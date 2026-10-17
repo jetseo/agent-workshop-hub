@@ -20,7 +20,8 @@ class Queue:
         return db
 
     def add(self, kind, title, payload=None, *, require_approval=False):
-        if kind not in ("plan", "code", "image", "qa") or not title.strip():
+        if (kind not in ("plan", "code", "image", "qa") or not isinstance(title, str)
+                or not title.strip() or len(title) > 500):
             raise ValueError("Invalid task")
         job_id = str(uuid.uuid4())
         state = "pending_approval" if require_approval else "queued"
