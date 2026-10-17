@@ -25,6 +25,25 @@ class WorkerTests(unittest.TestCase):
             result = process_one(self.queue, allow_opencode=True)
         self.assertEqual(result["state"], "review")
 
+    def test_image_outputs_saved_for_review(self):
+        self.queue.add("image", "Render", {"workflow": "workflow.json",
+                                           "save_outputs": True,
+                                           "output_dir": self.temp.name})
+        with patch("workshop.worker.submit_workflow", return_value={"prompt_id": "abc"}), \
+             patch("workshop.worker.wait_for_images", return_value=[{"filename": "test.png"}]), \
+             patch("workshop.worker.download_images", return_value=[{"path": "test.png"}]), \
+             patch("workshop.worker.save_report", return_value=Path(self.temp.name) / "report.json"):
+            result = process_one(self.queue, allow_comfyui=True)
+        self.assertEqual(result["state"], "review")
+        self.assertEqual(result["result"]["files"][0]["path"], "test.png")
+
+    def test_image_output_requires_destination(self):
+        self.queue.add("image", "Render", {"workflow": "workflow.json",
+                                           "save_outputs": True})
+        with patch("workshop.worker.submit_workflow", return_value={"prompt_id": "abc"}):
+            result = process_one(self.queue, allow_comfyui=True)
+        self.assertEqual(result["state"], "failed")
+
     def test_invalid_kind_not_executed(self):
         self.queue.add("image", "Generate image")
         with patch("workshop.worker.run_opencode") as runner:
