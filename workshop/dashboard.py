@@ -60,6 +60,11 @@ def make_handler(queue, token):
                 kind = html.escape(job["kind"])
                 state = html.escape(job["state"])
                 approve = ""
+                if job["state"] == "pending_approval":
+                    approve = ('<form method="post" action="/authorize">'
+                               '<input type="hidden" name="token" value="' + token + '">'
+                               '<input type="hidden" name="id" value="' + html.escape(job["id"]) + '">'
+                               '<button>Authorize execution</button></form>')
                 if job["state"] == "review":
                     approve = ('<form method="post" action="/approve">'
                                '<input type="hidden" name="token" value="' + token + '">'
@@ -73,7 +78,7 @@ def make_handler(queue, token):
 
         def do_POST(self):
             path = urlsplit(self.path).path
-            if path not in ("/add", "/approve"):
+            if path not in ("/add", "/approve", "/authorize"):
                 self._send(404, "Not found", "text/plain")
                 return
             try:
@@ -92,7 +97,9 @@ def make_handler(queue, token):
                         raise ValueError("Code and image tasks require a workspace or workflow path")
                     payload = ({"workspace": resource} if kind == "code" else
                                {"workflow": resource} if kind == "image" else {})
-                    queue.add(kind, title, payload)
+                    queue.add(kind, title, payload, require_approval=kind in ("code", "image"))
+                elif path == "/authorize":
+                    queue.authorize(form.get("id", [""])[0])
                 else:
                     queue.approve(form.get("id", [""])[0])
             except (ValueError, UnicodeDecodeError, IndexError) as error:
