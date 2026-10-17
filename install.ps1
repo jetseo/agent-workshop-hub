@@ -4,6 +4,7 @@ param(
     [switch]$InstallWSL,
     [switch]$RunUbuntuBootstrap,
     [switch]$InstallOpenCode,
+    [switch]$InstallNode,
     [ValidateNotNullOrEmpty()][string]$Distro = "Ubuntu-24.04",
     [switch]$DryRun
 )
@@ -15,6 +16,7 @@ Write-Host "Agent Workshop Hub | Windows preflight"
 if ($DryRun) {
     Write-Host "[dry-run] WSL distro: $Distro"
     if ($InstallWSL) { Write-Host "[dry-run] Would install WSL distro if absent: $Distro" }
+    if ($InstallOpenCode -or $InstallNode) { Write-Host "[dry-run] Would check/install Node.js prerequisite in $Distro" }
     if ($InstallOpenCode) { Write-Host "[dry-run] Would run scripts/install-opencode.sh in $Distro" }
     if ($RunUbuntuBootstrap) {
         Write-Host "[dry-run] Would install Ubuntu prerequisites: git curl ca-certificates python3 python3-venv python3-pip jq"
@@ -39,8 +41,8 @@ if ($Distro -notin $names) {
     return
 }
 Write-Host "WSL distro ready: $Distro"
-if (-not ($RunUbuntuBootstrap -or $InstallOpenCode)) {
-    Write-Host "Preflight complete. Use -RunUbuntuBootstrap and/or -InstallOpenCode."
+if (-not ($RunUbuntuBootstrap -or $InstallOpenCode -or $InstallNode)) {
+    Write-Host "Preflight complete. Use -RunUbuntuBootstrap, -InstallNode and/or -InstallOpenCode."
     return
 }
 if ($RunUbuntuBootstrap) {
@@ -50,6 +52,13 @@ if ($RunUbuntuBootstrap) {
     $bootstrap | & wsl.exe -d $Distro -- bash -s
     if ($LASTEXITCODE -ne 0) { throw "Ubuntu bootstrap failed ($LASTEXITCODE)" }
     Write-Host "Base prerequisites installed."
+}
+if ($InstallOpenCode -or $InstallNode) {
+    $script = Join-Path $PSScriptRoot "scripts/install-node.sh"
+    if (-not (Test-Path -LiteralPath $script)) { throw "Missing scripts/install-node.sh" }
+    $installer = (Get-Content -Raw -LiteralPath $script) -replace "`r`n", "`n"
+    $installer | & wsl.exe -d $Distro -- bash -s
+    if ($LASTEXITCODE -ne 0) { throw "Node.js prerequisite failed ($LASTEXITCODE)" }
 }
 if ($InstallOpenCode) {
     $script = Join-Path $PSScriptRoot "scripts/install-opencode.sh"
