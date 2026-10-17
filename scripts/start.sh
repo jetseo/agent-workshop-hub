@@ -16,6 +16,9 @@ done
 if ! [[ "$PORT" =~ ^[0-9]+$ ]] || (( 10#$PORT < 1024 || 10#$PORT > 65535 )); then
   echo "Port must be 1024-65535" >&2; exit 2
 fi
+if [[ -s "$HOME/.nvm/nvm.sh" ]]; then
+  . "$HOME/.nvm/nvm.sh"
+fi
 python3 -c 'import workshop.dashboard, workshop.worker' || {
   echo "Python application not importable. Run from a complete checkout." >&2
   exit 1
