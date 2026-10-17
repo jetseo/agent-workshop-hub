@@ -37,6 +37,15 @@ class Queue:
             db.execute("UPDATE jobs SET state='running', attempts=attempts+1 WHERE id=?", (row["id"],))
             return dict(db.execute("SELECT * FROM jobs WHERE id=?", (row["id"],)).fetchone())
 
+    def defer(self, job_id):
+        """Return an unexecuted job to the queue without consuming an attempt."""
+        with self._db() as db:
+            cur = db.execute(
+                "UPDATE jobs SET state='queued', attempts=attempts-1 "
+                "WHERE id=? AND state='running' AND attempts>0", (job_id,))
+            if cur.rowcount != 1:
+                raise ValueError("Task not running")
+
     def finish(self, job_id, result=None, success=True):
         with self._db() as db:
             row = db.execute("SELECT * FROM jobs WHERE id=? AND state='running'", (job_id,)).fetchone()
