@@ -28,6 +28,26 @@ bash scripts/bootstrap.sh --dry-run
 bash scripts/bootstrap.sh
 ```
 
+## Windows launcher verification
+
+From the repository root, validate the launcher without starting WSL or an AI
+executor:
+
+```powershell
+.\\start.ps1 -DryRun
+.\\start.ps1 -DryRun -Distro Ubuntu-24.04 -Port 8787
+```
+
+Start the dashboard only after configuring WSL and base prerequisites:
+
+```powershell
+.\\start.ps1 -Distro Ubuntu-24.04
+```
+
+To enable an executor, review its workspace permissions and any provider charges
+before passing `-AllowOpenCode` or `-AllowComfyUI`. The worker never starts
+from the launcher dry run.
+
 ## Runtime integration (not automated yet)
 
 1. Install OpenCode from its official installation instructions.
