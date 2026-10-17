@@ -13,7 +13,7 @@ A unified local-first AI development workspace for coding agents, image generati
 
 ## Status
 
-**Scaffolding / planning.** This repository does not yet provide a complete one-click installer. Avoid putting API keys or private code in tracked configuration files.
+**Experimental prototype.** A local dashboard, SQLite queue, opt-in OpenCode/ComfyUI worker and WSL launcher exist, but this is not a complete one-click installer. Actual Windows/ComfyUI integration testing is pending. Avoid putting API keys or private code in tracked configuration files.
 
 ## Proposed architecture
 
@@ -36,3 +36,29 @@ Model selection is a separate concern: local Ollama, free-tier providers, and op
 - Never overwrite existing Codex or Claude Code credentials.
 - Bind local service endpoints to loopback by default.
 - Keep secrets in untracked environment files or an OS credential store.
+
+## Run locally (after prerequisite installation)
+
+On WSL2 Ubuntu, from the repository root:
+
+```bash
+bash scripts/start.sh
+```
+
+Open http://127.0.0.1:8787. This defaults to dashboard-only mode and **does not execute AI tasks**.
+
+To explicitly enable worker execution:
+
+```bash
+bash scripts/start.sh --allow-opencode --allow-comfyui
+```
+
+On Windows PowerShell from the repository root:
+
+```powershell
+.\start.ps1
+# After reviewing agent permissions and provider costs:
+.\start.ps1 -AllowOpenCode -AllowComfyUI
+```
+
+**Limitations:** Existing Ubuntu-24.04 WSL distro and Python dependencies are required; no one-click installation of OpenCode, Ollama or ComfyUI; no per-job execution approval, cost cap or sandbox. Do not expose the dashboard to the network.
