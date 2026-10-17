@@ -28,6 +28,10 @@ jobs:
             [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file), [ref]$tokens, [ref]$errors) | Out-Null
             if ($errors.Count -gt 0) { $errors | Out-String | Write-Error; exit 1 }
           }
+      - name: Launcher dry run (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./start.ps1 -DryRun -Port 8787
       - name: Compile modules
         run: python -m compileall -q workshop tests
       - name: Unit and local HTTP integration tests
