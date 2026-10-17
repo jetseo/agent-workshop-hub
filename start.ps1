@@ -1,22 +1,41 @@
 # Agent Workshop Hub - Windows launcher (WSL2)
-# Run after WSL Ubuntu and prerequisites are configured.
 [CmdletBinding()]
 param(
     [switch]$AllowOpenCode,
     [switch]$AllowComfyUI,
-    [int]$Port = 8787
+    [ValidateRange(1024,65535)][int]$Port = 8787,
+    [ValidateNotNullOrEmpty()][string]$Distro = "Ubuntu-24.04",
+    [switch]$DryRun
 )
 $ErrorActionPreference = "Stop"
-if ($Port -lt 1024 -or $Port -gt 65535) { throw "Port must be between 1024 and 65535" }
-if (-not (Get-Command wsl.exe -ErrorAction SilentlyContinue)) { throw "WSL is required. Run install.ps1 first." }
 $launcher = Join-Path $PSScriptRoot "scripts/start.sh"
-if (-not (Test-Path $launcher)) { throw "Missing scripts/start.sh" }
-$path = (Resolve-Path $launcher).Path
-$wslPath = (& wsl.exe -d Ubuntu-24.04 -- wslpath -a $path).Trim()
-if ($LASTEXITCODE -ne 0 -or -not $wslPath) { throw "Could not resolve project path inside WSL" }
-$argsList = @("-d", "Ubuntu-24.04", "--", "bash", $wslPath, "--port=$Port")
-if ($AllowOpenCode) { $argsList += "--allow-opencode" }
-if ($AllowComfyUI) { $argsList += "--allow-comfyui" }
+if (-not (Test-Path -LiteralPath $launcher)) { throw "Missing scripts/start.sh" }
+$flags = @("--port=$Port")
+if ($AllowOpenCode) { $flags += "--allow-opencode" }
+if ($AllowComfyUI) { $flags += "--allow-comfyui" }
+if ($DryRun) {
+    Write-Host "[dry-run] WSL distro: $Distro"
+    Write-Host "[dry-run] Launcher: $launcher"
+    Write-Host "[dry-run] Arguments: $($flags -join ' ')"
+    Write-Host "[dry-run] No WSL process or AI executor started."
+    return
+}
+if (-not (Get-Command wsl.exe -ErrorAction SilentlyContinue)) {
+    throw "WSL is required. Run install.ps1 first."
+}
+$distros = @(& wsl.exe --list --quiet 2>&1)
+if ($LASTEXITCODE -ne 0) { throw "Unable to query WSL distributions" }
+# wsl.exe output may contain NUL characters in Windows PowerShell.
+$names = @($distros | ForEach-Object { ($_ -replace [char]0, "").Trim() })
+if ($Distro -notin $names) {
+    throw "WSL distro '$Distro' not found. Installed: $($names -join ', ')"
+}
+$path = (Resolve-Path -LiteralPath $launcher).Path
+$wslPath = (& wsl.exe -d $Distro -- wslpath -a $path).Trim()
+if ($LASTEXITCODE -ne 0 -or -not $wslPath) {
+    throw "Could not resolve project path inside WSL"
+}
+$argsList = @("-d", $Distro, "--", "bash", $wslPath) + $flags
 Write-Host "Starting local Agent Workshop Hub (Ctrl+C to stop)."
 & wsl.exe @argsList
 if ($LASTEXITCODE -ne 0) { throw "Hub exited with code $LASTEXITCODE" }
