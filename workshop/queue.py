@@ -42,7 +42,7 @@ class Queue:
             row = db.execute("SELECT * FROM jobs WHERE id=? AND state='running'", (job_id,)).fetchone()
             if row is None:
                 raise ValueError("Task not running")
-            state = "review" if success else ("queued" if row["attempts"] < row["max_attempts"] else "failed")
+            state = "review" if success else "failed"
             db.execute("UPDATE jobs SET state=?, result=? WHERE id=?", (state, json.dumps(result), job_id))
             return state
 
