@@ -20,6 +20,18 @@ Reboot if requested and complete the Ubuntu user setup. The default distro
 is `Ubuntu-24.04`; pass `-Distro <name>` to select another installed or
 installable distribution. Dry-run never invokes WSL or installs packages.
 
+To install Ubuntu prerequisites and then attempt the opt-in OpenCode setup
+from Windows PowerShell:
+
+```powershell
+.\\install.ps1 -DryRun -RunUbuntuBootstrap -InstallOpenCode
+.\\install.ps1 -RunUbuntuBootstrap -InstallOpenCode
+```
+
+**Prerequisite:** The OpenCode installer requires Node.js and npm inside the
+selected WSL distribution. The base Ubuntu bootstrap does not install them.
+Install a supported Node.js release before requesting `-InstallOpenCode`.
+
 To install only base Linux prerequisites:
 
 ```powershell
