@@ -1,5 +1,6 @@
 """SQLite task queue: state management only, never executes AI tools."""
 import json
+from contextlib import contextmanager
 import sqlite3
 import uuid
 from pathlib import Path
@@ -14,10 +15,19 @@ class Queue:
                  payload TEXT, attempts INTEGER DEFAULT 0, max_attempts INTEGER DEFAULT 2,
                  result TEXT)""")
 
+    @contextmanager
     def _db(self):
+        """Commit or roll back and always close SQLite connections."""
         db = sqlite3.connect(self.path, timeout=30)
         db.row_factory = sqlite3.Row
-        return db
+        try:
+            yield db
+            db.commit()
+        except BaseException:
+            db.rollback()
+            raise
+        finally:
+            db.close()
 
     def add(self, kind, title, payload=None, *, require_approval=False):
         if (kind not in ("plan", "code", "image", "qa") or not isinstance(title, str)
