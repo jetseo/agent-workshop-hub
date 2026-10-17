@@ -23,7 +23,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          foreach ($file in @("install.ps1", "start.ps1", "scripts/ollama.ps1", "scripts/comfyui-status.ps1", "scripts/install-comfyui.ps1", "scripts/setup-comfyui-env.ps1", "scripts/comfyui-gpu.ps1", "scripts/start-comfyui.ps1")) {
+          foreach ($file in @("install.ps1", "start.ps1", "scripts/ollama.ps1", "scripts/comfyui-status.ps1", "scripts/install-comfyui.ps1", "scripts/setup-comfyui-env.ps1", "scripts/comfyui-gpu.ps1", "scripts/start-comfyui.ps1", "scripts/install-comfyui-torch.ps1")) {
             $tokens = $null; $errors = $null
             [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file), [ref]$tokens, [ref]$errors) | Out-Null
             if ($errors.Count -gt 0) { $errors | Out-String | Write-Error; exit 1 }
@@ -51,6 +51,8 @@ jobs:
           ./scripts/comfyui-status.ps1 -DryRun
           ./scripts/comfyui-gpu.ps1 -DryRun
           ./scripts/start-comfyui.ps1 -DryRun
+          ./scripts/install-comfyui-torch.ps1 -DryRun -CudaWheel cu128
+          ./scripts/install-comfyui-torch.ps1 -DryRun -CudaWheel cu126
       - name: Launcher dry run (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
