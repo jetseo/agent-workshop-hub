@@ -23,11 +23,12 @@ input{width:min(440px,85%)}button{cursor:pointer;background:#2563eb;border:0}
 small{color:#9ca3af} .tag{color:#93c5fd}
 </style></head><body>
 <h1>Agent Workshop Hub</h1>
-<p>Local task dashboard · AI agents do not run automatically yet.</p>
+<p>Local task dashboard · A separately enabled worker executes queued tasks.</p>
 <section><h2>Add task</h2><form method="post" action="/add">
 <input type="hidden" name="token" value="__TOKEN__">
 <select name="kind"><option>plan</option><option>code</option><option>image</option><option>qa</option></select>
 <input name="title" placeholder="Describe a task" required maxlength="500">
+<input name="resource" placeholder="Code: absolute worktree path / Image: workflow JSON path" maxlength="2000">
 <button>Add</button></form></section>
 <h2>Tasks</h2>__JOBS__
 </body></html>"""
@@ -84,7 +85,14 @@ def make_handler(queue, token):
                     self._send(403, "Forbidden", "text/plain")
                     return
                 if path == "/add":
-                    queue.add(form.get("kind", [""])[0], form.get("title", [""])[0][:500])
+                    kind = form.get("kind", [""])[0]
+                    title = form.get("title", [""])[0][:500]
+                    resource = form.get("resource", [""])[0].strip()
+                    if kind in ("code", "image") and not resource:
+                        raise ValueError("Code and image tasks require a workspace or workflow path")
+                    payload = ({"workspace": resource} if kind == "code" else
+                               {"workflow": resource} if kind == "image" else {})
+                    queue.add(kind, title, payload)
                 else:
                     queue.approve(form.get("id", [""])[0])
             except (ValueError, UnicodeDecodeError, IndexError) as error:
