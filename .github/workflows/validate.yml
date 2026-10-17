@@ -23,7 +23,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          foreach ($file in @("install.ps1", "start.ps1", "scripts/ollama.ps1", "scripts/comfyui-status.ps1", "scripts/install-comfyui.ps1")) {
+          foreach ($file in @("install.ps1", "start.ps1", "scripts/ollama.ps1", "scripts/comfyui-status.ps1", "scripts/install-comfyui.ps1", "scripts/setup-comfyui-env.ps1")) {
             $tokens = $null; $errors = $null
             [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file), [ref]$tokens, [ref]$errors) | Out-Null
             if ($errors.Count -gt 0) { $errors | Out-String | Write-Error; exit 1 }
@@ -34,7 +34,7 @@ jobs:
         run: |
           ./install.ps1 -DryRun
           ./install.ps1 -DryRun -InstallOllama
-          ./install.ps1 -DryRun -InstallComfyUISource
+          ./install.ps1 -DryRun -InstallComfyUISource -SetupComfyUIEnv -InstallComfyUIRequirements
           ./install.ps1 -DryRun -InstallWSL -RunUbuntuBootstrap -InstallOpenCode -InstallNode -UseNvmFallback -Distro Ubuntu-24.04
       - name: Ollama utility dry run (Windows)
         if: runner.os == 'Windows'
@@ -47,6 +47,7 @@ jobs:
         shell: pwsh
         run: |
           ./scripts/install-comfyui.ps1 -DryRun
+          ./scripts/setup-comfyui-env.ps1 -DryRun -InstallRequirements
           ./scripts/comfyui-status.ps1 -DryRun
       - name: Launcher dry run (Windows)
         if: runner.os == 'Windows'
