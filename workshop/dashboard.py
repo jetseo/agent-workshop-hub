@@ -29,6 +29,7 @@ small{color:#9ca3af} .tag{color:#93c5fd}
 <select name="kind"><option>plan</option><option>code</option><option>image</option><option>qa</option></select>
 <input name="title" placeholder="Describe a task" required maxlength="500">
 <input name="resource" placeholder="Code: absolute worktree path / Image: workflow JSON path" maxlength="2000">
+<label>Image output directory (optional) <input name="output_dir" placeholder="Absolute directory for generated images" maxlength="2000"></label>
 <button>Add</button></form></section>
 <h2>Tasks</h2>__JOBS__
 </body></html>"""
@@ -85,9 +86,20 @@ def make_handler(queue, token):
                                '<input type="hidden" name="token" value="' + token + '">'
                                '<input type="hidden" name="id" value="' + html.escape(job["id"]) + '">'
                                '<button>Approve</button></form>')
+                detail = ""
+                if job["kind"] == "image" and job["state"] in ("review", "done", "failed"):
+                    try:
+                        result = json.loads(job.get("result") or "{}")
+                        files = result.get("files") or []
+                        if isinstance(files, list) and files:
+                            detail = "<small> · Generated files: " + str(len(files)) + "</small>"
+                        if result.get("report_path"):
+                            detail += "<small> · Report saved locally</small>"
+                    except (ValueError, TypeError, AttributeError):
+                        detail = ""
                 cards.append('<div class="job"><div><strong>' + name + '</strong><br>'
                              '<small>' + kind + ' · <span class="tag">' + state + '</span></small></div>'
-                             + approve + '</div>')
+                             + detail + approve + '</div>')
             page = PAGE.replace("__TOKEN__", token).replace("__JOBS__", "".join(cards) or "<p>No tasks yet.</p>")
             self._send(200, page)
 
@@ -124,6 +136,13 @@ def make_handler(queue, token):
                         raise ValueError("Code and image tasks require a workspace or workflow path")
                     payload = ({"workspace": resource} if kind == "code" else
                                {"workflow": resource} if kind == "image" else {})
+                    output_dir = form.get("output_dir", [""])[0].strip()
+                    if output_dir and kind != "image":
+                        raise ValueError("Output directory is only valid for image tasks")
+                    if output_dir:
+                        if len(output_dir) > 2000 or not Path(output_dir).is_absolute():
+                            raise ValueError("Image output directory must be an absolute path")
+                        payload.update({"save_outputs": True, "output_dir": output_dir})
                     queue.add(kind, title, payload, require_approval=kind in ("code", "image"))
                 elif path == "/authorize":
                     queue.authorize(form.get("id", [""])[0])
