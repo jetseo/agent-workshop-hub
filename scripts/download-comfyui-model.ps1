@@ -3,7 +3,7 @@
 param(
     [Parameter(Mandatory=$true)][string]$Url,
     [Parameter(Mandatory=$true)][ValidatePattern('^[a-fA-F0-9]{64}$')][string]$Sha256,
-    [Parameter(Mandatory=$true)][ValidatePattern('^[A-Za-z0-9][A-Za-z0-9._-]*\\.(safetensors|ckpt)$')][string]$FileName,
+    [Parameter(Mandatory=$true)][ValidatePattern('^[A-Za-z0-9][A-Za-z0-9._-]*\.(safetensors|ckpt)$')][string]$FileName,
     [string]$Destination = (Join-Path $HOME "ComfyUI"),
     [switch]$DryRun
 )
