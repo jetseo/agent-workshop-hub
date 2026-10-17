@@ -1,5 +1,8 @@
 """Poll a local ComfyUI prompt until it finishes and validate output image metadata."""
 import argparse
+import hashlib
+from pathlib import Path
+from urllib.parse import urlencode
 import json
 import time
 import urllib.error
@@ -40,11 +43,54 @@ def wait_for_images(prompt_id, *, base_url="http://127.0.0.1:8188", timeout=180)
     raise TimeoutError(f"ComfyUI prompt did not finish within {timeout}s")
 
 
+
+MAX_IMAGE_BYTES = 64 * 1024 * 1024
+
+
+def download_images(images, *, base_url, output_dir):
+    folder = Path(output_dir).expanduser().resolve()
+    folder.mkdir(parents=True, exist_ok=True)
+    results = []
+    for index, item in enumerate(images, 1):
+        name = item["filename"]
+        subfolder = item.get("subfolder", "")
+        kind = item.get("type", "output")
+        if not isinstance(name, str) or not name or not isinstance(subfolder, str) or kind not in ("output", "temp"):
+            raise ValueError("Invalid ComfyUI image metadata")
+        url = base_url.rstrip("/") + "/view?" + urlencode({"filename": name, "subfolder": subfolder, "type": kind})
+        with urllib.request.urlopen(url, timeout=30) as response:
+            data = response.read(MAX_IMAGE_BYTES + 1)
+        if not data or len(data) > MAX_IMAGE_BYTES:
+            raise ValueError("Image empty or larger than 64 MiB")
+        if data.startswith(bytes.fromhex("89504e470d0a1a0a")):
+            ext = ".png"
+        elif data.startswith(bytes.fromhex("ffd8ff")):
+            ext = ".jpg"
+        elif data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+            ext = ".webp"
+        else:
+            raise ValueError("Unsupported or invalid image signature")
+        digest = hashlib.sha256(data).hexdigest()
+        target = folder / f"image-{index:03d}-{digest[:12]}{ext}"
+        with target.open("xb") as output:
+            output.write(data)
+        results.append({"path": str(target), "bytes": len(data), "sha256": digest})
+    return results
+
+
+def save_report(report, path):
+    target = Path(path).expanduser().resolve()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with target.open("x", encoding="utf-8") as output:
+        json.dump(report, output, indent=2)
+    return target
+
 def main():
     parser = argparse.ArgumentParser(description="Explicit local ComfyUI image generation smoke test")
     parser.add_argument("workflow", help="API-format ComfyUI workflow JSON file")
     parser.add_argument("--port", type=int, default=8188)
     parser.add_argument("--timeout", type=int, default=180)
+    parser.add_argument("--output-dir", default="comfyui-smoke-output")
     parser.add_argument("--submit", action="store_true", help="Actually submit workflow")
     args = parser.parse_args()
     if not 1024 <= args.port <= 65535 or not 1 <= args.timeout <= 3600:
@@ -56,7 +102,11 @@ def main():
     result = submit_workflow(args.workflow, enabled=True, base_url=base)
     print("Submitted prompt:", result["prompt_id"])
     images = wait_for_images(result["prompt_id"], base_url=base, timeout=args.timeout)
-    print(json.dumps({"prompt_id": result["prompt_id"], "images": images}, indent=2))
+    files = download_images(images, base_url=base, output_dir=args.output_dir)
+    report = {"prompt_id": result["prompt_id"], "status": "success", "images": files}
+    report_path = save_report(report, Path(args.output_dir) / ("report-" + result["prompt_id"] + ".json"))
+    print(json.dumps(report, indent=2))
+    print("Report:", report_path)
 
 
 if __name__ == "__main__":
