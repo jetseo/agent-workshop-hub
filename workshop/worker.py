@@ -7,6 +7,7 @@ from .queue import Queue
 from .adapters import run_opencode
 from .comfyui import submit_workflow
 from .comfyui_status import wait_for_completion
+from scripts.comfyui_smoke import wait_for_images, download_images, save_report
 
 def _defer(queue, job):
     # A disabled executor must not consume or fail a queued task.
@@ -41,7 +42,20 @@ def process_one(queue, *, allow_opencode=False, allow_comfyui=False):
             if not isinstance(workflow, str) or not workflow:
                 raise ValueError("Image job requires payload.workflow")
             submitted = submit_workflow(workflow, enabled=True)
-            result = wait_for_completion(submitted["prompt_id"], max_wait=300)
+            if payload.get("save_outputs") is True:
+                output_dir = payload.get("output_dir")
+                if not isinstance(output_dir, str) or not output_dir.strip():
+                    raise ValueError("Image output saving requires payload.output_dir")
+                images = wait_for_images(submitted["prompt_id"], timeout=300)
+                files = download_images(images, base_url="http://127.0.0.1:8188",
+                                        output_dir=output_dir)
+                report = {"prompt_id": submitted["prompt_id"], "state": "completed",
+                          "files": files}
+                report_path = save_report(report, Path(output_dir) /
+                                          ("report-" + submitted["prompt_id"] + ".json"))
+                result = {**report, "report_path": str(report_path)}
+            else:
+                result = wait_for_completion(submitted["prompt_id"], max_wait=300)
             if result["state"] != "completed":
                 queue.finish(job["id"], result, success=False)
                 return {"job_id": job["id"], "state": "failed", "result": result}
