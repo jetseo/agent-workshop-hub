@@ -23,7 +23,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          foreach ($file in @("install.ps1", "start.ps1", "scripts/ollama.ps1", "scripts/comfyui-status.ps1", "scripts/install-comfyui.ps1", "scripts/setup-comfyui-env.ps1", "scripts/comfyui-gpu.ps1", "scripts/start-comfyui.ps1", "scripts/install-comfyui-torch.ps1")) {
+          foreach ($file in @("install.ps1", "start.ps1", "scripts/ollama.ps1", "scripts/comfyui-status.ps1", "scripts/install-comfyui.ps1", "scripts/setup-comfyui-env.ps1", "scripts/comfyui-gpu.ps1", "scripts/start-comfyui.ps1", "scripts/install-comfyui-torch.ps1", "scripts/download-comfyui-model.ps1")) {
             $tokens = $null; $errors = $null
             [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file), [ref]$tokens, [ref]$errors) | Out-Null
             if ($errors.Count -gt 0) { $errors | Out-String | Write-Error; exit 1 }
@@ -53,6 +53,7 @@ jobs:
           ./scripts/start-comfyui.ps1 -DryRun
           ./scripts/install-comfyui-torch.ps1 -DryRun -CudaWheel cu128
           ./scripts/install-comfyui-torch.ps1 -DryRun -CudaWheel cu126
+          ./scripts/download-comfyui-model.ps1 -DryRun -Url https://huggingface.co/example/model/resolve/main/model.safetensors -Sha256 ("a" * 64) -FileName example.safetensors
       - name: Launcher dry run (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
