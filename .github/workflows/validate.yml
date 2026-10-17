@@ -1,26 +1,40 @@
-name: Validate bootstrap and Python core
+name: Validate Agent Workshop Hub
 on:
   push:
   pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
 jobs:
-  checks:
-    runs-on: ubuntu-latest
+  python:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ['3.11', '3.12']
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
-      - name: Bash syntax
-        run: bash -n scripts/bootstrap.sh
-      - name: Bootstrap dry run
-        run: bash scripts/bootstrap.sh --dry-run
-      - name: Compile Python
+          python-version: ${{ matrix.python }}
+      - name: Compile modules
         run: python -m compileall -q workshop tests
-      - name: Unit tests
+      - name: Unit and local HTTP integration tests
         run: python -m unittest discover -s tests -v
       - name: Runtime preflight
         run: python -m workshop.preflight
-      - name: Validate example config
+  linux-bootstrap:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate shell syntax
+        run: bash -n scripts/bootstrap.sh scripts/start.sh
+      - name: Bootstrap dry run
+        run: bash scripts/bootstrap.sh --dry-run
+      - name: Validate YAML example
         run: |
           python -m pip install PyYAML
-          python -c "import yaml; yaml.safe_load(open('config/workshop.example.yaml'))"
+          python -c "import yaml; yaml.safe_load(open('config/workshop.example.yaml', encoding='utf-8'))"
