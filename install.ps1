@@ -7,6 +7,7 @@ param(
     [switch]$InstallNode,
     [switch]$UseNvmFallback,
     [switch]$InstallOllama,
+    [switch]$InstallComfyUISource,
     [ValidateNotNullOrEmpty()][string]$Distro = "Ubuntu-24.04",
     [switch]$DryRun
 )
@@ -18,6 +19,7 @@ Write-Host "Agent Workshop Hub | Windows preflight"
 if ($DryRun) {
     Write-Host "[dry-run] WSL distro: $Distro"
     if ($InstallOllama) { Write-Host "[dry-run] Would install Ollama on Windows using winget --id Ollama.Ollama --exact" }
+    if ($InstallComfyUISource) { Write-Host "[dry-run] Would clone ComfyUI source into $HOME/ComfyUI" }
     if ($InstallWSL) { Write-Host "[dry-run] Would install WSL distro if absent: $Distro" }
     if ($InstallOpenCode -or $InstallNode) { Write-Host "[dry-run] Would check/install Node.js prerequisite in $Distro" }
     if ($UseNvmFallback) { Write-Host "[dry-run] Would allow nvm fallback if Ubuntu Node.js is too old" }
@@ -37,8 +39,11 @@ if ($InstallOllama) {
     if ($LASTEXITCODE -ne 0) { throw "Ollama winget installation failed ($LASTEXITCODE)" }
     Write-Host "Ollama install command finished. Verify service/model access separately."
 }
-if ($InstallOllama -and -not ($InstallWSL -or $RunUbuntuBootstrap -or $InstallNode -or $InstallOpenCode)) {
-    Write-Host "Ollama-only installation step complete; WSL is not required."
+if ($InstallComfyUISource) {
+    & (Join-Path $PSScriptRoot "scripts/install-comfyui.ps1")
+}
+if (($InstallOllama -or $InstallComfyUISource) -and -not ($InstallWSL -or $RunUbuntuBootstrap -or $InstallNode -or $InstallOpenCode)) {
+    Write-Host "Windows-only installation steps complete; WSL is not required."
     return
 }
 if (-not (Get-Command wsl.exe -ErrorAction SilentlyContinue)) {
