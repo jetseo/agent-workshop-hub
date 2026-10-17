@@ -36,7 +36,7 @@ fi
 echo "Checking Ubuntu package candidate before installing."
 sudo apt-get update
 candidate="$(apt-cache policy nodejs | awk '/Candidate:/ {print $2; exit}')"
-candidate_major="$(printf '%s' "$candidate" | sed -nE 's/^[0-9]*:([0-9]+)\..*/\1/p; s/^([0-9]+)\..*/\1/p')"
+candidate_major="$(printf '%s' "$candidate" | sed -nE 's/^([0-9]+:)?([0-9]+)\..*/\2/p')"
 if [[ -z "$candidate_major" ]] || (( candidate_major < MIN_NODE_MAJOR )); then
   echo "Ubuntu nodejs candidate '$candidate' does not meet Node.js >= ${MIN_NODE_MAJOR}." >&2
   echo "No nodejs/npm packages were installed by this script." >&2
