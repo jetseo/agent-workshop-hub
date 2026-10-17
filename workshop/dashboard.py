@@ -4,9 +4,11 @@ import html
 import json
 import os
 import secrets
+import hashlib
+import hmac
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, urlsplit, quote
 from .queue import Queue
 
 PAGE = """<!doctype html><html lang="ko"><head><meta charset="utf-8">
@@ -20,7 +22,7 @@ section,.job{background:#1f2937;border:1px solid #374151;border-radius:12px;padd
 input,select,button{padding:10px;border-radius:8px;border:1px solid #4b5563;background:#111827;color:#fff}
 input{width:min(440px,85%)}button{cursor:pointer;background:#2563eb;border:0}
 .job{display:flex;justify-content:space-between;gap:14px;align-items:center;flex-wrap:wrap}
-small{color:#9ca3af} .tag{color:#93c5fd}
+small{color:#9ca3af} .tag{color:#93c5fd}.gallery img{width:140px;height:140px;object-fit:contain;margin:5px;border-radius:8px}
 </style></head><body>
 <h1>Agent Workshop Hub</h1>
 <p>Local task dashboard · A separately enabled worker executes queued tasks.</p>
@@ -33,6 +35,32 @@ small{color:#9ca3af} .tag{color:#93c5fd}
 <button>Add</button></form></section>
 <h2>Tasks</h2>__JOBS__
 </body></html>"""
+
+def gallery_files(job):
+    if not job or job["kind"] != "image" or job["state"] not in ("review", "done"):
+        return []
+    try:
+        files = json.loads(job.get("result") or "{}").get("files", [])
+        if not isinstance(files, list):
+            return []
+        valid = []
+        for item in files[:24]:
+            if not isinstance(item, dict):
+                continue
+            path, digest = item.get("path"), item.get("sha256")
+            if (isinstance(path, str) and Path(path).is_absolute()
+                    and Path(path).suffix.lower() in (".png", ".jpg", ".webp")
+                    and isinstance(digest, str) and len(digest) == 64
+                    and all(c in "0123456789abcdefABCDEF" for c in digest)):
+                valid.append((Path(path), digest))
+        return valid
+    except (ValueError, TypeError, AttributeError):
+        return []
+
+
+def gallery_signature(token, job_id, index):
+    return hmac.new(token.encode(), f"{job_id}:{index}".encode(), hashlib.sha256).hexdigest()
+
 
 def make_handler(queue, token):
     class Handler(BaseHTTPRequestHandler):
@@ -57,6 +85,47 @@ def make_handler(queue, token):
         def do_GET(self):
             if not self._trusted_host():
                 self._send(403, "Invalid Host", "text/plain")
+                return
+            if urlsplit(self.path).path == "/image":
+                params = parse_qs(urlsplit(self.path).query)
+                job_id = params.get("id", [""])[0]
+                index_text = params.get("index", [""])[0]
+                signature = params.get("sig", [""])[0]
+                if not index_text.isdecimal() or len(index_text) > 3:
+                    self._send(404, "Not found", "text/plain")
+                    return
+                index = int(index_text)
+                if not hmac.compare_digest(signature, gallery_signature(token, job_id, index)):
+                    self._send(403, "Forbidden", "text/plain")
+                    return
+                job = next((j for j in queue.list() if j["id"] == job_id), None)
+                images = gallery_files(job)
+                if index >= len(images):
+                    self._send(404, "Not found", "text/plain")
+                    return
+                image_path, digest = images[index]
+                try:
+                    if not image_path.is_file() or image_path.stat().st_size > 64 * 1024 * 1024:
+                        raise ValueError("Invalid image")
+                    data = image_path.read_bytes()
+                    if hashlib.sha256(data).hexdigest().lower() != digest.lower():
+                        raise ValueError("Checksum mismatch")
+                    ext = image_path.suffix.lower()
+                    signatures = {".png": data.startswith(bytes.fromhex("89504e470d0a1a0a")),
+                                  ".jpg": data.startswith(bytes.fromhex("ffd8ff")),
+                                  ".webp": data[:4] == b"RIFF" and data[8:12] == b"WEBP"}
+                    if not signatures[ext]:
+                        raise ValueError("Invalid image signature")
+                except (OSError, ValueError):
+                    self._send(404, "Image unavailable", "text/plain")
+                    return
+                self.send_response(200)
+                self.send_header("Content-Type", {".png": "image/png", ".jpg": "image/jpeg", ".webp": "image/webp"}[ext])
+                self.send_header("Content-Length", str(len(data)))
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("X-Content-Type-Options", "nosniff")
+                self.end_headers()
+                self.wfile.write(data)
                 return
             if urlsplit(self.path).path == "/api/jobs":
                 # Never expose prompts, workspace paths or execution logs without auth.
@@ -97,6 +166,13 @@ def make_handler(queue, token):
                             detail += "<small> · Report saved locally</small>"
                     except (ValueError, TypeError, AttributeError):
                         detail = ""
+                gallery = ""
+                for i, _ in enumerate(gallery_files(job)):
+                    url = ("/image?id=" + quote(job["id"]) + "&index=" + str(i) +
+                           "&sig=" + gallery_signature(token, job["id"], i))
+                    gallery += '<a href="' + url + '"><img loading="lazy" alt="Generated image" src="' + url + '"></a>'
+                if gallery:
+                    detail += '<div class="gallery">' + gallery + '</div>'
                 cards.append('<div class="job"><div><strong>' + name + '</strong><br>'
                              '<small>' + kind + ' · <span class="tag">' + state + '</span></small></div>'
                              + detail + approve + '</div>')
