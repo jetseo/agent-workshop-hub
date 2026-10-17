@@ -19,13 +19,14 @@ class Queue:
         db.row_factory = sqlite3.Row
         return db
 
-    def add(self, kind, title, payload=None):
+    def add(self, kind, title, payload=None, *, require_approval=False):
         if kind not in ("plan", "code", "image", "qa") or not title.strip():
             raise ValueError("Invalid task")
         job_id = str(uuid.uuid4())
+        state = "pending_approval" if require_approval else "queued"
         with self._db() as db:
-            db.execute("INSERT INTO jobs(id,kind,title,state,payload) VALUES(?,?,?,'queued',?)",
-                       (job_id, kind, title, json.dumps(payload or {})))
+            db.execute("INSERT INTO jobs(id,kind,title,state,payload) VALUES(?,?,?,?,?)",
+                       (job_id, kind, title, state, json.dumps(payload or {})))
         return job_id
 
     def claim(self, kinds=None):
@@ -65,6 +66,15 @@ class Queue:
             state = "review" if success else "failed"
             db.execute("UPDATE jobs SET state=?, result=? WHERE id=?", (state, json.dumps(result), job_id))
             return state
+
+    def authorize(self, job_id):
+        """Approve a pending task for execution, not the completed result."""
+        with self._db() as db:
+            cur = db.execute(
+                "UPDATE jobs SET state='queued' WHERE id=? AND state='pending_approval'",
+                (job_id,))
+            if cur.rowcount != 1:
+                raise ValueError("Task not awaiting execution approval")
 
     def approve(self, job_id):
         with self._db() as db:
