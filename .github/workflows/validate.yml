@@ -23,7 +23,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          foreach ($file in @("install.ps1", "start.ps1")) {
+          foreach ($file in @("install.ps1", "start.ps1", "scripts/ollama.ps1")) {
             $tokens = $null; $errors = $null
             [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file), [ref]$tokens, [ref]$errors) | Out-Null
             if ($errors.Count -gt 0) { $errors | Out-String | Write-Error; exit 1 }
@@ -35,6 +35,12 @@ jobs:
           ./install.ps1 -DryRun
           ./install.ps1 -DryRun -InstallOllama
           ./install.ps1 -DryRun -InstallWSL -RunUbuntuBootstrap -InstallOpenCode -InstallNode -UseNvmFallback -Distro Ubuntu-24.04
+      - name: Ollama utility dry run (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          ./scripts/ollama.ps1 -DryRun
+          ./scripts/ollama.ps1 -DryRun -Pull -Model qwen2.5-coder:7b
       - name: Launcher dry run (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
