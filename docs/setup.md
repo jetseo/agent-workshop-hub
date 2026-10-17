@@ -76,7 +76,7 @@ from the launcher dry run.
    The script uses `npm install --global opencode-ai`, does not change
    existing OpenCode installations, and does not configure model providers.
    Review the upstream package before installing.
-2. Install Ollama using its official Windows or Linux instructions. Select one host to avoid port conflicts.
+2. Ollama on Windows can be installed explicitly with `./install.ps1 -InstallOllama` (uses `winget install --id Ollama.Ollama --exact --source winget`). Use `-DryRun` to inspect first. The installer does not download a model, start the service, or verify connectivity. Select one Ollama host to avoid port conflicts.
 3. Install ComfyUI in Windows with NVIDIA GPU support and test image generation independently.
 4. Test model API connectivity before enabling any agent workflow.
 5. Connect Codex CLI and Claude Code only through supported, documented endpoints and keep their existing credentials untouched.
@@ -85,4 +85,4 @@ Do not expose Ollama, ComfyUI or any model gateway to the public internet. Do no
 
 ## Current scope
 
-The Windows installer performs preflight, optional Linux prerequisites, and opt-in Node.js/OpenCode setup. Node.js from Ubuntu apt may be too old. Ollama and ComfyUI are not automatically installed. It does **not** install or run the full multi-agent platform yet.
+The Windows installer performs preflight, optional Linux prerequisites, and opt-in Node.js/OpenCode setup. Node.js from Ubuntu apt may be too old. Ollama has an opt-in Windows winget installer, but ComfyUI is not automatically installed. It does **not** install or run the full multi-agent platform yet.
