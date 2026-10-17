@@ -37,6 +37,10 @@ if ($InstallOllama) {
     if ($LASTEXITCODE -ne 0) { throw "Ollama winget installation failed ($LASTEXITCODE)" }
     Write-Host "Ollama install command finished. Verify service/model access separately."
 }
+if ($InstallOllama -and -not ($InstallWSL -or $RunUbuntuBootstrap -or $InstallNode -or $InstallOpenCode)) {
+    Write-Host "Ollama-only installation step complete; WSL is not required."
+    return
+}
 if (-not (Get-Command wsl.exe -ErrorAction SilentlyContinue)) {
     throw "wsl.exe unavailable. Enable WSL in Windows first, then rerun."
 }
