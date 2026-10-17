@@ -6,6 +6,7 @@ param(
     [switch]$InstallOpenCode,
     [switch]$InstallNode,
     [switch]$UseNvmFallback,
+    [switch]$InstallOllama,
     [ValidateNotNullOrEmpty()][string]$Distro = "Ubuntu-24.04",
     [switch]$DryRun
 )
@@ -16,6 +17,7 @@ if ($PSVersionTable.PSEdition -eq "Core" -and -not $IsWindows) {
 Write-Host "Agent Workshop Hub | Windows preflight"
 if ($DryRun) {
     Write-Host "[dry-run] WSL distro: $Distro"
+    if ($InstallOllama) { Write-Host "[dry-run] Would install Ollama on Windows using winget --id Ollama.Ollama --exact" }
     if ($InstallWSL) { Write-Host "[dry-run] Would install WSL distro if absent: $Distro" }
     if ($InstallOpenCode -or $InstallNode) { Write-Host "[dry-run] Would check/install Node.js prerequisite in $Distro" }
     if ($UseNvmFallback) { Write-Host "[dry-run] Would allow nvm fallback if Ubuntu Node.js is too old" }
@@ -25,6 +27,15 @@ if ($DryRun) {
     }
     Write-Host "[dry-run] No system changes performed."
     return
+}
+if ($InstallOllama) {
+    if (-not (Get-Command winget.exe -ErrorAction SilentlyContinue)) {
+        throw "winget.exe unavailable. Install Microsoft App Installer, then retry -InstallOllama."
+    }
+    Write-Host "Installing Ollama on Windows through winget (explicit opt-in)."
+    & winget.exe install --id Ollama.Ollama --exact --source winget --accept-package-agreements --accept-source-agreements
+    if ($LASTEXITCODE -ne 0) { throw "Ollama winget installation failed ($LASTEXITCODE)" }
+    Write-Host "Ollama install command finished. Verify service/model access separately."
 }
 if (-not (Get-Command wsl.exe -ErrorAction SilentlyContinue)) {
     throw "wsl.exe unavailable. Enable WSL in Windows first, then rerun."
