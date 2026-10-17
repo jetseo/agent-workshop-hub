@@ -30,7 +30,8 @@ class WorkerTests(unittest.TestCase):
         with patch("workshop.worker.run_opencode") as runner:
             result = process_one(self.queue, allow_opencode=True)
             runner.assert_not_called()
-        self.assertIn("error", result)
+        self.assertIsNone(result)
+        self.assertEqual(self.queue.list()[0]["state"], "queued")
 
 if __name__ == "__main__":
     unittest.main()
