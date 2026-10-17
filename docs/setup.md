@@ -77,7 +77,7 @@ from the launcher dry run.
    existing OpenCode installations, and does not configure model providers.
    Review the upstream package before installing.
 2. Ollama on Windows can be installed explicitly with `./install.ps1 -InstallOllama` (uses `winget install --id Ollama.Ollama --exact --source winget`). Use `-DryRun` to inspect first. The installer does not download a model or start the service. After starting Ollama, run `./scripts/ollama.ps1` to check local connectivity and list installed models. To explicitly download a model, run `./scripts/ollama.ps1 -DryRun -Pull -Model qwen2.5-coder:7b` first, then remove `-DryRun`. Model downloads can use multiple GB of storage. Select one Ollama host to avoid port conflicts.
-3. Install ComfyUI in Windows with NVIDIA GPU support and test image generation independently.
+3. ComfyUI source checkout on Windows: `./install.ps1 -DryRun -InstallComfyUISource`, then `./install.ps1 -InstallComfyUISource`. This clones the official repository into `~/ComfyUI` without overwriting an existing directory. It does **not** install Python, PyTorch, CUDA, dependencies or models. After separately configuring and starting ComfyUI, check its local HTTP endpoint with `./scripts/comfyui-status.ps1` (default port 8188).
 4. Test model API connectivity before enabling any agent workflow.
 5. Connect Codex CLI and Claude Code only through supported, documented endpoints and keep their existing credentials untouched.
 
@@ -85,4 +85,4 @@ Do not expose Ollama, ComfyUI or any model gateway to the public internet. Do no
 
 ## Current scope
 
-The Windows installer performs preflight, optional Linux prerequisites, and opt-in Node.js/OpenCode setup. Node.js from Ubuntu apt may be too old. Ollama has an opt-in Windows winget installer, but ComfyUI is not automatically installed. It does **not** install or run the full multi-agent platform yet.
+The Windows installer performs preflight, optional Linux prerequisites, and opt-in Node.js/OpenCode setup. Node.js from Ubuntu apt may be too old. Ollama has an opt-in Windows winget installer, but ComfyUI has an opt-in source checkout, but its runtime and GPU dependencies are not automatically installed. It does **not** install or run the full multi-agent platform yet.
