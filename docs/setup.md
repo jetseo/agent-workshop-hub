@@ -55,7 +55,17 @@ from the launcher dry run.
 
 ## Runtime integration (not automated yet)
 
-1. Install OpenCode from its official installation instructions.
+1. OpenCode: install a supported Node.js release with npm, then run the opt-in
+   installer in Ubuntu/WSL:
+
+   ```bash
+   bash scripts/install-opencode.sh --dry-run
+   bash scripts/install-opencode.sh
+   ```
+
+   The script uses `npm install --global opencode-ai`, does not change
+   existing OpenCode installations, and does not configure model providers.
+   Review the upstream package before installing.
 2. Install Ollama using its official Windows or Linux instructions. Select one host to avoid port conflicts.
 3. Install ComfyUI in Windows with NVIDIA GPU support and test image generation independently.
 4. Test model API connectivity before enabling any agent workflow.
@@ -65,4 +75,4 @@ Do not expose Ollama, ComfyUI or any model gateway to the public internet. Do no
 
 ## Current scope
 
-The installer only performs preflight and optional Linux prerequisite installation. It does **not** install or run the full multi-agent platform yet.
+The Windows installer performs preflight and optional Linux prerequisite installation; OpenCode has a separate opt-in npm installation script. It does **not** install or run the full multi-agent platform yet.
