@@ -86,3 +86,8 @@ Do not expose Ollama, ComfyUI or any model gateway to the public internet. Do no
 ## Current scope
 
 The Windows installer performs preflight, optional Linux prerequisites, and opt-in Node.js/OpenCode setup. Node.js from Ubuntu apt may be too old. Ollama has an opt-in Windows winget installer, but ComfyUI has an opt-in source checkout, but its Python virtual environment and requirements can be installed with explicit switches; GPU-compatible PyTorch installation is opt-in with a runtime check; checkpoint download is opt-in and requires a trusted URL and checksum; end-to-end generation tests remain unverified. It does **not** install or run the full multi-agent platform yet.
+
+
+### Save ComfyUI job results through the worker
+
+For an image job payload, set `{"workflow": "/absolute/path/workflow-api.json", "save_outputs": true, "output_dir": "/absolute/path/outputs"}`. After explicit queue approval and starting the worker with `--allow-comfyui`, the worker submits the API workflow, waits for completion, downloads output images, writes a JSON report, and moves the job to `review`. The default image-job behavior without `save_outputs` remains status-only. Do not reuse output paths containing existing report filenames. Actual GPU integration is not yet verified.
