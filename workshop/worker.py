@@ -8,6 +8,11 @@ from .adapters import run_opencode
 from .comfyui import submit_workflow
 from .comfyui_status import wait_for_completion
 
+def _defer(queue, job):
+    # A disabled executor must not consume or fail a queued task.
+    queue.defer(job["id"])
+    return {"job_id": job["id"], "state": "queued", "reason": "executor disabled"}
+
 def process_one(queue, *, allow_opencode=False, allow_comfyui=False):
     if not (allow_opencode or allow_comfyui):
         raise PermissionError("Worker requires an explicit executor opt-in")
@@ -20,14 +25,14 @@ def process_one(queue, *, allow_opencode=False, allow_comfyui=False):
         payload = json.loads(job["payload"])
         if job["kind"] == "code":
             if not allow_opencode:
-                raise PermissionError("Code execution was not enabled")
+                return _defer(queue, job)
             workspace = payload.get("workspace")
             if not isinstance(workspace, str) or not workspace:
                 raise ValueError("Code job requires payload.workspace")
             result = run_opencode(job["title"], workspace, enabled=True)
         elif job["kind"] == "image":
             if not allow_comfyui:
-                raise PermissionError("Image submission was not enabled")
+                return _defer(queue, job)
             workflow = payload.get("workflow")
             if not isinstance(workflow, str) or not workflow:
                 raise ValueError("Image job requires payload.workflow")
