@@ -50,9 +50,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Validate shell syntax
-        run: bash -n scripts/bootstrap.sh scripts/start.sh
+        run: bash -n scripts/bootstrap.sh scripts/start.sh scripts/install-opencode.sh
       - name: Bootstrap dry run
         run: bash scripts/bootstrap.sh --dry-run
+      - name: OpenCode installer dry run
+        run: bash scripts/install-opencode.sh --dry-run
       - name: Validate YAML example
         run: |
           python -m pip install PyYAML
