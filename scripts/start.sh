@@ -30,8 +30,8 @@ cleanup() {
 trap cleanup EXIT INT TERM
 if (( ALLOW_OPENCODE || ALLOW_COMFYUI )); then
   flags=()
-  (( ALLOW_OPENCODE )) && flags+=(--allow-opencode)
-  (( ALLOW_COMFYUI )) && flags+=(--allow-comfyui)
+  if (( ALLOW_OPENCODE )); then flags+=(--allow-opencode); fi
+  if (( ALLOW_COMFYUI )); then flags+=(--allow-comfyui); fi
   python3 -m workshop.worker --watch "${flags[@]}" &
   child_pid=$!
   echo "Worker enabled: ${flags[*]}"
