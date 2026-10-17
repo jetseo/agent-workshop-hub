@@ -58,7 +58,12 @@ def make_handler(queue, token):
                 self._send(403, "Invalid Host", "text/plain")
                 return
             if urlsplit(self.path).path == "/api/jobs":
-                self._send(200, json.dumps(queue.list()), "application/json; charset=utf-8")
+                # Never expose prompts, workspace paths or execution logs without auth.
+                public_jobs = [
+                    {"id": job["id"], "kind": job["kind"], "title": job["title"],
+                     "state": job["state"]} for job in queue.list()
+                ]
+                self._send(200, json.dumps(public_jobs), "application/json; charset=utf-8")
                 return
             if urlsplit(self.path).path != "/":
                 self._send(404, "Not found", "text/plain")
@@ -95,6 +100,15 @@ def make_handler(queue, token):
                 self._send(404, "Not found", "text/plain")
                 return
             try:
+                origin = self.headers.get("Origin")
+                if origin is not None:
+                    allowed_origins = (
+                        "http://127.0.0.1:" + str(self.server.server_port),
+                        "http://localhost:" + str(self.server.server_port),
+                    )
+                    if origin not in allowed_origins:
+                        self._send(403, "Invalid Origin", "text/plain")
+                        return
                 size = int(self.headers.get("Content-Length", "0"))
                 if size <= 0 or size > 8192:
                     raise ValueError("Invalid request size")
