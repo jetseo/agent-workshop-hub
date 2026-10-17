@@ -15,6 +15,9 @@ if (( DRY_RUN )); then
   echo "[dry-run] No packages installed or modified."
   exit 0
 fi
+if [[ -s "$HOME/.nvm/nvm.sh" ]]; then
+  . "$HOME/.nvm/nvm.sh"
+fi
 if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
   echo "Node.js and npm are required. Install a supported Node.js release first." >&2
   exit 1
