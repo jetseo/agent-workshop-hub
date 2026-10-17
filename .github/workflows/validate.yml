@@ -33,6 +33,7 @@ jobs:
         shell: pwsh
         run: |
           ./install.ps1 -DryRun
+          ./install.ps1 -DryRun -InstallOllama
           ./install.ps1 -DryRun -InstallWSL -RunUbuntuBootstrap -InstallOpenCode -InstallNode -UseNvmFallback -Distro Ubuntu-24.04
       - name: Launcher dry run (Windows)
         if: runner.os == 'Windows'
