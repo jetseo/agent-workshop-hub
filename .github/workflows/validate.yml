@@ -33,7 +33,7 @@ jobs:
         shell: pwsh
         run: |
           ./install.ps1 -DryRun
-          ./install.ps1 -DryRun -InstallWSL -RunUbuntuBootstrap -InstallOpenCode -Distro Ubuntu-24.04
+          ./install.ps1 -DryRun -InstallWSL -RunUbuntuBootstrap -InstallOpenCode -InstallNode -Distro Ubuntu-24.04
       - name: Launcher dry run (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
@@ -50,9 +50,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Validate shell syntax
-        run: bash -n scripts/bootstrap.sh scripts/start.sh scripts/install-opencode.sh
+        run: bash -n scripts/bootstrap.sh scripts/start.sh scripts/install-opencode.sh scripts/install-node.sh
       - name: Bootstrap dry run
         run: bash scripts/bootstrap.sh --dry-run
+      - name: Node installer dry run
+        run: bash scripts/install-node.sh --dry-run
       - name: OpenCode installer dry run
         run: bash scripts/install-opencode.sh --dry-run
       - name: Validate YAML example
