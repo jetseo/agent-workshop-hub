@@ -28,10 +28,21 @@ class Queue:
                        (job_id, kind, title, json.dumps(payload or {})))
         return job_id
 
-    def claim(self):
+    def claim(self, kinds=None):
         with self._db() as db:
             db.execute("BEGIN IMMEDIATE")
-            row = db.execute("SELECT * FROM jobs WHERE state='queued' ORDER BY rowid LIMIT 1").fetchone()
+            allowed = tuple(kinds) if kinds is not None else None
+            if allowed is not None:
+                if not allowed:
+                    return None
+                if any(kind not in ("code", "image", "plan", "qa") for kind in allowed):
+                    raise ValueError("Invalid kind filter")
+                placeholders = ",".join("?" for _ in allowed)
+                row = db.execute(
+                    "SELECT * FROM jobs WHERE state='queued' AND kind IN (" +
+                    placeholders + ") ORDER BY rowid LIMIT 1", allowed).fetchone()
+            else:
+                row = db.execute("SELECT * FROM jobs WHERE state='queued' ORDER BY rowid LIMIT 1").fetchone()
             if row is None:
                 return None
             db.execute("UPDATE jobs SET state='running', attempts=attempts+1 WHERE id=?", (row["id"],))
