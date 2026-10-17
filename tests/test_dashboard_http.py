@@ -83,6 +83,27 @@ class DashboardHTTPTests(unittest.TestCase):
             urllib.request.urlopen(request, timeout=3)
         self.assertEqual(error.exception.code, 403)
 
+    def test_reject_cross_origin_write(self):
+        data = urllib.parse.urlencode({
+            "token": "integration-token", "kind": "plan", "title": "Injected"
+        }).encode("utf-8")
+        request = urllib.request.Request(
+            self.url + "/add", data=data, method="POST",
+            headers={"Origin": "https://attacker.example"}
+        )
+        with self.assertRaises(urllib.error.HTTPError) as error:
+            self.client.open(request, timeout=3)
+        self.assertEqual(error.exception.code, 403)
+        self.assertEqual(self.queue.list(), [])
+
+    def test_api_redacts_payload_and_result(self):
+        self.queue.add("code", "Task", {"workspace": "/private/workspace"})
+        with urllib.request.urlopen(self.url + "/api/jobs", timeout=3) as response:
+            raw = response.read().decode("utf-8")
+        self.assertNotIn("/private/workspace", raw)
+        self.assertNotIn("payload", raw)
+        self.assertNotIn("result", raw)
+
     def test_api_jobs(self):
         self.queue.add("plan", "Outline")
         with urllib.request.urlopen(self.url + "/api/jobs", timeout=3) as response:
