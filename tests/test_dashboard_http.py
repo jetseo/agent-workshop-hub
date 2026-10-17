@@ -75,6 +75,14 @@ class DashboardHTTPTests(unittest.TestCase):
         self.assertNotIn("<script>", page)
         self.assertIn("&lt;script&gt;", page)
 
+    def test_reject_unexpected_host(self):
+        request = urllib.request.Request(
+            self.url + "/", headers={"Host": "attacker.example"}
+        )
+        with self.assertRaises(urllib.error.HTTPError) as error:
+            urllib.request.urlopen(request, timeout=3)
+        self.assertEqual(error.exception.code, 403)
+
     def test_api_jobs(self):
         self.queue.add("plan", "Outline")
         with urllib.request.urlopen(self.url + "/api/jobs", timeout=3) as response:
