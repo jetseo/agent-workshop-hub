@@ -9,13 +9,18 @@ In PowerShell from the repository root:
 .\install.ps1
 ```
 
-If WSL is missing, use an elevated PowerShell and explicitly opt in:
+If the requested Ubuntu distribution is missing, use an elevated PowerShell
+and explicitly opt in:
 
 ```powershell
 .\install.ps1 -InstallWSL
 ```
 
-Reboot if requested and complete the Ubuntu user setup. To install only base Linux prerequisites:
+Reboot if requested and complete the Ubuntu user setup. The default distro
+is `Ubuntu-24.04`; pass `-Distro <name>` to select another installed or
+installable distribution. Dry-run never invokes WSL or installs packages.
+
+To install only base Linux prerequisites:
 
 ```powershell
 .\install.ps1 -RunUbuntuBootstrap
