@@ -28,9 +28,7 @@ from Windows PowerShell:
 .\\install.ps1 -RunUbuntuBootstrap -InstallOpenCode
 ```
 
-**Prerequisite:** The OpenCode installer requires Node.js and npm inside the
-selected WSL distribution. The base Ubuntu bootstrap does not install them.
-Install a supported Node.js release before requesting `-InstallOpenCode`.
+**Node.js:** `-InstallOpenCode` now runs the opt-in Node.js prerequisite installer first. It checks for Node.js 20+ and npm, and attempts installation from Ubuntu `apt` when missing. Some Ubuntu releases provide an older Node.js through `apt`; in that case installation stops with a clear error, and you must install a supported Node.js release separately. Existing compatible Node.js installations are preserved.
 
 To install only base Linux prerequisites:
 
@@ -87,4 +85,4 @@ Do not expose Ollama, ComfyUI or any model gateway to the public internet. Do no
 
 ## Current scope
 
-The Windows installer performs preflight and optional Linux prerequisite installation; OpenCode has a separate opt-in npm installation script. It does **not** install or run the full multi-agent platform yet.
+The Windows installer performs preflight, optional Linux prerequisites, and opt-in Node.js/OpenCode setup. Node.js from Ubuntu apt may be too old. Ollama and ComfyUI are not automatically installed. It does **not** install or run the full multi-agent platform yet.
