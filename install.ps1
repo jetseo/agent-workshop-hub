@@ -5,6 +5,7 @@ param(
     [switch]$RunUbuntuBootstrap,
     [switch]$InstallOpenCode,
     [switch]$InstallNode,
+    [switch]$UseNvmFallback,
     [ValidateNotNullOrEmpty()][string]$Distro = "Ubuntu-24.04",
     [switch]$DryRun
 )
@@ -17,6 +18,7 @@ if ($DryRun) {
     Write-Host "[dry-run] WSL distro: $Distro"
     if ($InstallWSL) { Write-Host "[dry-run] Would install WSL distro if absent: $Distro" }
     if ($InstallOpenCode -or $InstallNode) { Write-Host "[dry-run] Would check/install Node.js prerequisite in $Distro" }
+    if ($UseNvmFallback) { Write-Host "[dry-run] Would allow nvm fallback if Ubuntu Node.js is too old" }
     if ($InstallOpenCode) { Write-Host "[dry-run] Would run scripts/install-opencode.sh in $Distro" }
     if ($RunUbuntuBootstrap) {
         Write-Host "[dry-run] Would install Ubuntu prerequisites: git curl ca-certificates python3 python3-venv python3-pip jq"
@@ -57,7 +59,11 @@ if ($InstallOpenCode -or $InstallNode) {
     $script = Join-Path $PSScriptRoot "scripts/install-node.sh"
     if (-not (Test-Path -LiteralPath $script)) { throw "Missing scripts/install-node.sh" }
     $installer = (Get-Content -Raw -LiteralPath $script) -replace "`r`n", "`n"
-    $installer | & wsl.exe -d $Distro -- bash -s
+    if ($UseNvmFallback) {
+        $installer | & wsl.exe -d $Distro -- bash -s -- --use-nvm
+    } else {
+        $installer | & wsl.exe -d $Distro -- bash -s
+    }
     if ($LASTEXITCODE -ne 0) { throw "Node.js prerequisite failed ($LASTEXITCODE)" }
 }
 if ($InstallOpenCode) {
