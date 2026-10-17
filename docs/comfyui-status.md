@@ -4,6 +4,6 @@
 
 `wait_for_completion(prompt_id, max_wait=300, interval=3)` polls for terminal status, returning timeout if no terminal history appears.
 
-**Important:** This is not yet wired to the worker. A successful submission is still only a submission. No image files are downloaded or copied into a workspace. Only local loopback ComfyUI URLs are supported.
+**Worker integration:** The image worker now polls for completion for up to 300 seconds before moving a task into review. A failed or timed-out run is marked failed and never automatically replayed. No image files are downloaded or copied into a workspace. Only local loopback ComfyUI URLs are supported.
 
 The API history response and output metadata should be treated as untrusted data. Do not interpret returned filenames as filesystem paths without validation.
