@@ -54,9 +54,13 @@ def process_one(queue, *, allow_opencode=False, allow_comfyui=False):
         state = queue.finish(job["id"], result, success=True)
         return {"job_id": job["id"], "state": state, "result": result}
     except Exception as error:
-        # Always transition away from running on handled errors.
-        queue.finish(job["id"], {"error": str(error)}, success=False)
-        return {"job_id": job["id"], "error": str(error)}
+        # Preserve the original executor failure even if persistence also fails.
+        detail = {"error": str(error), "type": type(error).__name__}
+        try:
+            queue.finish(job["id"], detail, success=False)
+        except Exception as storage_error:
+            detail["storage_error"] = str(storage_error)
+        return {"job_id": job["id"], "state": "failed", "result": detail}
 
 def main():
     parser = argparse.ArgumentParser()
