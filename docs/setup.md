@@ -76,7 +76,7 @@ from the launcher dry run.
    The script uses `npm install --global opencode-ai`, does not change
    existing OpenCode installations, and does not configure model providers.
    Review the upstream package before installing.
-2. Ollama on Windows can be installed explicitly with `./install.ps1 -InstallOllama` (uses `winget install --id Ollama.Ollama --exact --source winget`). Use `-DryRun` to inspect first. The installer does not download a model, start the service, or verify connectivity. Select one Ollama host to avoid port conflicts.
+2. Ollama on Windows can be installed explicitly with `./install.ps1 -InstallOllama` (uses `winget install --id Ollama.Ollama --exact --source winget`). Use `-DryRun` to inspect first. The installer does not download a model or start the service. After starting Ollama, run `./scripts/ollama.ps1` to check local connectivity and list installed models. To explicitly download a model, run `./scripts/ollama.ps1 -DryRun -Pull -Model qwen2.5-coder:7b` first, then remove `-DryRun`. Model downloads can use multiple GB of storage. Select one Ollama host to avoid port conflicts.
 3. Install ComfyUI in Windows with NVIDIA GPU support and test image generation independently.
 4. Test model API connectivity before enabling any agent workflow.
 5. Connect Codex CLI and Claude Code only through supported, documented endpoints and keep their existing credentials untouched.
