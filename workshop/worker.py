@@ -18,7 +18,12 @@ def process_one(queue, *, allow_opencode=False, allow_comfyui=False):
         raise PermissionError("Worker requires an explicit executor opt-in")
     # Recover stale tasks explicitly before starting a new worker; never replay them.
     # Queue selection is FIFO; unsupported kinds must not be silently executed.
-    job = queue.claim()
+    enabled_kinds = []
+    if allow_opencode:
+        enabled_kinds.append("code")
+    if allow_comfyui:
+        enabled_kinds.append("image")
+    job = queue.claim(kinds=enabled_kinds)
     if job is None:
         return None
     try:
