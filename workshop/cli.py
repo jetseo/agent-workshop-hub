@@ -16,7 +16,8 @@ def main():
     add.add_argument("--skip-execution-approval", action="store_true",
                      help="Unsafe: allow immediate execution of newly queued code/image tasks")
     sub.add_parser("list")
-    sub.add_parser("claim")
+    claim = sub.add_parser("claim")
+    claim.add_argument("--unsafe-manual", action="store_true", help="Advanced queue administration only")
     sub.add_parser("recover")
     authorize = sub.add_parser("authorize")
     authorize.add_argument("id")
@@ -32,6 +33,8 @@ def main():
     elif args.command == "list":
         result = q.list()
     elif args.command == "claim":
+        if not args.unsafe_manual:
+            p.error("Manual claim requires --unsafe-manual; normal execution uses the worker")
         result = q.claim()
     elif args.command == "recover":
         result = {"marked_failed": q.recover()}
