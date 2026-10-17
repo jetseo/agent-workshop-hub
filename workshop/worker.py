@@ -5,6 +5,7 @@ from pathlib import Path
 from .queue import Queue
 from .adapters import run_opencode
 from .comfyui import submit_workflow
+from .comfyui_status import wait_for_completion
 
 def process_one(queue, *, allow_opencode=False, allow_comfyui=False):
     if not (allow_opencode or allow_comfyui):
@@ -28,7 +29,11 @@ def process_one(queue, *, allow_opencode=False, allow_comfyui=False):
             workflow = payload.get("workflow")
             if not isinstance(workflow, str) or not workflow:
                 raise ValueError("Image job requires payload.workflow")
-            result = submit_workflow(workflow, enabled=True)
+            submitted = submit_workflow(workflow, enabled=True)
+            result = wait_for_completion(submitted["prompt_id"], max_wait=300)
+            if result["state"] != "completed":
+                queue.finish(job["id"], result, success=False)
+                return {"job_id": job["id"], "state": "failed", "result": result}
         else:
             raise ValueError("Unsupported executor kind: " + job["kind"])
         if result.get("exit_code", 0) != 0:
