@@ -1,0 +1,33 @@
+version: 1
+server:
+  host: 127.0.0.1
+  port: 8787
+workspace:
+  root: "~/agent-workshop-projects"
+  require_approval_for_merge: true
+  isolated_worktrees: true
+models:
+  default_route: local
+  local:
+    provider: ollama
+    base_url: "http://127.0.0.1:11434"
+  cloud:
+    enabled: false
+    require_explicit_consent: true
+  paid:
+    enabled: false
+    require_approval: true
+agents:
+  coding:
+    primary: opencode
+    optional: [codex, claude-code]
+  image:
+    engine: comfyui
+    max_gpu_jobs: 1
+  qa:
+    enabled: false
+safety:
+  max_retries: 2
+  max_concurrent_code_jobs: 2
+  auto_merge: false
+  auto_push: false
