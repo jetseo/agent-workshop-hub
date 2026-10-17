@@ -1,6 +1,7 @@
 """Single-job opt-in worker. No automatic retries of side-effecting commands."""
 import argparse
 import json
+import time
 from pathlib import Path
 from .queue import Queue
 from .adapters import run_opencode
@@ -11,6 +12,7 @@ def process_one(queue, *, allow_opencode=False, allow_comfyui=False):
     if not (allow_opencode or allow_comfyui):
         raise PermissionError("Worker requires an explicit executor opt-in")
     # Recover stale tasks explicitly before starting a new worker; never replay them.
+    # Queue selection is FIFO; unsupported kinds must not be silently executed.
     job = queue.claim()
     if job is None:
         return None
@@ -52,12 +54,26 @@ def main():
     parser.add_argument("--db", default=str(Path.home() / ".agent-workshop" / "jobs.sqlite3"))
     parser.add_argument("--allow-opencode", action="store_true")
     parser.add_argument("--allow-comfyui", action="store_true")
+    parser.add_argument("--watch", action="store_true", help="Keep polling for new tasks")
+    parser.add_argument("--interval", type=float, default=3.0)
     args = parser.parse_args()
     if not (args.allow_opencode or args.allow_comfyui):
         parser.error("Pass --allow-opencode or --allow-comfyui after reviewing permissions")
     queue = Queue(args.db)
+    if args.interval < 0.5:
+        parser.error("--interval must be at least 0.5 seconds")
     queue.recover()
-    print(json.dumps(process_one(queue, allow_opencode=args.allow_opencode, allow_comfyui=args.allow_comfyui), ensure_ascii=False, indent=2))
+    try:
+        while True:
+            outcome = process_one(queue, allow_opencode=args.allow_opencode,
+                                  allow_comfyui=args.allow_comfyui)
+            if outcome is not None:
+                print(json.dumps(outcome, ensure_ascii=False), flush=True)
+            if not args.watch:
+                break
+            time.sleep(args.interval)
+    except KeyboardInterrupt:
+        print("Worker stopped.", flush=True)
 
 if __name__ == "__main__":
     main()
