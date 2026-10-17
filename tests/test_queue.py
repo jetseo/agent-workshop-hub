@@ -17,9 +17,9 @@ class TestQueue(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             q = Queue(Path(d) / "tasks.db")
             task = q.add("image", "Generate sprite")
-            self.assertIsNone(q.claim())
-            q.claim()
+            self.assertEqual(q.claim()["id"], task)
             self.assertEqual(q.finish(task, success=False), "failed")
+            self.assertIsNone(q.claim())
 
     def test_recovery(self):
         with tempfile.TemporaryDirectory() as d:
