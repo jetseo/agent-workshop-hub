@@ -91,3 +91,8 @@ The Windows installer performs preflight, optional Linux prerequisites, and opt-
 ### Save ComfyUI job results through the worker
 
 For an image job payload, set `{"workflow": "/absolute/path/workflow-api.json", "save_outputs": true, "output_dir": "/absolute/path/outputs"}`. After explicit queue approval and starting the worker with `--allow-comfyui`, the worker submits the API workflow, waits for completion, downloads output images, writes a JSON report, and moves the job to `review`. The default image-job behavior without `save_outputs` remains status-only. Do not reuse output paths containing existing report filenames. Actual GPU integration is not yet verified.
+
+
+### Dashboard image results
+
+The local dashboard at `http://127.0.0.1:8787/` now accepts an optional absolute **Image output directory** when adding an image task. After authorizing execution and running the opt-in ComfyUI worker, image jobs that save outputs show their generated file count and whether a local report was saved. Final approval still requires the review button. The dashboard deliberately does not serve generated files over HTTP. CLI equivalent: `python -m workshop.cli add image "Generate art" --workflow /absolute/workflow.json --output-dir /absolute/output`. Actual ComfyUI GPU end-to-end execution remains unverified.
