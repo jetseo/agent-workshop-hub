@@ -1,32 +1,50 @@
-# Agent Workshop Hub - Windows bootstrap
-# Run in PowerShell. Use -InstallWSL to opt into OS changes.
+# Agent Workshop Hub - Windows preflight and opt-in Ubuntu prerequisite setup.
 [CmdletBinding()]
 param(
     [switch]$InstallWSL,
     [switch]$RunUbuntuBootstrap,
+    [ValidateNotNullOrEmpty()][string]$Distro = "Ubuntu-24.04",
     [switch]$DryRun
 )
 $ErrorActionPreference = "Stop"
+if ($PSVersionTable.PSEdition -eq "Core" -and -not $IsWindows) {
+    throw "Windows required"
+}
 Write-Host "Agent Workshop Hub | Windows preflight"
-if (-not $IsWindows -and $PSVersionTable.PSEdition -eq 'Core') { throw "Windows required" }
-$wsl = Get-Command wsl.exe -ErrorAction SilentlyContinue
-if (-not $wsl) {
-    if (-not $InstallWSL) { Write-Warning "WSL unavailable. Rerun with -InstallWSL in an elevated PowerShell."; exit 1 }
-    if ($DryRun) { Write-Host "[dry-run] wsl --install -d Ubuntu-24.04"; exit 0 }
-    wsl.exe --install -d Ubuntu-24.04
-    Write-Host "Restart Windows if prompted, finish Ubuntu first-run setup, then rerun."
-    exit 0
+if ($DryRun) {
+    Write-Host "[dry-run] WSL distro: $Distro"
+    if ($InstallWSL) { Write-Host "[dry-run] Would install WSL distro if absent: $Distro" }
+    if ($RunUbuntuBootstrap) {
+        Write-Host "[dry-run] Would install Ubuntu prerequisites: git curl ca-certificates python3 python3-venv python3-pip jq"
+    }
+    Write-Host "[dry-run] No system changes performed."
+    return
 }
-wsl.exe --list --verbose
+if (-not (Get-Command wsl.exe -ErrorAction SilentlyContinue)) {
+    throw "wsl.exe unavailable. Enable WSL in Windows first, then rerun."
+}
+$raw = @(& wsl.exe --list --quiet 2>&1)
 if ($LASTEXITCODE -ne 0) { throw "Unable to query WSL distributions" }
-if (-not $RunUbuntuBootstrap) {
-    Write-Host "Preflight complete. Rerun with -RunUbuntuBootstrap to configure Ubuntu prerequisites."
-    exit 0
+$names = @($raw | ForEach-Object { ($_ -replace [char]0, "").Trim() })
+if ($Distro -notin $names) {
+    if (-not $InstallWSL) {
+        throw "WSL distro '$Distro' is not installed. Rerun with -InstallWSL in elevated PowerShell."
+    }
+    Write-Host "Installing WSL distro $Distro. Administrator approval or restart may be required."
+    & wsl.exe --install -d $Distro
+    if ($LASTEXITCODE -ne 0) { throw "WSL distro installation failed ($LASTEXITCODE)" }
+    Write-Host "Complete the Ubuntu first-run user setup and rerun install.ps1."
+    return
 }
-if ($DryRun) { Write-Host "[dry-run] Ubuntu bootstrap (git, curl, python3, venv)"; exit 0 }
+Write-Host "WSL distro ready: $Distro"
+if (-not $RunUbuntuBootstrap) {
+    Write-Host "Preflight complete. Add -RunUbuntuBootstrap to install Ubuntu prerequisites."
+    return
+}
 $script = Join-Path $PSScriptRoot "scripts/bootstrap.sh"
-if (-not (Test-Path $script)) { throw "Missing scripts/bootstrap.sh" }
-# Pass script via stdin to avoid Windows/WSL path translation problems.
-Get-Content -Raw -Path $script | wsl.exe -d Ubuntu-24.04 -- bash -s
-if ($LASTEXITCODE -ne 0) { throw "Ubuntu bootstrap failed with exit code $LASTEXITCODE" }
-Write-Host "Bootstrap completed. See docs/setup.md for optional runtimes."
+if (-not (Test-Path -LiteralPath $script)) { throw "Missing scripts/bootstrap.sh" }
+# Convert CRLF to LF and pipe the script through standard input.
+$bootstrap = (Get-Content -Raw -LiteralPath $script) -replace "`r`n", "`n"
+$bootstrap | & wsl.exe -d $Distro -- bash -s
+if ($LASTEXITCODE -ne 0) { throw "Ubuntu bootstrap failed ($LASTEXITCODE)" }
+Write-Host "Base prerequisites installed. OpenCode, Ollama and ComfyUI remain opt-in."
