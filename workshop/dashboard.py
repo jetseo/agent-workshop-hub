@@ -35,6 +35,13 @@ small{color:#9ca3af} .tag{color:#93c5fd}
 
 def make_handler(queue, token):
     class Handler(BaseHTTPRequestHandler):
+        def _trusted_host(self):
+            host = self.headers.get("Host", "")
+            return host in (
+                "127.0.0.1:" + str(self.server.server_port),
+                "localhost:" + str(self.server.server_port),
+            )
+
         def _send(self, code, body, content_type="text/html; charset=utf-8"):
             data = body.encode("utf-8")
             self.send_response(code)
@@ -47,6 +54,9 @@ def make_handler(queue, token):
             self.wfile.write(data)
 
         def do_GET(self):
+            if not self._trusted_host():
+                self._send(403, "Invalid Host", "text/plain")
+                return
             if urlsplit(self.path).path == "/api/jobs":
                 self._send(200, json.dumps(queue.list()), "application/json; charset=utf-8")
                 return
@@ -77,6 +87,9 @@ def make_handler(queue, token):
             self._send(200, page)
 
         def do_POST(self):
+            if not self._trusted_host():
+                self._send(403, "Invalid Host", "text/plain")
+                return
             path = urlsplit(self.path).path
             if path not in ("/add", "/approve", "/authorize"):
                 self._send(404, "Not found", "text/plain")
