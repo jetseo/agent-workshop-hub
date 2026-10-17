@@ -13,6 +13,7 @@ def main():
     add.add_argument("title")
     add.add_argument("--workspace", help="Existing Git worktree or repository directory")
     add.add_argument("--workflow", help="ComfyUI API-format workflow JSON file")
+    add.add_argument("--output-dir", help="Absolute output directory for generated ComfyUI images")
     add.add_argument("--skip-execution-approval", action="store_true",
                      help="Unsafe: allow immediate execution of newly queued code/image tasks")
     sub.add_parser("list")
@@ -29,7 +30,15 @@ def main():
     args = p.parse_args()
     q = Queue(args.db)
     if args.command == "add":
-        result = {"id": q.add(args.kind, args.title, ({"workspace": args.workspace} if args.workspace else {"workflow": args.workflow} if args.workflow else {}), require_approval=(args.kind in ("code", "image") and not args.skip_execution_approval))}
+        if args.output_dir and (args.kind != "image" or not Path(args.output_dir).is_absolute()):
+            p.error("--output-dir requires an image task and absolute path")
+        payload = ({"workspace": args.workspace} if args.workspace else
+                   {"workflow": args.workflow} if args.workflow else {})
+        if args.output_dir:
+            payload.update({"save_outputs": True, "output_dir": args.output_dir})
+        result = {"id": q.add(args.kind, args.title, payload,
+                              require_approval=(args.kind in ("code", "image") and
+                                                not args.skip_execution_approval))}
     elif args.command == "list":
         result = q.list()
     elif args.command == "claim":
