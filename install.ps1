@@ -3,6 +3,7 @@
 param(
     [switch]$InstallWSL,
     [switch]$RunUbuntuBootstrap,
+    [switch]$InstallOpenCode,
     [ValidateNotNullOrEmpty()][string]$Distro = "Ubuntu-24.04",
     [switch]$DryRun
 )
@@ -14,6 +15,7 @@ Write-Host "Agent Workshop Hub | Windows preflight"
 if ($DryRun) {
     Write-Host "[dry-run] WSL distro: $Distro"
     if ($InstallWSL) { Write-Host "[dry-run] Would install WSL distro if absent: $Distro" }
+    if ($InstallOpenCode) { Write-Host "[dry-run] Would run scripts/install-opencode.sh in $Distro" }
     if ($RunUbuntuBootstrap) {
         Write-Host "[dry-run] Would install Ubuntu prerequisites: git curl ca-certificates python3 python3-venv python3-pip jq"
     }
@@ -37,14 +39,23 @@ if ($Distro -notin $names) {
     return
 }
 Write-Host "WSL distro ready: $Distro"
-if (-not $RunUbuntuBootstrap) {
-    Write-Host "Preflight complete. Add -RunUbuntuBootstrap to install Ubuntu prerequisites."
+if (-not ($RunUbuntuBootstrap -or $InstallOpenCode)) {
+    Write-Host "Preflight complete. Use -RunUbuntuBootstrap and/or -InstallOpenCode."
     return
 }
-$script = Join-Path $PSScriptRoot "scripts/bootstrap.sh"
-if (-not (Test-Path -LiteralPath $script)) { throw "Missing scripts/bootstrap.sh" }
-# Convert CRLF to LF and pipe the script through standard input.
-$bootstrap = (Get-Content -Raw -LiteralPath $script) -replace "`r`n", "`n"
-$bootstrap | & wsl.exe -d $Distro -- bash -s
-if ($LASTEXITCODE -ne 0) { throw "Ubuntu bootstrap failed ($LASTEXITCODE)" }
-Write-Host "Base prerequisites installed. OpenCode, Ollama and ComfyUI remain opt-in."
+if ($RunUbuntuBootstrap) {
+    $script = Join-Path $PSScriptRoot "scripts/bootstrap.sh"
+    if (-not (Test-Path -LiteralPath $script)) { throw "Missing scripts/bootstrap.sh" }
+    $bootstrap = (Get-Content -Raw -LiteralPath $script) -replace "`r`n", "`n"
+    $bootstrap | & wsl.exe -d $Distro -- bash -s
+    if ($LASTEXITCODE -ne 0) { throw "Ubuntu bootstrap failed ($LASTEXITCODE)" }
+    Write-Host "Base prerequisites installed."
+}
+if ($InstallOpenCode) {
+    $script = Join-Path $PSScriptRoot "scripts/install-opencode.sh"
+    if (-not (Test-Path -LiteralPath $script)) { throw "Missing scripts/install-opencode.sh" }
+    $installer = (Get-Content -Raw -LiteralPath $script) -replace "`r`n", "`n"
+    $installer | & wsl.exe -d $Distro -- bash -s
+    if ($LASTEXITCODE -ne 0) { throw "OpenCode installation failed ($LASTEXITCODE)" }
+    Write-Host "OpenCode installation step complete."
+}
