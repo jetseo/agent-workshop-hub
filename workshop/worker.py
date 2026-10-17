@@ -23,7 +23,7 @@ def process_one(queue, *, allow_opencode=False):
         if result["exit_code"] != 0:
             # Do not retry a potentially side-effecting command automatically.
             queue.finish(job["id"], result, success=False)
-            return {"job_id": job["id"], "state": "failed_or_queued", "result": result}
+            return {"job_id": job["id"], "state": "failed", "result": result}
         state = queue.finish(job["id"], result, success=True)
         return {"job_id": job["id"], "state": state, "result": result}
     except Exception as error:
