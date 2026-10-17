@@ -16,8 +16,7 @@ def _defer(queue, job):
 def process_one(queue, *, allow_opencode=False, allow_comfyui=False):
     if not (allow_opencode or allow_comfyui):
         raise PermissionError("Worker requires an explicit executor opt-in")
-    # Recover stale tasks explicitly before starting a new worker; never replay them.
-    # Queue selection is FIFO; unsupported kinds must not be silently executed.
+    # Claim only jobs with an enabled executor.
     enabled_kinds = []
     if allow_opencode:
         enabled_kinds.append("code")
@@ -65,6 +64,7 @@ def main():
     parser.add_argument("--allow-opencode", action="store_true")
     parser.add_argument("--allow-comfyui", action="store_true")
     parser.add_argument("--watch", action="store_true", help="Keep polling for new tasks")
+    parser.add_argument("--recover-stale", action="store_true", help="Mark ALL running jobs failed; use only when no other worker is active")
     parser.add_argument("--interval", type=float, default=3.0)
     args = parser.parse_args()
     if not (args.allow_opencode or args.allow_comfyui):
@@ -72,7 +72,10 @@ def main():
     queue = Queue(args.db)
     if args.interval < 0.5:
         parser.error("--interval must be at least 0.5 seconds")
-    queue.recover()
+    # Startup recovery is operator-controlled to avoid marking another live worker's
+    # running tasks failed when multiple processes share the same database.
+    if args.recover_stale:
+        print(json.dumps({"marked_failed": queue.recover()}), flush=True)
     try:
         while True:
             outcome = process_one(queue, allow_opencode=args.allow_opencode,
