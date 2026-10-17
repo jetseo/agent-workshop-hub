@@ -1,0 +1,17 @@
+name: Validate bootstrap
+on:
+  push:
+  pull_request:
+jobs:
+  shell:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Bash syntax
+        run: bash -n scripts/bootstrap.sh
+      - name: Dry run
+        run: bash scripts/bootstrap.sh --dry-run
+      - name: Config parse
+        run: |
+          python -m pip install PyYAML
+          python -c "import yaml; yaml.safe_load(open('config/workshop.example.yaml'))"
