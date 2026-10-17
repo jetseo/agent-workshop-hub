@@ -33,8 +33,17 @@ if ! command -v apt-get >/dev/null 2>&1; then
   echo "apt-get unavailable; install supported Node.js >= ${MIN_NODE_MAJOR} manually." >&2
   exit 1
 fi
-echo "Installing Ubuntu nodejs and npm packages (may require sudo)."
+echo "Checking Ubuntu package candidate before installing."
 sudo apt-get update
+candidate="$(apt-cache policy nodejs | awk '/Candidate:/ {print $2; exit}')"
+candidate_major="$(printf '%s' "$candidate" | sed -nE 's/^[0-9]*:([0-9]+)\..*/\1/p; s/^([0-9]+)\..*/\1/p')"
+if [[ -z "$candidate_major" ]] || (( candidate_major < MIN_NODE_MAJOR )); then
+  echo "Ubuntu nodejs candidate '$candidate' does not meet Node.js >= ${MIN_NODE_MAJOR}." >&2
+  echo "No nodejs/npm packages were installed by this script." >&2
+  echo "Install a supported Node.js release from the official Node.js distribution, then rerun." >&2
+  exit 1
+fi
+echo "Installing Ubuntu nodejs and npm packages (candidate: $candidate)."
 sudo apt-get install -y nodejs npm
 if ! check_node; then
   echo "Distribution Node.js is too old or npm is missing." >&2
