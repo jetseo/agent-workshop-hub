@@ -12,6 +12,7 @@ def main():
     add.add_argument("kind", choices=["plan", "code", "image", "qa"])
     add.add_argument("title")
     add.add_argument("--workspace", help="Existing Git worktree or repository directory")
+    add.add_argument("--workflow", help="ComfyUI API-format workflow JSON file")
     sub.add_parser("list")
     sub.add_parser("claim")
     sub.add_parser("recover")
@@ -23,7 +24,7 @@ def main():
     args = p.parse_args()
     q = Queue(args.db)
     if args.command == "add":
-        result = {"id": q.add(args.kind, args.title, {"workspace": args.workspace} if args.workspace else {})}
+        result = {"id": q.add(args.kind, args.title, ({"workspace": args.workspace} if args.workspace else {"workflow": args.workflow} if args.workflow else {}))}
     elif args.command == "list":
         result = q.list()
     elif args.command == "claim":
