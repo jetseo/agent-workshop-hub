@@ -62,8 +62,10 @@ class DashboardTests(unittest.TestCase):
         job = {"kind": "image", "state": "review", "payload": json.dumps({"output_dir": str(Path.cwd().resolve())}), "result": json.dumps({"files": [item]})}
         self.assertEqual(len(gallery_files(job)), 1)
         item["path"] = str(Path.cwd().resolve().parent / "image-001-test.png")
+        job["result"] = json.dumps({"files": [item]})
         self.assertEqual(gallery_files(job), [])
         item["path"] = str(Path.cwd().resolve() / "image-001-test.png")
+        job["result"] = json.dumps({"files": [item]})
         job["state"] = "queued"
         self.assertEqual(gallery_files(job), [])
         job["state"] = "review"
