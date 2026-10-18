@@ -68,6 +68,13 @@ class DashboardTests(unittest.TestCase):
                     urllib.request.urlopen(request, timeout=5)
                 self.assertEqual(error.exception.code, 403)
                 self.assertEqual(queue.list(), [])
+                origin_request = urllib.request.Request(base + '/add', data=urlencode({
+                    'kind': 'plan', 'title': 'bad origin', 'token': 'secret'}).encode(),
+                    headers={'Origin': 'https://evil.example'}, method='POST')
+                with self.assertRaises(urllib.error.HTTPError) as error:
+                    urllib.request.urlopen(origin_request, timeout=5)
+                self.assertEqual(error.exception.code, 403)
+                self.assertEqual(queue.list(), [])
                 request = urllib.request.Request(base + '/add', data=urlencode({
                     'kind': 'plan', 'title': 'authorized', 'token': 'secret'}).encode(), method='POST')
                 with urllib.request.urlopen(request, timeout=5) as response:
