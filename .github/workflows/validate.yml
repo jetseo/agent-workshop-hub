@@ -61,11 +61,25 @@ jobs:
       - name: Compile modules
         run: python -m compileall -q workshop tests
       - name: Unit and local HTTP integration tests
+        id: unittest
         shell: bash
         run: |
           mkdir -p test-results
           python -m unittest discover -s tests -v 2>&1 | tee test-results/unittest.log
           exit ${PIPESTATUS[0]}
+      - name: Summarize test results
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo '## Python tests'
+            echo ''
+            echo '- Runner: ${{ matrix.os }}'
+            echo '- Python: ${{ matrix.python }}'
+            echo '- Outcome: ${{ steps.unittest.outcome }}'
+            echo ''
+            echo 'Download the python-diagnostics artifact for full output.'
+          } >> "$GITHUB_STEP_SUMMARY"
       - name: Upload Python test diagnostics
         if: always()
         uses: actions/upload-artifact@v4
