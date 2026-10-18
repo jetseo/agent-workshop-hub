@@ -16,12 +16,12 @@ PAGE = """<!doctype html><html lang="ko"><head><meta charset="utf-8">
 <title>Agent Workshop Hub</title>
 <style>
 :root{font-family:system-ui,sans-serif;color-scheme:dark}
-body{max-width:1000px;margin:32px auto;padding:0 18px;background:#111827;color:#e5e7eb}
+body{max-width:1000px;margin:32px auto;padding:0 18px;background:#111827;color:#e5e7eb}*{box-sizing:border-box}
 h1{font-size:1.8rem}p{color:#9ca3af}
 section,.job{background:#1f2937;border:1px solid #374151;border-radius:12px;padding:18px;margin:14px 0}
 input,select,button{padding:10px;border-radius:8px;border:1px solid #4b5563;background:#111827;color:#fff}
 input{width:min(440px,85%)}button{cursor:pointer;background:#2563eb;border:0}
-.job{display:flex;justify-content:space-between;gap:14px;align-items:center;flex-wrap:wrap}
+.job{display:flex;justify-content:space-between;gap:14px;align-items:center;flex-wrap:wrap}.job>div:first-child{min-width:0;overflow-wrap:anywhere}.gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px;width:100%;margin-top:12px}.gallery a{display:block;min-width:0}.gallery img{width:100%;height:auto;aspect-ratio:1;object-fit:contain;margin:0;background:#111827}.job form{max-width:100%}@media(max-width:600px){body{margin:12px auto;padding:0 12px}section,.job{padding:12px;margin:10px 0}input,select,button{max-width:100%;width:100%;min-height:44px;margin:4px 0}.job{display:block}.gallery{grid-template-columns:repeat(2,minmax(0,1fr))}}
 small{color:#9ca3af} .tag{color:#93c5fd}.gallery img{width:140px;height:140px;object-fit:contain;margin:5px;border-radius:8px}
 </style></head><body>
 <h1>Agent Workshop Hub</h1>
