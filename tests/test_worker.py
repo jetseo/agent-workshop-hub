@@ -40,10 +40,19 @@ class WorkerTests(unittest.TestCase):
     def test_image_output_requires_destination(self):
         self.queue.add("image", "Render", {"workflow": "workflow.json",
                                            "save_outputs": True})
-        with patch("workshop.worker.submit_workflow", return_value={"prompt_id": "abc"}):
+        with patch("workshop.worker.submit_workflow") as submit:
             result = process_one(self.queue, allow_comfyui=True)
+            submit.assert_not_called()
         self.assertEqual(result["state"], "failed")
 
+    def test_image_output_rejects_relative_destination_before_submit(self):
+        self.queue.add("image", "Render", {"workflow": "workflow.json",
+                                           "save_outputs": True,
+                                           "output_dir": "relative/images"})
+        with patch("workshop.worker.submit_workflow") as submit:
+            result = process_one(self.queue, allow_comfyui=True)
+            submit.assert_not_called()
+        self.assertEqual(result["state"], "failed")
     def test_invalid_kind_not_executed(self):
         self.queue.add("image", "Generate image")
         with patch("workshop.worker.run_opencode") as runner:
