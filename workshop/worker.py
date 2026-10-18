@@ -48,15 +48,16 @@ def process_one(queue, *, allow_opencode=False, allow_comfyui=False):
                         or not Path(output_dir).is_absolute()):
                     raise ValueError("Image output saving requires an absolute payload.output_dir")
             submitted = submit_workflow(workflow, enabled=True)
+            # Reject malformed identifiers before any polling, downloads or report writes.
+            prompt_id = submitted.get("prompt_id") if isinstance(submitted, dict) else None
+            if not isinstance(prompt_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", prompt_id):
+                raise ValueError("Invalid ComfyUI prompt identifier")
             if payload.get("save_outputs") is True:
                 images = wait_for_images(submitted["prompt_id"], timeout=300)
                 files = download_images(images, base_url="http://127.0.0.1:8188",
                                         output_dir=output_dir)
                 report = {"prompt_id": submitted["prompt_id"], "state": "completed",
                           "files": files}
-                prompt_id = submitted["prompt_id"]
-                if not isinstance(prompt_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", prompt_id):
-                    raise ValueError("Invalid ComfyUI prompt identifier")
                 report_path = save_report(report, Path(output_dir) /
                                           ("report-" + prompt_id + ".json"))
                 result = {**report, "report_path": str(report_path)}
