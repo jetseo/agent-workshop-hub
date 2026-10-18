@@ -18,7 +18,7 @@ class DashboardTests(unittest.TestCase):
             data = bytes.fromhex("89504e470d0a1a0a") + b"test-image"
             image.write_bytes(data)
             queue = Queue(folder / "jobs.db")
-            job_id = queue.add("image", "Generate", {"workflow": "example.json"})
+            job_id = queue.add("image", "Generate", {"workflow": "example.json"}, require_approval=True)
             queue.authorize(job_id)
             queue.claim(kinds=["image"])
             queue.finish(job_id, {"files": [{"path": str(image),
