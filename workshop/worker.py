@@ -41,11 +41,13 @@ def process_one(queue, *, allow_opencode=False, allow_comfyui=False):
             workflow = payload.get("workflow")
             if not isinstance(workflow, str) or not workflow:
                 raise ValueError("Image job requires payload.workflow")
-            submitted = submit_workflow(workflow, enabled=True)
             if payload.get("save_outputs") is True:
                 output_dir = payload.get("output_dir")
-                if not isinstance(output_dir, str) or not output_dir.strip():
-                    raise ValueError("Image output saving requires payload.output_dir")
+                if (not isinstance(output_dir, str) or not output_dir.strip()
+                        or not Path(output_dir).is_absolute()):
+                    raise ValueError("Image output saving requires an absolute payload.output_dir")
+            submitted = submit_workflow(workflow, enabled=True)
+            if payload.get("save_outputs") is True:
                 images = wait_for_images(submitted["prompt_id"], timeout=300)
                 files = download_images(images, base_url="http://127.0.0.1:8188",
                                         output_dir=output_dir)
