@@ -53,6 +53,17 @@ class WorkerTests(unittest.TestCase):
             result = process_one(self.queue, allow_comfyui=True)
             submit.assert_not_called()
         self.assertEqual(result["state"], "failed")
+    def test_rejects_unsafe_comfyui_prompt_identifier(self):
+        self.queue.add('image', 'Render', {'workflow': 'workflow.json',
+                                           'save_outputs': True,
+                                           'output_dir': self.temp.name})
+        with patch('workshop.worker.submit_workflow', return_value={'prompt_id': '../outside'}), \
+             patch('workshop.worker.wait_for_images', return_value=[]), \
+             patch('workshop.worker.download_images', return_value=[]), \
+             patch('workshop.worker.save_report') as save:
+            result = process_one(self.queue, allow_comfyui=True)
+            save.assert_not_called()
+        self.assertEqual(result['state'], 'failed')
     def test_invalid_kind_not_executed(self):
         self.queue.add("image", "Generate image")
         with patch("workshop.worker.run_opencode") as runner:
