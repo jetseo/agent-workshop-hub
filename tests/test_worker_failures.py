@@ -20,6 +20,18 @@ class WorkerFailureTests(unittest.TestCase):
             self.assertEqual(queue.list()[0]["state"], "failed")
             self.assertIsNone(queue.claim(kinds=["code"]))
 
+    def test_interrupt_marks_job_failed_and_is_not_replayed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            queue = Queue(Path(directory) / "jobs.sqlite3")
+            queue.add("code", "Implement", {"workspace": directory})
+            with patch("workshop.worker.run_opencode", side_effect=KeyboardInterrupt):
+                with self.assertRaises(KeyboardInterrupt):
+                    process_one(queue, allow_opencode=True)
+            job = queue.list()[0]
+            self.assertEqual(job["state"], "failed")
+            self.assertIn("interrupted", job["result"])
+            self.assertIsNone(queue.claim(kinds=["code"]))
+
     def test_nonzero_exit_is_failure(self):
         with tempfile.TemporaryDirectory() as directory:
             queue = Queue(Path(directory) / "jobs.sqlite3")

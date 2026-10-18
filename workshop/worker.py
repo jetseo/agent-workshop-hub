@@ -2,6 +2,7 @@
 import argparse
 import json
 import re
+import signal
 import time
 from pathlib import Path
 from .queue import Queue
@@ -74,6 +75,15 @@ def process_one(queue, *, allow_opencode=False, allow_comfyui=False):
             return {"job_id": job["id"], "state": "failed", "result": result}
         state = queue.finish(job["id"], result, success=True)
         return {"job_id": job["id"], "state": state, "result": result}
+    except (KeyboardInterrupt, SystemExit):
+        # Interrupted mid-run: the side effects are unknown, so fail the job for
+        # explicit operator review instead of leaving it 'running' or replaying it.
+        try:
+            queue.finish(job["id"], {"error": "Worker interrupted during execution; "
+                                     "review side effects before re-queuing",
+                                     "type": "Interrupted"}, success=False)
+        finally:
+            raise
     except Exception as error:
         # Preserve the original executor failure even if persistence also fails.
         detail = {"error": str(error), "type": type(error).__name__}
@@ -101,6 +111,8 @@ def main():
     # running tasks failed when multiple processes share the same database.
     if args.recover_stale:
         print(json.dumps({"marked_failed": queue.recover()}), flush=True)
+    # Treat SIGTERM like Ctrl+C so interrupted jobs are marked failed, not left running.
+    signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))
     try:
         while True:
             outcome = process_one(queue, allow_opencode=args.allow_opencode,
