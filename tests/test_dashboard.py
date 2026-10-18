@@ -14,11 +14,11 @@ class DashboardTests(unittest.TestCase):
     def test_gallery_http_integration(self):
         with tempfile.TemporaryDirectory() as directory:
             folder = Path(directory)
-            image = folder / "render.png"
+            image = folder / "image-001-test.png"
             data = bytes.fromhex("89504e470d0a1a0a") + b"test-image"
             image.write_bytes(data)
             queue = Queue(folder / "jobs.db")
-            job_id = queue.add("image", "Generate", {"workflow": "example.json"}, require_approval=True)
+            job_id = queue.add("image", "Generate", {"workflow": "example.json", "output_dir": str(folder)}, require_approval=True)
             queue.authorize(job_id)
             queue.claim(kinds=["image"])
             queue.finish(job_id, {"files": [{"path": str(image),
@@ -58,9 +58,12 @@ class DashboardTests(unittest.TestCase):
 
     def test_gallery_only_for_reviewed_image_results(self):
         import json
-        item = {"path": str(Path.cwd().resolve() / "render.png"), "sha256": "a" * 64}
-        job = {"kind": "image", "state": "review", "result": json.dumps({"files": [item]})}
+        item = {"path": str(Path.cwd().resolve() / "image-001-test.png"), "sha256": "a" * 64}
+        job = {"kind": "image", "state": "review", "payload": json.dumps({"output_dir": str(Path.cwd().resolve())}), "result": json.dumps({"files": [item]})}
         self.assertEqual(len(gallery_files(job)), 1)
+        item["path"] = str(Path.cwd().resolve().parent / "image-001-test.png")
+        self.assertEqual(gallery_files(job), [])
+        item["path"] = str(Path.cwd().resolve() / "image-001-test.png")
         job["state"] = "queued"
         self.assertEqual(gallery_files(job), [])
         job["state"] = "review"
