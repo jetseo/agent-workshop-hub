@@ -75,7 +75,19 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
       - name: Runtime preflight
-        run: python -m workshop.preflight
+        shell: bash
+        run: |
+          mkdir -p test-results
+          python -m workshop.preflight 2>&1 | tee test-results/preflight.log
+          exit ${PIPESTATUS[0]}
+      - name: Upload preflight diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: preflight-diagnostics-${{ matrix.os }}-py${{ matrix.python }}
+          path: test-results/preflight.log
+          if-no-files-found: warn
+          retention-days: 14
   linux-bootstrap:
     runs-on: ubuntu-latest
     timeout-minutes: 10
