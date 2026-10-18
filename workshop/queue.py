@@ -1,5 +1,6 @@
 """SQLite task queue: state management only, never executes AI tools."""
 import json
+import time
 from contextlib import contextmanager
 import sqlite3
 import uuid
@@ -14,6 +15,10 @@ class Queue:
                 (id TEXT PRIMARY KEY, kind TEXT, title TEXT, state TEXT,
                  payload TEXT, attempts INTEGER DEFAULT 0, max_attempts INTEGER DEFAULT 2,
                  result TEXT)""")
+            # Additive migration for databases created before heartbeats existed.
+            columns = {row["name"] for row in db.execute("PRAGMA table_info(jobs)")}
+            if "heartbeat" not in columns:
+                db.execute("ALTER TABLE jobs ADD COLUMN heartbeat REAL")
 
     @contextmanager
     def _db(self):
@@ -57,8 +62,15 @@ class Queue:
                 row = db.execute("SELECT * FROM jobs WHERE state='queued' ORDER BY rowid LIMIT 1").fetchone()
             if row is None:
                 return None
-            db.execute("UPDATE jobs SET state='running', attempts=attempts+1 WHERE id=?", (row["id"],))
+            db.execute("UPDATE jobs SET state='running', attempts=attempts+1, heartbeat=? WHERE id=?",
+                       (time.time(), row["id"]))
             return dict(db.execute("SELECT * FROM jobs WHERE id=?", (row["id"],)).fetchone())
+
+    def heartbeat(self, job_id):
+        """Mark a running job as still owned by a live worker."""
+        with self._db() as db:
+            db.execute("UPDATE jobs SET heartbeat=? WHERE id=? AND state='running'",
+                       (time.time(), job_id))
 
     def defer(self, job_id):
         """Return an unexecuted job to the queue without consuming an attempt."""
@@ -97,7 +109,20 @@ class Queue:
         with self._db() as db:
             return [dict(row) for row in db.execute("SELECT * FROM jobs ORDER BY rowid")]
 
-    def recover(self):
-        """Never replay interrupted side-effecting tasks automatically."""
+    def recover(self, stale_after=None):
+        """Fail interrupted tasks; never replay them automatically.
+
+        With stale_after (seconds), only jobs whose worker stopped sending
+        heartbeats are failed, so a live worker sharing the database is safe.
+        Without it, every running job is failed (single-worker legacy mode).
+        """
+        message = json.dumps({"error": "Worker stopped before completion; review side effects before re-queuing",
+                              "type": "Stale"})
         with self._db() as db:
-            return db.execute("UPDATE jobs SET state='failed' WHERE state='running'").rowcount
+            if stale_after is None:
+                return db.execute("UPDATE jobs SET state='failed', result=? WHERE state='running'",
+                                  (message,)).rowcount
+            cutoff = time.time() - stale_after
+            return db.execute(
+                "UPDATE jobs SET state='failed', result=? WHERE state='running' "
+                "AND (heartbeat IS NULL OR heartbeat<?)", (message, cutoff)).rowcount
