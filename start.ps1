@@ -21,19 +21,19 @@ if ($DryRun) {
     return
 }
 if (-not (Get-Command wsl.exe -ErrorAction SilentlyContinue)) {
-    throw "WSL is required. Run install.ps1 first."
+    throw "wsl.exe was not found. Install WSL2 first: review with .\install.ps1 -DryRun, then run .\install.ps1 -InstallWSL from an administrator PowerShell (a reboot may be required)."
 }
 $distros = @(& wsl.exe --list --quiet 2>&1)
-if ($LASTEXITCODE -ne 0) { throw "Unable to query WSL distributions" }
+if ($LASTEXITCODE -ne 0) { throw "Unable to query WSL distributions (wsl.exe exit code $LASTEXITCODE). Run 'wsl --status' to check that WSL2 is enabled." }
 # wsl.exe output may contain NUL characters in Windows PowerShell.
 $names = @($distros | ForEach-Object { ($_ -replace [char]0, "").Trim() })
 if ($Distro -notin $names) {
-    throw "WSL distro '$Distro' not found. Installed: $($names -join ', ')"
+    throw "WSL distro '$Distro' not found. Installed: $($names -join ', '). Re-run with -Distro <name> or install it with 'wsl --install -d $Distro'."
 }
 $path = (Resolve-Path -LiteralPath $launcher).Path
 $wslPath = (& wsl.exe -d $Distro -- wslpath -a $path).Trim()
 if ($LASTEXITCODE -ne 0 -or -not $wslPath) {
-    throw "Could not resolve project path inside WSL"
+    throw "Could not convert '$path' to a WSL path in distro '$Distro'. Check that the distro starts ('wsl -d $Distro -- echo ok')."
 }
 $argsList = @("-d", $Distro, "--", "bash", $wslPath) + $flags
 Write-Host "Starting local Agent Workshop Hub (Ctrl+C to stop)."
