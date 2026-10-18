@@ -64,6 +64,26 @@ class WorkerTests(unittest.TestCase):
             result = process_one(self.queue, allow_comfyui=True)
             save.assert_not_called()
         self.assertEqual(result['state'], 'failed')
+    def test_invalid_prompt_id_stops_before_network_polling(self):
+        self.queue.add("image", "Render", {"workflow": "workflow.json",
+                                           "save_outputs": True,
+                                           "output_dir": self.temp.name})
+        with patch("workshop.worker.submit_workflow", return_value={"prompt_id": "../escape"}), \
+             patch("workshop.worker.wait_for_images") as poll, \
+             patch("workshop.worker.download_images") as download:
+            result = process_one(self.queue, allow_comfyui=True)
+            poll.assert_not_called()
+            download.assert_not_called()
+        self.assertEqual(result["state"], "failed")
+
+    def test_invalid_prompt_id_without_save_outputs(self):
+        self.queue.add("image", "Render", {"workflow": "workflow.json"})
+        with patch("workshop.worker.submit_workflow", return_value={"prompt_id": None}), \
+             patch("workshop.worker.wait_for_completion") as poll:
+            result = process_one(self.queue, allow_comfyui=True)
+            poll.assert_not_called()
+        self.assertEqual(result["state"], "failed")
+
     def test_invalid_kind_not_executed(self):
         self.queue.add("image", "Generate image")
         with patch("workshop.worker.run_opencode") as runner:
