@@ -94,12 +94,18 @@ jobs:
           mkdir -p test-results
           python -m workshop.preflight 2>&1 | tee test-results/preflight.log
           exit ${PIPESTATUS[0]}
+      - name: Offline integration diagnostics
+        shell: bash
+        run: |
+          mkdir -p test-results
+          python -m workshop.diagnostics --json --no-services > test-results/diagnostics.json
+          python -m json.tool test-results/diagnostics.json
       - name: Upload preflight diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: preflight-diagnostics-${{ matrix.os }}-py${{ matrix.python }}
-          path: test-results/preflight.log
+          path: test-results/
           if-no-files-found: warn
           retention-days: 14
   linux-bootstrap:
