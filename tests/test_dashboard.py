@@ -32,6 +32,10 @@ class DashboardTests(unittest.TestCase):
                 with urllib.request.urlopen(base + "/") as response:
                     page = response.read().decode()
                 self.assertIn("Generated image", page)
+                with urllib.request.urlopen(base + "/") as response:
+                    policy = response.headers["Content-Security-Policy"]
+                    self.assertIn("img-src", policy)
+                    self.assertIn("form-action", policy)
                 url = (base + "/image?id=" + job_id + "&index=0&sig=" +
                        gallery_signature(token, job_id, 0))
                 with urllib.request.urlopen(url) as response:
