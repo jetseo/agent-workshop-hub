@@ -107,6 +107,20 @@ class DashboardTests(unittest.TestCase):
         job["kind"] = "code"
         self.assertEqual(gallery_files(job), [])
 
+    def test_gallery_rejects_missing_or_invalid_output_directory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            image = Path(directory) / 'image-001-test.png'
+            item = {'path': str(image), 'sha256': 'a' * 64}
+            job = {'kind': 'image', 'state': 'review',
+                   'result': json.dumps({'files': [item]})}
+            self.assertEqual(gallery_files(job), [])
+            job['payload'] = json.dumps({'output_dir': 'relative/path'})
+            self.assertEqual(gallery_files(job), [])
+            job['payload'] = json.dumps({'output_dir': directory})
+            self.assertEqual(len(gallery_files(job)), 1)
+            item['path'] = str(Path(directory) / 'other.png')
+            job['result'] = json.dumps({'files': [item]})
+            self.assertEqual(gallery_files(job), [])
     def test_gallery_signature_scoped_to_job_and_index(self):
         self.assertNotEqual(gallery_signature("token", "a", 0),
                             gallery_signature("token", "a", 1))
