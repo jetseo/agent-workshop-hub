@@ -34,3 +34,14 @@ class DiagnosticsTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class HintTests(unittest.TestCase):
+    def test_failed_optional_checks_carry_hints_and_survive_legacy_encoding(self):
+        import os, subprocess, sys
+        env = {**os.environ, "PYTHONIOENCODING": "cp1252"}
+        env.pop("PYTHONUTF8", None)
+        out = subprocess.run([sys.executable, "-m", "workshop.diagnostics", "--no-services"],
+                             capture_output=True, env=env, check=False)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertNotIn(b"UnicodeEncodeError", out.stderr)
