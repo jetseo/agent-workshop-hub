@@ -61,7 +61,19 @@ jobs:
       - name: Compile modules
         run: python -m compileall -q workshop tests
       - name: Unit and local HTTP integration tests
-        run: python -m unittest discover -s tests -v
+        shell: bash
+        run: |
+          mkdir -p test-results
+          python -m unittest discover -s tests -v 2>&1 | tee test-results/unittest.log
+          exit ${PIPESTATUS[0]}
+      - name: Upload Python test diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-diagnostics-${{ matrix.os }}-py${{ matrix.python }}
+          path: test-results/
+          if-no-files-found: warn
+          retention-days: 14
       - name: Runtime preflight
         run: python -m workshop.preflight
   linux-bootstrap:
