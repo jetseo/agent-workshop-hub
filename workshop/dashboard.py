@@ -40,6 +40,11 @@ def gallery_files(job):
     if not job or job["kind"] != "image" or job["state"] not in ("review", "done"):
         return []
     try:
+        payload = json.loads(job.get("payload") or "{}")
+        output_dir = payload.get("output_dir")
+        if not isinstance(output_dir, str) or not Path(output_dir).is_absolute():
+            return []
+        root = Path(output_dir).resolve()
         files = json.loads(job.get("result") or "{}").get("files", [])
         if not isinstance(files, list):
             return []
@@ -50,6 +55,8 @@ def gallery_files(job):
             path, digest = item.get("path"), item.get("sha256")
             if (isinstance(path, str) and Path(path).is_absolute()
                     and Path(path).suffix.lower() in (".png", ".jpg", ".webp")
+                    and Path(path).resolve().parent == root
+                    and Path(path).name.startswith("image-")
                     and isinstance(digest, str) and len(digest) == 64
                     and all(c in "0123456789abcdefABCDEF" for c in digest)):
                 valid.append((Path(path), digest))
