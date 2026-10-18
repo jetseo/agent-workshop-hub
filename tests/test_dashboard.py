@@ -58,7 +58,7 @@ class DashboardTests(unittest.TestCase):
 
     def test_gallery_only_for_reviewed_image_results(self):
         import json
-        item = {"path": "/tmp/render.png", "sha256": "a" * 64}
+        item = {"path": str(Path.cwd().resolve() / "render.png"), "sha256": "a" * 64}
         job = {"kind": "image", "state": "review", "result": json.dumps({"files": [item]})}
         self.assertEqual(len(gallery_files(job)), 1)
         job["state"] = "queued"
