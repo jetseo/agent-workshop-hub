@@ -1,6 +1,7 @@
 """Single-job opt-in worker. No automatic retries of side-effecting commands."""
 import argparse
 import json
+import re
 import time
 from pathlib import Path
 from .queue import Queue
@@ -53,8 +54,11 @@ def process_one(queue, *, allow_opencode=False, allow_comfyui=False):
                                         output_dir=output_dir)
                 report = {"prompt_id": submitted["prompt_id"], "state": "completed",
                           "files": files}
+                prompt_id = submitted["prompt_id"]
+                if not isinstance(prompt_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", prompt_id):
+                    raise ValueError("Invalid ComfyUI prompt identifier")
                 report_path = save_report(report, Path(output_dir) /
-                                          ("report-" + submitted["prompt_id"] + ".json"))
+                                          ("report-" + prompt_id + ".json"))
                 result = {**report, "report_path": str(report_path)}
             else:
                 result = wait_for_completion(submitted["prompt_id"], max_wait=300)
