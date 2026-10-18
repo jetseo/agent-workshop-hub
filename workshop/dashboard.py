@@ -25,16 +25,20 @@ input{width:min(440px,85%)}button{cursor:pointer;background:#2563eb;border:0}
 small{color:#9ca3af} .tag{color:#93c5fd}
 </style></head><body>
 <h1>Agent Workshop Hub</h1>
-<p>Local task dashboard · A separately enabled worker executes queued tasks.</p>
-<section><h2>Add task</h2><form method="post" action="/add">
+<p>Local task dashboard · A separately enabled worker executes queued tasks.<br>로컬 작업 대시보드 · 작업은 별도로 허용한 워커만 실행합니다.</p>
+<section><h2>Add task / 작업 추가</h2><form method="post" action="/add">
 <input type="hidden" name="token" value="__TOKEN__">
 <select name="kind"><option>plan</option><option>code</option><option>image</option><option>qa</option></select>
 <input name="title" placeholder="Describe a task" required maxlength="500">
 <input name="resource" placeholder="Code: absolute worktree path / Image: workflow JSON path" maxlength="2000">
 <label>Image output directory (optional) <input name="output_dir" placeholder="Absolute directory for generated images" maxlength="2000"></label>
-<button>Add</button></form></section>
-<h2>Tasks</h2>__JOBS__
+<button>Add / 추가</button></form></section>
+<h2>Tasks / 작업 목록</h2>__JOBS__
 </body></html>"""
+
+STATE_KO = {"pending_approval": " (실행 승인 대기)", "queued": " (대기 중)",
+            "running": " (실행 중)", "review": " (결과 검토 대기)",
+            "done": " (완료)", "failed": " (실패 · 부수효과 확인 후 다시 추가)"}
 
 def gallery_files(job):
     if not job or job["kind"] != "image" or job["state"] not in ("review", "done"):
@@ -156,12 +160,12 @@ def make_handler(queue, token):
                     approve = ('<form method="post" action="/authorize">'
                                '<input type="hidden" name="token" value="' + token + '">'
                                '<input type="hidden" name="id" value="' + html.escape(job["id"]) + '">'
-                               '<button>Authorize execution</button></form>')
+                               '<button>Authorize execution / 실행 승인</button></form>')
                 if job["state"] == "review":
                     approve = ('<form method="post" action="/approve">'
                                '<input type="hidden" name="token" value="' + token + '">'
                                '<input type="hidden" name="id" value="' + html.escape(job["id"]) + '">'
-                               '<button>Approve</button></form>')
+                               '<button>Approve / 결과 승인</button></form>')
                 detail = ""
                 if job["kind"] == "image" and job["state"] in ("review", "done", "failed"):
                     try:
@@ -181,9 +185,9 @@ def make_handler(queue, token):
                 if gallery:
                     detail += '<div class="gallery">' + gallery + '</div>'
                 cards.append('<div class="job"><div><strong>' + name + '</strong><br>'
-                             '<small>' + kind + ' · <span class="tag">' + state + '</span></small></div>'
+                             '<small>' + kind + ' · <span class="tag">' + state + STATE_KO.get(job["state"], "") + '</span></small></div>'
                              + detail + approve + '</div>')
-            page = PAGE.replace("__TOKEN__", token).replace("__JOBS__", "".join(cards) or "<p>No tasks yet.</p>")
+            page = PAGE.replace("__TOKEN__", token).replace("__JOBS__", "".join(cards) or "<p>No tasks yet. / 아직 작업이 없습니다.</p>")
             self._send(200, page)
 
         def do_POST(self):
