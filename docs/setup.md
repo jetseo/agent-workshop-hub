@@ -101,3 +101,8 @@ The local dashboard at `http://127.0.0.1:8787/` now accepts an optional absolute
 ### Local image gallery
 
 The dashboard shows up to 24 image previews for image tasks in review or done state. The layout adapts to narrow mobile screens. Each image URL is scoped to the job and signed; file bytes are checked against the recorded SHA-256 before delivery. The gallery is available only on the local dashboard. Run `python -m unittest discover -s tests -v` to exercise HTTP gallery tests.
+
+
+### CI diagnostics
+
+The validation workflow uploads unittest and runtime preflight logs for Windows and Ubuntu, Python 3.11 and 3.12. Open the GitHub Actions run, select the relevant job, and download the diagnostics artifact. Logs are retained for 14 days. The workflow preserves failing test exit codes, so a captured log does not conceal test failures.
