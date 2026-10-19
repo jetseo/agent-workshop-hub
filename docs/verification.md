@@ -14,7 +14,16 @@
 | `opencode run --model opencode/glm-5.3-flash-free` (짧은 프롬프트) | 사용자 PC, WSL에서 호출한 **Windows `opencode.exe`**(interop) | 응답 `ok` | 2026-10-19. **WSL 네이티브 OpenCode 아님.** 배너 `> Sisyphus - ultraworker · 모델` 출력 |
 | `onboard models` free/paid 분류 | 사용자 PC, WSL (Windows `opencode.exe` 경유) | free 9, local 0, paid 99 | 분류 로직 확인용. WSL 네이티브 OpenCode 기준은 아님 |
 | Ollama 연동 | 사용자 PC | **미검증** | OpenCode에 ollama 모델 없음 |
-| 보드 E2E (실제 모델) | 사용자 PC | **실패/중단** (1차: Windows exe 경유로 `plan` 무응답) | WSL 네이티브 설치 후 재시도 필요 |
+| 보드 E2E (실제 모델), 1차 | 사용자 PC (Windows exe 경유) | 실패/중단 (`plan` 무응답) | 원인은 확정 못함. WSL 네이티브로 재시도 필요 |
+
+## WSL 네이티브 OpenCode 검증 (2026-10-19, 사용자 PC)
+| 항목 | 결과 | 비고 |
+|---|---|---|
+| WSL 안 OpenCode 설치 (nvm Node 22 + `npm i -g opencode-ai`) | 통과 | 1.19.3, `/home/jetseo/.nvm/versions/node/v22.23.3/bin/opencode` |
+| `opencode auth login` (WSL 전용 자격 증명) | 통과 | `OpenCode api` 1개 |
+| `onboard models` | 통과 | free 9, local 0, paid 75 |
+| `opencode run --model opencode/glm-5.3-flash-free` (빈 git 폴더, `< /dev/null`) | **통과** | 응답 `ok`, 15.3초, 기본 에이전트 `build` |
+| 보드 E2E (`examples/board-spec.free.json`) | **미검증** | 다음 단계 |
 
 ## 발견된 문제 (2026-10-19)
 - WSL의 PATH에 Windows 경로가 붙어 `opencode`가 `/mnt/c/.../opencode.exe`로 해석됨. 보드의 텍스트 단계(긴 한국어 여러 줄 프롬프트, Linux 임시 cwd)가 이 경로로 실행되어 `plan` 단계가 3분 이상 응답 없이 `running`에 머묾.
