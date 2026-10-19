@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Explicit opt-in Node.js prerequisite setup for OpenCode on Ubuntu/WSL.
-set -euo pipefail
+set -Eeuo pipefail
+trap 'echo "install-node.sh: command failed at line $LINENO: $BASH_COMMAND" >&2' ERR
 # WSL appends the Windows PATH. Windows binaries (node, npm, opencode.exe) must never be
 # mistaken for Linux ones, so drop /mnt/<drive>/ entries for this script.
 PATH="$(printf '%s' "$PATH" | tr ':' '\n' | grep -v '^/mnt/[a-zA-Z]/' | paste -sd: -)"
@@ -48,7 +49,9 @@ if ! command -v apt-get >/dev/null 2>&1; then
 fi
 echo "Checking Ubuntu package candidate before installing."
 sudo apt-get update
-candidate="$(apt-cache policy nodejs | awk '/Candidate:/ {print $2; exit}')"
+policy_output="$(apt-cache policy nodejs 2>&1 || true)"
+# No early-exit awk: avoids SIGPIPE turning a successful lookup into a silent failure.
+candidate="$(awk '/Candidate:/ && !seen {print $2; seen=1}' <<<"$policy_output")"
 candidate_major="$(printf '%s' "$candidate" | sed -nE 's/^([0-9]+:)?([0-9]+)\..*/\2/p')"
 if [[ -z "$candidate_major" ]] || (( candidate_major < MIN_NODE_MAJOR )); then
   echo "Ubuntu nodejs candidate '$candidate' does not meet Node.js >= ${MIN_NODE_MAJOR}." >&2

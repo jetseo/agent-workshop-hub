@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Explicit, opt-in OpenCode installation using the published npm package.
-set -euo pipefail
+set -Eeuo pipefail
+trap 'echo "install-opencode.sh: command failed at line $LINENO: $BASH_COMMAND" >&2' ERR
 # WSL appends the Windows PATH. Windows binaries (node, npm, opencode.exe) must never be
 # mistaken for Linux ones, so drop /mnt/<drive>/ entries for this script.
 PATH="$(printf '%s' "$PATH" | tr ':' '\n' | grep -v '^/mnt/[a-zA-Z]/' | paste -sd: -)"
