@@ -59,17 +59,20 @@ class Board:
         _atomic_write(self.state_path, json.dumps(state, ensure_ascii=False, indent=2))
         _atomic_write(self.folder / "board.md", self._render(state))
 
-    def add_step(self, step_id, model, depends_on=(), prompt=""):
+    def add_step(self, step_id, model, depends_on=(), prompt="", kind="text", workspace=None):
         state = self._load()
         if not STEP_ID.fullmatch(step_id or ""):
             raise ValueError("Invalid step id")
+        if kind not in ("text", "code"):
+            raise ValueError("Invalid step kind")
         if step_id in state["steps"]:
             raise ValueError("Duplicate step id")
         for dep in depends_on:
             if dep not in state["steps"]:
                 raise ValueError("Unknown dependency: " + dep)
         state["steps"][step_id] = {"model": model, "depends_on": list(depends_on),
-                                   "prompt": prompt, "status": "pending", "merged": False}
+                                   "prompt": prompt, "status": "pending", "merged": False,
+                                   "kind": kind, "workspace": workspace}
         self._save(state)
 
     def set_status(self, step_id, status):
@@ -78,6 +81,9 @@ class Board:
         state = self._load()
         state["steps"][step_id]["status"] = status
         self._save(state)
+
+    def steps(self):
+        return self._load()["steps"]
 
     def ready_steps(self):
         """Pending steps whose dependencies are all done and merged; may run in parallel."""
@@ -134,7 +140,7 @@ class Board:
         lines += ["## 계획 / Steps", ""]
         for sid, s in state["steps"].items():
             deps = ", ".join(s["depends_on"]) or "-"
-            lines.append("- `" + sid + "` [" + s["status"] + "] model=" + str(s["model"]) + " depends_on=" + deps)
+            lines.append("- `" + sid + "` [" + s["status"] + "] " + s.get("kind", "text") + " model=" + str(s["model"]) + " depends_on=" + deps)
         lines += ["", "## 공유 컨텍스트 / Shared context"]
         lines += ["- (" + c["author"] + ") " + c["note"] for c in state["context"]] or ["(none)"]
         lines += ["", "## 단계별 산출물 / Step outputs"]

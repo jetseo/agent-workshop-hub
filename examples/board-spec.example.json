@@ -1,0 +1,11 @@
+{
+  "title": "예시: 기획 → 병렬 검토 → 종합",
+  "goal": "README 개선안을 작성한다",
+  "constraints": "외부로 코드를 보내지 않는다",
+  "steps": [
+    {"id": "plan", "model": "ollama/qwen2.5-coder:7b", "prompt": "개선안 초안을 작성하라"},
+    {"id": "review-a", "model": "ollama/qwen2.5-coder:7b", "depends_on": ["plan"], "prompt": "초안의 문제점을 지적하라"},
+    {"id": "review-b", "model": "ollama/qwen2.5-coder:7b", "depends_on": ["plan"], "prompt": "초안의 누락을 지적하라"},
+    {"id": "final", "model": "ollama/qwen2.5-coder:7b", "depends_on": ["review-a", "review-b"], "prompt": "검토를 반영해 최종안을 작성하라"}
+  ]
+}

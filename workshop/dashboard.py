@@ -3,6 +3,7 @@ import argparse
 import html
 import json
 import os
+import re
 import secrets
 import hashlib
 import hmac
@@ -33,7 +34,7 @@ small{color:#9ca3af} .tag{color:#93c5fd}
 <input name="resource" placeholder="Code: absolute worktree path / Image: workflow JSON path" maxlength="2000">
 <label>Image output directory (optional) <input name="output_dir" placeholder="Absolute directory for generated images" maxlength="2000"></label>
 <button>Add / 추가</button></form></section>
-<h2>Tasks / 작업 목록</h2>__JOBS__
+<h2>Tasks / 작업 목록</h2><p><a href="/boards" style="color:#93c5fd">Boards / 멀티 모델 보드 →</a></p>__JOBS__
 </body></html>"""
 
 STATE_KO = {"pending_approval": " (실행 승인 대기)", "queued": " (대기 중)",
@@ -73,7 +74,8 @@ def gallery_signature(token, job_id, index):
     return hmac.new(token.encode(), f"{job_id}:{index}".encode(), hashlib.sha256).hexdigest()
 
 
-def make_handler(queue, token):
+def make_handler(queue, token, boards_root=None):
+    boards_root = boards_root or str(Path.home() / ".agent-workshop" / "boards")
     class Handler(BaseHTTPRequestHandler):
         def _trusted_host(self):
             host = self.headers.get("Host", "")
@@ -146,7 +148,26 @@ def make_handler(queue, token):
                 ]
                 self._send(200, json.dumps(public_jobs), "application/json; charset=utf-8")
                 return
-            if urlsplit(self.path).path != "/":
+            route = urlsplit(self.path).path
+            if route in ("/boards", "/board"):
+                # Read-only view of shared boards; running models stays in the CLI/worker.
+                root = Path(boards_root)
+                if route == "/boards":
+                    ids = sorted((d.name for d in root.glob("*") if (d / "board.md").is_file()), reverse=True) if root.is_dir() else []
+                    items = "".join('<li><a href="/board?id=' + quote(i) + '">' + html.escape(i) + '</a></li>' for i in ids)
+                    self._send(200, '<!doctype html><html lang="ko"><meta charset="utf-8"><body style="font-family:sans-serif;background:#111827;color:#e5e7eb;max-width:900px;margin:30px auto">'
+                               '<h1>Boards / 보드</h1><a href="/" style="color:#93c5fd">← Tasks</a><ul>' + (items or "<li>No boards yet. / 보드가 없습니다.</li>") + '</ul></body></html>')
+                    return
+                board_id = parse_qs(urlsplit(self.path).query).get("id", [""])[0]
+                target = root / board_id / "board.md"
+                if not re.fullmatch(r"[0-9a-f-]{36}", board_id) or not target.is_file():
+                    self._send(404, "Not found", "text/plain")
+                    return
+                self._send(200, '<!doctype html><html lang="ko"><meta charset="utf-8"><body style="font-family:sans-serif;background:#111827;color:#e5e7eb;max-width:900px;margin:30px auto">'
+                           '<a href="/boards" style="color:#93c5fd">← Boards</a><pre style="white-space:pre-wrap;overflow-wrap:anywhere">' +
+                           html.escape(target.read_text(encoding="utf-8")[:200000]) + '</pre></body></html>')
+                return
+            if route != "/":
                 self._send(404, "Not found", "text/plain")
                 return
             jobs = queue.list()
