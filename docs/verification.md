@@ -9,7 +9,7 @@
 | 오프라인 진단 | 클라우드(Linux) | 통과 | `--no-services` |
 | WSL2 설치/복구 | 사용자 PC (Windows) | 복구 후 설치 완료 | 최초 `REGDB_E_CLASSNOTREG`, 가상화 비활성이었음 |
 | OpenCode 설치 | 사용자 PC, Windows 및 WSL | 1.19.3 확인 | Windows·WSL 각각 별도 설치/로그인 |
-| GitHub Actions (Linux/Windows) | GitHub | **미확인** | 푸시만 함 |
+| GitHub Actions (Linux/Windows) | GitHub | **통과** (커밋 `85ba1af`, push 및 PR #1 실행) | 5개 작업 모두 success: ubuntu/windows × Py3.11/3.12 + linux-bootstrap. Windows 러너에서 PowerShell 문법·dry-run·단위 테스트(실제 git worktree 테스트 포함)·`Offline integration diagnostics` 통과. Windows **실기기**가 아닌 GitHub 러너 결과 |
 | `start.ps1` 실행 / WSL 경로 변환 | 사용자 PC | **미검증** | |
 | `opencode run --model opencode/glm-5.3-flash-free` (짧은 프롬프트) | 사용자 PC, WSL에서 호출한 **Windows `opencode.exe`**(interop) | 응답 `ok` | 2026-10-19. **WSL 네이티브 OpenCode 아님.** 배너 `> Sisyphus - ultraworker · 모델` 출력 |
 | `onboard models` free/paid 분류 | 사용자 PC, WSL (Windows `opencode.exe` 경유) | free 9, local 0, paid 99 | 분류 로직 확인용. WSL 네이티브 OpenCode 기준은 아님 |
