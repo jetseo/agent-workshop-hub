@@ -126,3 +126,14 @@ class BoardPageTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ProgressTests(Fixture):
+    def test_progress_reports_start_done_and_failure(self):
+        board = self.board([{"id": "a", "model": "loc/m"}, {"id": "b", "model": "nope/m"}])
+        lines = []
+        run_board(board, self.providers, text_fn=lambda *a: "x", progress=lines.append)
+        text = "\n".join(lines)
+        self.assertIn("[start] a", text)
+        self.assertIn("[done]  a", text)
+        self.assertIn("[FAIL]  b", text)

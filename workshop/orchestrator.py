@@ -6,7 +6,9 @@ Spec file (JSON): {"title","goal","constraints","steps":[{"id","kind":"text|code
 import argparse
 import json
 import subprocess
+import sys
 import tempfile
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -95,11 +97,12 @@ def _run_step(board, sid, step, providers, flags, text_fn, code_fn):
 
 
 def run_board(board, providers, *, allow_opencode=False, allow_cloud=False, allow_may_train=False,
-              allow_paid=False, approve_text_agents=False, approved_code=(), max_parallel=2, text_fn=chat, code_fn=run_opencode):
+              allow_paid=False, approve_text_agents=False, approved_code=(), max_parallel=2, text_fn=chat, code_fn=run_opencode, progress=None):
     flags = {"allow_opencode": allow_opencode, "allow_cloud": allow_cloud,
              "allow_may_train": allow_may_train, "allow_paid": allow_paid, "approve_text_agents": approve_text_agents,
              "approved_code": set(approved_code)}
     errors = {}
+    say = progress or (lambda message: None)
     with ThreadPoolExecutor(max_workers=max(1, max_parallel)) as pool:
         while True:
             ready = board.ready_steps()
@@ -108,15 +111,19 @@ def run_board(board, providers, *, allow_opencode=False, allow_cloud=False, allo
             steps = board.steps()
             for sid in ready:
                 board.set_status(sid, "running")
+                say("[start] " + sid + "  (" + steps[sid]["model"] + ")")
+            started = time.time()
             futures = {sid: pool.submit(_run_step, board, sid, steps[sid], providers, flags, text_fn, code_fn)
                        for sid in ready}
             for sid, future in futures.items():
                 try:
                     board.write_step_output(sid, future.result())
                     board.merge_step(sid)  # single writer: only this loop merges
+                    say("[done]  " + sid + "  " + str(int(time.time() - started)) + "s")
                 except Exception as error:
                     errors[sid] = type(error).__name__ + ": " + str(error)[:300]
                     board.set_status(sid, "failed")
+                    say("[FAIL]  " + sid + "  " + errors[sid])
     steps = board.steps()
     return {"done": [s for s, v in steps.items() if v["status"] == "done"],
             "failed": errors,
@@ -146,7 +153,8 @@ def main(argv=None):
     summary = run_board(board, Providers(), allow_opencode=args.allow_opencode,
                         allow_cloud=args.allow_cloud, allow_may_train=args.allow_may_train,
                         allow_paid=args.allow_paid_models,
-                        approve_text_agents=args.approve_text_agents, approved_code=args.approve_code, max_parallel=args.max_parallel)
+                        approve_text_agents=args.approve_text_agents, approved_code=args.approve_code, max_parallel=args.max_parallel,
+                        progress=lambda m: print(m, file=sys.stderr, flush=True))
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     return 0 if not summary["failed"] and not summary["blocked"] else 1
 
