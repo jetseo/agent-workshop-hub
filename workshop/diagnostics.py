@@ -49,7 +49,7 @@ def _queue_self_test():
 # Actionable next steps for failed checks (Korean, with the command to run).
 HINTS = {
     "git": "git이 필요합니다. Ubuntu(WSL): sudo apt install git",
-    "opencode": "선택 사항: scripts/install-opencode.sh --dry-run 으로 설치 절차를 먼저 확인하세요.",
+    "opencode": "WSL 안에 설치되지 않았거나 Windows용만 보입니다. bash scripts/install-opencode.sh --dry-run 으로 절차를 확인한 뒤 설치하세요.",
     "ollama": "선택 사항: Windows에서 .\\scripts\\ollama.ps1 -DryRun 으로 확인하세요.",
     "ollama_api": "Ollama가 꺼져 있습니다. 'ollama serve' 실행 후 다시 확인하세요 (127.0.0.1:11434).",
     "comfyui_api": "ComfyUI가 꺼져 있습니다. scripts/start-comfyui.ps1 로 시작 후 다시 확인하세요 (127.0.0.1:8188).",

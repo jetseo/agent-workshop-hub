@@ -23,6 +23,18 @@ def ollama_models(base_url="http://127.0.0.1:11434", timeout=3):
 
 MODEL_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._:/@-]*")
 
+def find_opencode():
+    """Path of a Linux/native opencode, or None.
+
+    Under WSL, the Windows PATH exposes Windows installs (/mnt/c/.../opencode.exe). Running those
+    from a Linux cwd hangs or mangles arguments and uses Windows credentials, so they are refused
+    unless WORKSHOP_ALLOW_WINDOWS_OPENCODE=1.
+    """
+    binary = shutil.which("opencode")
+    if binary and binary.startswith("/mnt/") and os.environ.get("WORKSHOP_ALLOW_WINDOWS_OPENCODE") != "1":
+        return None
+    return binary
+
 def run_opencode(prompt, workspace, *, enabled=False, timeout=600, model=None):
     """Execute a single explicitly enabled OpenCode run in an existing worktree.
 
@@ -31,8 +43,12 @@ def run_opencode(prompt, workspace, *, enabled=False, timeout=600, model=None):
     """
     if not enabled:
         raise PermissionError("OpenCode execution requires explicit opt-in")
-    binary = shutil.which("opencode")
+    binary = find_opencode()
     if binary is None:
+        found = shutil.which("opencode")
+        if found and found.startswith("/mnt/"):
+            raise FileNotFoundError("Only a Windows OpenCode was found (" + found + "). Install OpenCode "
+                                    "inside WSL: bash scripts/install-opencode.sh")
         raise FileNotFoundError("OpenCode executable is not installed")
     directory = Path(workspace).expanduser().resolve(strict=True)
     if not directory.is_dir():

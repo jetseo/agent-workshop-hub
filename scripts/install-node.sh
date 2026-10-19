@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # Explicit opt-in Node.js prerequisite setup for OpenCode on Ubuntu/WSL.
 set -euo pipefail
+# WSL appends the Windows PATH. Windows binaries (node, npm, opencode.exe) must never be
+# mistaken for Linux ones, so drop /mnt/<drive>/ entries for this script.
+PATH="$(printf '%s' "$PATH" | tr ':' '\n' | grep -v '^/mnt/[a-zA-Z]/' | paste -sd: -)"
+export PATH
 DRY_RUN=0
 USE_NVM=0
 for arg in "$@"; do

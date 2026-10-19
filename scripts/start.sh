@@ -2,6 +2,10 @@
 # Start the local dashboard and optionally an explicitly approved worker.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+# WSL appends the Windows PATH. Windows binaries (node, npm, opencode.exe) must never be
+# mistaken for Linux ones, so drop /mnt/<drive>/ entries for this script.
+PATH="$(printf '%s' "$PATH" | tr ':' '\n' | grep -v '^/mnt/[a-zA-Z]/' | paste -sd: -)"
+export PATH
 PORT=8787
 ALLOW_OPENCODE=0
 ALLOW_COMFYUI=0

@@ -100,3 +100,23 @@ class OpenCodeModelTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WindowsInteropTests(unittest.TestCase):
+    def test_windows_opencode_is_refused_under_wsl(self):
+        import os
+        win = "/mnt/c/Users/x/AppData/Roaming/npm/node_modules/opencode-ai/bin/opencode.exe"
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / ".git").mkdir()
+            with patch("workshop.adapters.shutil.which", return_value=win), \
+                 patch.dict(os.environ, {}, clear=False):
+                os.environ.pop("WORKSHOP_ALLOW_WINDOWS_OPENCODE", None)
+                self.assertIsNone(adapters.find_opencode())
+                with self.assertRaises(FileNotFoundError) as ctx:
+                    adapters.run_opencode("hi", d, enabled=True)
+                self.assertIn("install-opencode.sh", str(ctx.exception))
+            done = MagicMock(returncode=0, stdout="", stderr="")
+            with patch("workshop.adapters.shutil.which", return_value=win), \
+                 patch.dict(os.environ, {"WORKSHOP_ALLOW_WINDOWS_OPENCODE": "1"}), \
+                 patch("workshop.adapters.subprocess.run", return_value=done):
+                self.assertEqual(adapters.find_opencode(), win)

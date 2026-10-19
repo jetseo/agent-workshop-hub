@@ -12,13 +12,14 @@ import shutil
 import subprocess
 import sys
 
+from .adapters import find_opencode
 from .chat import chat
 from .modelpolicy import parse_models_output
 from .providers import Providers, POLICIES
 
 
 def _opencode(args):
-    binary = shutil.which("opencode")
+    binary = find_opencode()
     if binary is None:
         return None
     done = subprocess.run([binary, *args], capture_output=True, text=True, timeout=30, check=False)
