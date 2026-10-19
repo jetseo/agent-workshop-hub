@@ -36,7 +36,7 @@ class PolicyTests(unittest.TestCase):
                 board = create_board(Path(d) / "b", {"title": "T", "goal": "G", "steps": [
                     {"id": "c", "kind": "code", "model": model, "workspace": d}]})
                 return run_board(board, Providers(Path(d) / "p.json"), allow_opencode=True,
-                                 allow_cloud=True, allow_may_train=True,
+                                 allow_cloud=True, allow_may_train=True, allow_main_checkout=True,
                                  approved_code=["c"], code_fn=code, **flags)
             self.assertIn("--allow-paid-models", run("openai/gpt-5.4")["failed"]["c"])
             self.assertEqual(calls, [])

@@ -66,7 +66,8 @@ class OrchestratorTests(Fixture):
         self.assertIn("approval", s["failed"]["c"])
         s = run_board(self.board(spec), self.providers, approved_code=["c"], code_fn=code)
         self.assertIn("--allow-opencode", s["failed"]["c"])
-        s = run_board(self.board(spec), self.providers, approved_code=["c"], allow_opencode=True, code_fn=code)
+        s = run_board(self.board(spec), self.providers, approved_code=["c"], allow_opencode=True,
+                      allow_main_checkout=True, code_fn=code)
         self.assertEqual(len(calls), 1)  # failed once, not retried
         self.assertIn("exited", s["failed"]["c"])
 

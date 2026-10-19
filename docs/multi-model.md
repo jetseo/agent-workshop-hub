@@ -50,3 +50,20 @@ python3 -m workshop.orchestrator --resume ~/.agent-workshop/boards/<보드-id> -
 - 기준 폴더는 `--context-root`(기본: 현재 폴더)이며 그 밖의 경로, 심볼릭 링크, 비밀로 보이는 이름(`.env`, `auth.json`, 키/토큰/DB 파일 등)은 거부합니다.
 - 최대 10개, 파일당 40KB, 합계 100KB. 프롬프트가 길면 참조 파일부터 잘립니다.
 - 이 내용은 클라우드 모델에 전송됩니다. 민감한 파일은 지정하지 마세요.
+
+## 코드 단계 (일회용 worktree)
+코드 단계는 명세에 `"repo": "."`처럼 저장소를 지정하면 **일회용 worktree와 브랜치**(`workshop/<보드앞8자>-<단계>`, 위치 `~/.agent-workshop/worktrees/<보드>/<단계>`)를 HEAD에서 만들어 거기서만 OpenCode를 실행합니다.
+실행 후 변경 내용(stat + diff)이 보드 산출물에 들어가므로 다음 텍스트 단계가 검토할 수 있습니다. **커밋·푸시·병합은 하지 않습니다.**
+
+필요한 조건(모두 있어야 실행): `--allow-opencode`, `--approve-code <단계-id>`, 클라우드 모델이면 `--allow-cloud --allow-may-train`, 유료 모델이면 `--allow-paid-models`.
+- 저장소에 커밋이 최소 1개 있어야 하고, 커밋하지 않은 변경은 worktree에 들어가지 않습니다.
+- `workspace`(일반 체크아웃을 직접 수정)는 기본 거부이며 `--allow-main-checkout`으로만 허용합니다.
+- 실패한 코드 단계는 자동 재시도하지 않습니다. worktree가 남으므로 확인 후 제거하고 `--retry-code <단계-id>`로 다시 실행하세요.
+
+정리(변경을 버릴 때):
+```bash
+python3 -m workshop.worktree remove <저장소> ~/.agent-workshop/worktrees/<보드-id>/<단계-id>
+```
+변경을 채택하려면 worktree 폴더에서 직접 diff를 확인하고 커밋/병합하세요.
+
+**남는 위험(샌드박스 아님):** worktree는 폴더 분리일 뿐 OpenCode의 도구 실행을 가두지 못합니다. 모델이 이 폴더 밖 파일이나 명령에 접근할 수 있으므로, 신뢰하는 저장소의 작은 작업에서 diff를 반드시 검토하세요.

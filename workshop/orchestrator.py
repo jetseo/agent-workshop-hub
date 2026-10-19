@@ -16,9 +16,12 @@ from .adapters import run_opencode
 from .board import Board
 from .chat import chat
 from .modelpolicy import classify
+from . import worktree
 from .providers import Providers
 
 OPENCODE_PROVIDERS = ("opencode", "openai")  # served by the OpenCode CLI, not a chat endpoint
+CODE_NOTE = ("Make only the requested change inside the current working directory. Do not commit, push, "
+             "merge, install packages, or touch files outside this directory.\n\n")
 NO_TOOLS_NOTE = ("Answer in plain text only. Do not create, modify or delete files and do not run "
                  "commands.\n\n")
 TEXT_TIMEOUT = 240  # seconds per OpenCode text step
@@ -57,12 +60,22 @@ def load_references(names, context_root=None):
     return refs
 
 
+def _resolve_repo(repo):
+    if repo is None:
+        return None
+    path = Path(repo).expanduser().resolve()
+    if not worktree.is_repo(path):
+        raise ValueError("Step repo is not a git repository: " + str(path))
+    return str(path)
+
+
 def create_board(root, spec, context_root=None):
     board = Board.create(root, spec["title"], spec["goal"], spec.get("constraints", ""),
                          references=load_references(spec.get("context_files", []), context_root))
     for step in spec["steps"]:
         board.add_step(step["id"], step["model"], step.get("depends_on", ()),
-                       step.get("prompt", ""), step.get("kind", "text"), step.get("workspace"))
+                       step.get("prompt", ""), step.get("kind", "text"), step.get("workspace"),
+                       _resolve_repo(step.get("repo")))
     return board
 
 
@@ -113,13 +126,26 @@ def _run_step(board, sid, step, providers, flags, text_fn, code_fn):
             raise PermissionError("Code step needs explicit approval (--approve-code " + sid + ")")
         if not flags["allow_opencode"]:
             raise PermissionError("OpenCode execution not enabled (--allow-opencode)")
-        if not step.get("workspace"):
-            raise ValueError("Code step requires a workspace")
+        if not (step.get("repo") or step.get("workspace")):
+            raise ValueError("Code step requires a repo (disposable worktree) or a workspace")
         if classify(step["model"]) == "paid" and not flags["allow_paid"]:
             raise PermissionError("Model '" + step["model"] + "' is paid or subscription-backed; "
                                   "use a -free/ollama model or pass --allow-paid-models")
         _require_cloud_consent(step, flags)
-        result = code_fn(prompt, step["workspace"], enabled=True, model=step["model"])
+        if step.get("repo"):
+            path, branch = worktree.create(step["repo"], flags["worktree_base"], board.folder.name, sid)
+            result = code_fn(CODE_NOTE + prompt, str(path), enabled=True, model=step["model"])
+            if result.get("exit_code", 0) != 0:
+                raise RuntimeError(_exit_error(result) + " (worktree kept for inspection: " + str(path) + ")")
+            info = worktree.collect_diff(path)
+            return ("Worktree: " + str(path) + "\nBranch: " + branch + "\n"
+                    "Nothing was committed, pushed or merged. Review the diff, then merge or discard it yourself.\n\n"
+                    + ("No files changed." if not info["changed"] else
+                       info["stat"] + "\n\n```diff\n" + info["diff"] + ("\n[...diff truncated...]" if info["truncated"] else "") + "\n```"))
+        if not (Path(step["workspace"]) / ".git").is_file() and not flags["allow_main_checkout"]:
+            raise PermissionError("Workspace is a main checkout, not a disposable worktree; use a step "
+                                  "\"repo\" instead, or pass --allow-main-checkout to accept direct edits")
+        result = code_fn(CODE_NOTE + prompt, step["workspace"], enabled=True, model=step["model"])
         if result.get("exit_code", 0) != 0:
             raise RuntimeError(_exit_error(result))
         return strip_banner(result.get("stdout", ""))
@@ -145,9 +171,12 @@ def _run_step(board, sid, step, providers, flags, text_fn, code_fn):
 
 
 def run_board(board, providers, *, allow_opencode=False, allow_cloud=False, allow_may_train=False,
-              allow_paid=False, approve_text_agents=False, approved_code=(), max_parallel=2, text_fn=chat, code_fn=run_opencode, progress=None):
+              allow_paid=False, approve_text_agents=False, allow_main_checkout=False,
+              worktree_base=None, approved_code=(), max_parallel=2, text_fn=chat, code_fn=run_opencode, progress=None):
     flags = {"allow_opencode": allow_opencode, "allow_cloud": allow_cloud,
              "allow_may_train": allow_may_train, "allow_paid": allow_paid, "approve_text_agents": approve_text_agents,
+             "allow_main_checkout": allow_main_checkout,
+             "worktree_base": worktree_base or worktree.default_base(),
              "approved_code": set(approved_code)}
     errors = {}
     say = progress or (lambda message: None)
@@ -191,6 +220,8 @@ def main(argv=None):
     parser.add_argument("--approve-text-agents", action="store_true",
                         help="Approve all text-only steps served by OpenCode (never code steps)")
     parser.add_argument("--context-root", default=".", help="Folder that spec context_files are read from (default: current directory)")
+    parser.add_argument("--allow-main-checkout", action="store_true",
+                        help="Let a code step edit a normal checkout directly (default: only disposable worktrees)")
     parser.add_argument("--allow-paid-models", action="store_true",
                         help="Permit paid/subscription-backed OpenCode models (default: free and local only)")
     parser.add_argument("--max-parallel", type=int, default=2)
@@ -212,7 +243,8 @@ def main(argv=None):
     summary = run_board(board, Providers(), allow_opencode=args.allow_opencode,
                         allow_cloud=args.allow_cloud, allow_may_train=args.allow_may_train,
                         allow_paid=args.allow_paid_models,
-                        approve_text_agents=args.approve_text_agents, approved_code=args.approve_code, max_parallel=args.max_parallel,
+                        approve_text_agents=args.approve_text_agents,
+                        allow_main_checkout=args.allow_main_checkout, approved_code=args.approve_code, max_parallel=args.max_parallel,
                         progress=lambda m: print(m, file=sys.stderr, flush=True))
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     return 0 if not summary["failed"] and not summary["blocked"] else 1
