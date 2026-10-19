@@ -23,7 +23,8 @@
 | `opencode auth login` (WSL 전용 자격 증명) | 통과 | `OpenCode api` 1개 |
 | `onboard models` | 통과 | free 9, local 0, paid 75 |
 | `opencode run --model opencode/glm-5.3-flash-free` (빈 git 폴더, `< /dev/null`) | **통과** | 응답 `ok`, 15.3초, 기본 에이전트 `build` |
-| 보드 E2E (`examples/board-spec.free.json`) | **미검증** | 다음 단계 |
+| 보드 E2E 1차 실행 (`board-spec.free.json`, 무료 모델 3종) | 부분 통과 | `plan` 43s, `review-a` 6s 완료. 병렬 `review-b`는 `exit code 1`로 실패(원인 미확인, stderr 미수집 버전), `final`은 blocked |
+| 보드 `--resume` 후 재실행 | **통과** | 완료 단계 건너뜀, `review-b` 17s, `final` 33s, 4단계 모두 done. 같은 모델이 재시도에서 성공 → 첫 실패는 일시적이었을 가능성(미확정) |
 
 ## 발견된 문제 (2026-10-19)
 - WSL의 PATH에 Windows 경로가 붙어 `opencode`가 `/mnt/c/.../opencode.exe`로 해석됨. 보드의 텍스트 단계(긴 한국어 여러 줄 프롬프트, Linux 임시 cwd)가 이 경로로 실행되어 `plan` 단계가 3분 이상 응답 없이 `running`에 머묾.
