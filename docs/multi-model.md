@@ -15,3 +15,13 @@
 4. 대시보드 `/boards`에서 보드를 읽기 전용으로 볼 수 있습니다.
 
 규칙: 코드 단계는 재시도하지 않고, 텍스트 단계만 1회 재시도합니다. 실패한 단계의 후속 단계는 실행되지 않고 `blocked`로 보고됩니다.
+
+## 비용 안전장치 (OpenCode 모델)
+- `ollama/…`는 로컬, 이름이 `-free`로 끝나는 모델은 무료로 분류합니다. **그 외(`opencode/gpt-…`, `opencode/claude-…`, `openai/…` OAuth 구독 포함)는 유료로 취급**하며 코드 단계에서 `--allow-paid-models` 없이는 실행되지 않습니다.
+- `big-pickle`처럼 이름만으로 무료인지 알 수 없는 모델도 보수적으로 유료 취급합니다.
+- `python3 -m workshop.onboard models` 로 설치된 OpenCode의 모델을 free/local/paid로 나눠 볼 수 있습니다(읽기 전용).
+
+## Windows vs WSL 주의
+Hub는 WSL(Ubuntu) 안에서 실행됩니다. Windows PowerShell에 설치한 OpenCode는 WSL에서 보이지 않고 로그인 정보(`auth.json`)도 별개입니다.
+WSL 안에 OpenCode를 설치(`install.ps1 -InstallOpenCode`)하고 거기서 `opencode auth login`을 다시 해야 합니다.
+Windows 네이티브 `.cmd` 실행기는 인자 이스케이프 문제가 있어 임의 프롬프트를 넘기는 용도로 사용하지 않습니다.

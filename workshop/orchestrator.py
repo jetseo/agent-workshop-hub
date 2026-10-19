@@ -11,6 +11,7 @@ from pathlib import Path
 from .adapters import run_opencode
 from .board import Board
 from .chat import chat
+from .modelpolicy import classify
 from .providers import Providers
 
 TEXT_ATTEMPTS = 2  # text steps have no side effects, so one retry is safe
@@ -34,6 +35,9 @@ def _run_step(board, sid, step, providers, flags, text_fn, code_fn):
             raise PermissionError("OpenCode execution not enabled (--allow-opencode)")
         if not step.get("workspace"):
             raise ValueError("Code step requires a workspace")
+        if classify(step["model"]) == "paid" and not flags["allow_paid"]:
+            raise PermissionError("Model '" + step["model"] + "' is paid or subscription-backed; "
+                                  "use a -free/ollama model or pass --allow-paid-models")
         result = code_fn(prompt, step["workspace"], enabled=True, model=step["model"])
         if result.get("exit_code", 0) != 0:
             raise RuntimeError("OpenCode exited with code " + str(result["exit_code"]))
@@ -58,9 +62,9 @@ def _run_step(board, sid, step, providers, flags, text_fn, code_fn):
 
 
 def run_board(board, providers, *, allow_opencode=False, allow_cloud=False, allow_may_train=False,
-              approved_code=(), max_parallel=2, text_fn=chat, code_fn=run_opencode):
+              allow_paid=False, approved_code=(), max_parallel=2, text_fn=chat, code_fn=run_opencode):
     flags = {"allow_opencode": allow_opencode, "allow_cloud": allow_cloud,
-             "allow_may_train": allow_may_train, "approved_code": set(approved_code)}
+             "allow_may_train": allow_may_train, "allow_paid": allow_paid, "approved_code": set(approved_code)}
     errors = {}
     with ThreadPoolExecutor(max_workers=max(1, max_parallel)) as pool:
         while True:
@@ -93,6 +97,8 @@ def main(argv=None):
     parser.add_argument("--approve-code", action="append", default=[], metavar="STEP_ID")
     parser.add_argument("--allow-cloud", action="store_true")
     parser.add_argument("--allow-may-train", action="store_true")
+    parser.add_argument("--allow-paid-models", action="store_true",
+                        help="Permit paid/subscription-backed OpenCode models (default: free and local only)")
     parser.add_argument("--max-parallel", type=int, default=2)
     parser.add_argument("--dry-run", action="store_true", help="Create the board only; call no model")
     args = parser.parse_args(argv)
@@ -103,7 +109,7 @@ def main(argv=None):
         return 0
     summary = run_board(board, Providers(), allow_opencode=args.allow_opencode,
                         allow_cloud=args.allow_cloud, allow_may_train=args.allow_may_train,
-                        approved_code=args.approve_code, max_parallel=args.max_parallel)
+                        allow_paid=args.allow_paid_models, approved_code=args.approve_code, max_parallel=args.max_parallel)
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     return 0 if not summary["failed"] and not summary["blocked"] else 1
 

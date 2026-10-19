@@ -13,6 +13,7 @@ import subprocess
 import sys
 
 from .chat import chat
+from .modelpolicy import parse_models_output
 from .providers import Providers, POLICIES
 
 
@@ -29,6 +30,7 @@ def main(argv=None):
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("list")
     sub.add_parser("check")
+    sub.add_parser("models", help="Group `opencode models` into free / local / paid (read-only)")
     add = sub.add_parser("add")
     add.add_argument("name")
     add.add_argument("--base-url", required=True)
@@ -58,6 +60,17 @@ def main(argv=None):
                 key = "n/a" if not p["key_env"] else ("set" if os.environ.get(p["key_env"]) else "NOT SET")
                 print(name + "  " + p["base_url"] + "  policy=" + p["data_policy"] +
                       "  rpm=" + str(p["rpm"]) + "  key(" + str(p["key_env"]) + ")=" + key)
+        elif args.command == "models":
+            out = _opencode(["models"])
+            if out is None:
+                raise ValueError("opencode is not installed in this environment (WSL vs Windows?)")
+            groups = parse_models_output(out)
+            for label in ("free", "local", "paid"):
+                print(label + " (" + str(len(groups[label])) + ")")
+                if label != "paid":
+                    for model in groups[label]:
+                        print("  " + model)
+            print("paid models are blocked unless --allow-paid-models is passed.")
         elif args.command == "check":
             out = _opencode(["models"])
             print("opencode: " + ("not installed" if out is None else str(len(out.splitlines())) + " models listed"))
