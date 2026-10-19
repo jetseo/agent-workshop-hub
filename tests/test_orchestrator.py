@@ -172,3 +172,48 @@ class ResumeTests(Fixture):
         from workshop.orchestrator import _exit_error
         msg = _exit_error({"exit_code": 1, "stderr": "Error: model not available\n", "stdout": ""})
         self.assertIn("model not available", msg)
+
+
+class ReferenceFileTests(Fixture):
+    def make_root(self):
+        root = self.dir / "proj"
+        (root / "docs").mkdir(parents=True)
+        (root / "README.md").write_text("install.ps1 exists", encoding="utf-8")
+        (root / "docs" / "setup.md").write_text("setup notes", encoding="utf-8")
+        (root / ".env").write_text("KEY=1", encoding="utf-8")
+        (root / "auth.json").write_text("{}", encoding="utf-8")
+        (self.dir / "outside.md").write_text("outside", encoding="utf-8")
+        (root / "link.md").symlink_to(self.dir / "outside.md")
+        return root
+
+    def spec(self, files):
+        return {"title": "T", "goal": "G", "context_files": files,
+                "steps": [{"id": "a", "model": "loc/m", "prompt": "Q"}]}
+
+    def test_reference_files_reach_the_prompt_and_board(self):
+        root = self.make_root()
+        board = create_board(self.dir / "b", self.spec(["README.md", "docs/setup.md"]), context_root=root)
+        prompt = board.context_for("a")
+        self.assertIn("install.ps1 exists", prompt)
+        self.assertIn("the ONLY source of facts", prompt)
+        self.assertTrue(prompt.rstrip().endswith("Q"))
+        self.assertIn("README.md", (board.folder / "board.md").read_text(encoding="utf-8"))
+
+    def test_unsafe_references_are_refused(self):
+        root = self.make_root()
+        for bad in ([".env"], ["auth.json"], ["link.md"], ["../outside.md"], [str(root / "README.md")],
+                    ["missing.md"], [123], ["README.md"] * 11):
+            with self.assertRaises(ValueError, msg=str(bad)):
+                create_board(self.dir / "bx", self.spec(bad), context_root=root)
+
+    def test_oversized_reference_is_refused_and_trimmed_before_the_task(self):
+        root = self.make_root()
+        (root / "big.md").write_text("x" * 50_000, encoding="utf-8")
+        with self.assertRaises(ValueError):
+            create_board(self.dir / "bx", self.spec(["big.md"]), context_root=root)
+        (root / "mid.md").write_text("y" * 30_000, encoding="utf-8")
+        board = create_board(self.dir / "by", self.spec(["mid.md"]), context_root=root)
+        prompt = board.context_for("a", max_chars=5000)
+        self.assertLessEqual(len(prompt), 5100)
+        self.assertIn("# Goal", prompt)
+        self.assertTrue(prompt.rstrip().endswith("Q"))

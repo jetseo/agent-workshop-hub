@@ -36,6 +36,7 @@ class PolicyTests(unittest.TestCase):
                 board = create_board(Path(d) / "b", {"title": "T", "goal": "G", "steps": [
                     {"id": "c", "kind": "code", "model": model, "workspace": d}]})
                 return run_board(board, Providers(Path(d) / "p.json"), allow_opencode=True,
+                                 allow_cloud=True, allow_may_train=True,
                                  approved_code=["c"], code_fn=code, **flags)
             self.assertIn("--allow-paid-models", run("openai/gpt-5.4")["failed"]["c"])
             self.assertEqual(calls, [])
@@ -71,6 +72,12 @@ class OpenCodeTextStepTests(unittest.TestCase):
         self.assertIn("--allow-paid-models", s["failed"]["t"])
         s, seen, board = self.run_it("opencode/glm-5.3-flash-free", allow_opencode=True,
                                      approve_text_agents=True)
+        self.assertIn("--allow-cloud --allow-may-train", s["failed"]["t"])
+        s, seen, board = self.run_it("opencode/glm-5.3-flash-free", allow_opencode=True,
+                                     approve_text_agents=True, allow_cloud=True)
+        self.assertIn("--allow-cloud --allow-may-train", s["failed"]["t"])
+        s, seen, board = self.run_it("opencode/glm-5.3-flash-free", allow_opencode=True,
+                                     approve_text_agents=True, allow_cloud=True, allow_may_train=True)
         self.assertEqual(s["done"], ["t"])
         self.assertTrue(seen["prompt"].startswith("Answer in plain text only"))
         self.assertIn("workshop-text-", seen["ws"])

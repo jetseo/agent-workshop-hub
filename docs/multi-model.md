@@ -31,8 +31,9 @@ Windows 네이티브 `.cmd` 실행기는 인자 이스케이프 문제가 있어
 그래도 도구를 쓸 수 있는 에이전트이므로 `--allow-opencode`와 승인이 필요합니다.
 ```bash
 python3 -m workshop.orchestrator examples/board-spec.free.json --dry-run          # 보드만 생성
-python3 -m workshop.orchestrator examples/board-spec.free.json --allow-opencode --approve-text-agents
+python3 -m workshop.orchestrator examples/board-spec.free.json --allow-opencode --approve-text-agents --allow-cloud --allow-may-train
 ```
+`--allow-cloud --allow-may-train`은 `-free` 모델이 입력을 외부 서비스로 보내고 학습에 쓸 수 있다는 점을 받아들인다는 명시적 동의입니다(`ollama/…` 로컬 모델은 불필요).
 `--approve-text-agents`는 텍스트 단계에만 적용되며 코드 단계는 계속 `--approve-code <id>`가 필요합니다.
 
 ## 이어서 실행 (--resume)
@@ -42,3 +43,10 @@ python3 -m workshop.orchestrator --resume ~/.agent-workshop/boards/<보드-id> -
 ```
 실패한 **텍스트** 단계만 다시 대기 상태로 돌립니다. 실패한 **코드** 단계는 파일을 바꿨을 수 있어 `--retry-code <단계-id>`로 직접 지정해야 다시 실행됩니다.
 실패 메시지에는 OpenCode가 낸 오류(stderr 끝부분)가 포함됩니다.
+
+## 참조 파일 (`context_files`)
+모델은 빈 임시 폴더에서 실행되어 저장소를 볼 수 없고, 모르는 것은 추측으로 채우기 쉽습니다(1차 실행에서 존재하는 `install.ps1`을 "근거 없음"이라 단정하고 다음 단계가 그대로 받아들임).
+명세에 `"context_files": ["README.md", "docs/setup.md"]`처럼 파일을 지정하면 **그 시점의 내용 스냅샷**이 모든 단계의 프롬프트에 "유일한 사실 근거"로 들어갑니다.
+- 기준 폴더는 `--context-root`(기본: 현재 폴더)이며 그 밖의 경로, 심볼릭 링크, 비밀로 보이는 이름(`.env`, `auth.json`, 키/토큰/DB 파일 등)은 거부합니다.
+- 최대 10개, 파일당 40KB, 합계 100KB. 프롬프트가 길면 참조 파일부터 잘립니다.
+- 이 내용은 클라우드 모델에 전송됩니다. 민감한 파일은 지정하지 마세요.

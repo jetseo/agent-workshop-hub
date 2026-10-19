@@ -25,8 +25,41 @@ TEXT_TIMEOUT = 240  # seconds per OpenCode text step
 TEXT_ATTEMPTS = 2  # text steps have no side effects, so one retry is safe
 
 
-def create_board(root, spec):
-    board = Board.create(root, spec["title"], spec["goal"], spec.get("constraints", ""))
+SECRET_NAME_PARTS = (".env", "auth.json", "id_rsa", "id_ed25519", ".pem", ".key", ".pfx", ".p12",
+                     "secret", "credential", "token", "password", ".sqlite", ".db")
+MAX_REF_FILES, MAX_REF_BYTES, MAX_REF_TOTAL = 10, 40_000, 100_000
+
+
+def load_references(names, context_root=None):
+    """Read user-chosen files as read-only prompt context. Refuses anything outside the root,
+    symlinks, secret-looking names, and oversized input."""
+    root = Path(context_root or Path.cwd()).resolve()
+    if not isinstance(names, list) or len(names) > MAX_REF_FILES:
+        raise ValueError("context_files must be a list of at most " + str(MAX_REF_FILES) + " paths")
+    refs, total = [], 0
+    for name in names:
+        if not isinstance(name, str) or not name or Path(name).is_absolute():
+            raise ValueError("context_files entries must be relative paths: " + str(name))
+        path = root / name
+        if path.is_symlink() or not path.is_file():
+            raise ValueError("Not a regular file under the context root: " + name)
+        resolved = path.resolve()
+        if root not in resolved.parents:
+            raise ValueError("Path escapes the context root: " + name)
+        lowered = resolved.name.lower()
+        if any(part in lowered for part in SECRET_NAME_PARTS):
+            raise ValueError("Refusing secret-looking file: " + name)
+        size = resolved.stat().st_size
+        total += size
+        if size > MAX_REF_BYTES or total > MAX_REF_TOTAL:
+            raise ValueError("Reference files too large: " + name)
+        refs.append({"name": name, "text": resolved.read_text(encoding="utf-8", errors="replace")})
+    return refs
+
+
+def create_board(root, spec, context_root=None):
+    board = Board.create(root, spec["title"], spec["goal"], spec.get("constraints", ""),
+                         references=load_references(spec.get("context_files", []), context_root))
     for step in spec["steps"]:
         board.add_step(step["id"], step["model"], step.get("depends_on", ()),
                        step.get("prompt", ""), step.get("kind", "text"), step.get("workspace"))
@@ -46,6 +79,12 @@ def strip_banner(text):
     return "\n".join(lines).strip()
 
 
+def _require_cloud_consent(step, flags):
+    if classify(step["model"]) != "local" and not (flags["allow_cloud"] and flags["allow_may_train"]):
+        raise PermissionError("Model '" + step["model"] + "' runs on a cloud service that may train on your "
+                              "prompts and files; pass --allow-cloud --allow-may-train to accept that")
+
+
 def _opencode_text(prompt, step, flags, sid, code_fn):
     """Text step served by OpenCode in a throw-away git dir. Still a tool-capable agent,
     so it needs the same explicit enable + approval as code steps, and free/local models."""
@@ -56,6 +95,7 @@ def _opencode_text(prompt, step, flags, sid, code_fn):
     if classify(step["model"]) == "paid" and not flags["allow_paid"]:
         raise PermissionError("Model '" + step["model"] + "' is paid or subscription-backed; "
                               "use a -free/ollama model or pass --allow-paid-models")
+    _require_cloud_consent(step, flags)
     with tempfile.TemporaryDirectory(prefix="workshop-text-") as scratch:
         subprocess.run(["git", "init", "-q", scratch], check=True, capture_output=True)
         result = code_fn(NO_TOOLS_NOTE + prompt, scratch, enabled=True, model=step["model"],
@@ -78,6 +118,7 @@ def _run_step(board, sid, step, providers, flags, text_fn, code_fn):
         if classify(step["model"]) == "paid" and not flags["allow_paid"]:
             raise PermissionError("Model '" + step["model"] + "' is paid or subscription-backed; "
                                   "use a -free/ollama model or pass --allow-paid-models")
+        _require_cloud_consent(step, flags)
         result = code_fn(prompt, step["workspace"], enabled=True, model=step["model"])
         if result.get("exit_code", 0) != 0:
             raise RuntimeError(_exit_error(result))
@@ -149,6 +190,7 @@ def main(argv=None):
     parser.add_argument("--allow-may-train", action="store_true")
     parser.add_argument("--approve-text-agents", action="store_true",
                         help="Approve all text-only steps served by OpenCode (never code steps)")
+    parser.add_argument("--context-root", default=".", help="Folder that spec context_files are read from (default: current directory)")
     parser.add_argument("--allow-paid-models", action="store_true",
                         help="Permit paid/subscription-backed OpenCode models (default: free and local only)")
     parser.add_argument("--max-parallel", type=int, default=2)
@@ -160,7 +202,8 @@ def main(argv=None):
             parser.error("Not a board folder: " + args.resume)
         print("Resuming; re-queued: " + (", ".join(board.reset_failed(args.retry_code)) or "nothing"), flush=True)
     elif args.spec:
-        board = create_board(args.root, json.loads(Path(args.spec).read_text(encoding="utf-8")))
+        board = create_board(args.root, json.loads(Path(args.spec).read_text(encoding="utf-8")),
+                             context_root=args.context_root)
     else:
         parser.error("Provide a spec file or --resume BOARD_DIR")
     print("Board: " + str(board.folder / "board.md"), flush=True)

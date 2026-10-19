@@ -37,12 +37,12 @@ class Board:
         self.state_path = self.folder / "state.json"
 
     @classmethod
-    def create(cls, root, title, goal, constraints=""):
+    def create(cls, root, title, goal, constraints="", references=None):
         if not isinstance(title, str) or not title.strip() or len(title) > 500:
             raise ValueError("Invalid title")
         board = cls(Path(root) / str(uuid.uuid4()))
         board._save({"title": title.strip(), "goal": goal, "constraints": constraints,
-                     "steps": {}, "context": [], "revision": 0})
+                     "steps": {}, "context": [], "references": references or [], "revision": 0})
         return board
 
     def _load(self):
@@ -125,23 +125,36 @@ class Board:
         state["context"].append({"author": author, "note": note, "time": int(time.time())})
         self._save(state)
 
-    def context_for(self, step_id, max_chars=8000):
-        """Prompt material for one step: goal, constraints, shared notes, dependency outputs."""
+    def context_for(self, step_id, max_chars=30000):
+        """Prompt material for one step: goal, constraints, reference files, shared notes,
+        dependency outputs, task. Under size pressure reference files are trimmed first."""
         state = self._load()
         step = state["steps"][step_id]
-        parts = ["# Goal\n" + state["goal"]]
+        head = ["# Goal\n" + state["goal"]]
         if state["constraints"]:
-            parts.append("# Constraints\n" + state["constraints"])
+            head.append("# Constraints\n" + state["constraints"])
+        refs = state.get("references") or []
+        mid = []
         if state["context"]:
-            parts.append("# Shared context\n" + "\n".join("- " + c["note"] for c in state["context"]))
+            mid.append("# Shared context\n" + "\n".join("- " + c["note"] for c in state["context"]))
         for dep in step["depends_on"]:
-            parts.append("# Output of " + dep + "\n" +
-                         (self.folder / "steps" / (dep + ".md")).read_text(encoding="utf-8"))
-        parts.append("# Your task\n" + step["prompt"])
+            mid.append("# Output of " + dep + "\n" +
+                       (self.folder / "steps" / (dep + ".md")).read_text(encoding="utf-8"))
+        tail = "# Your task\n" + step["prompt"]
+        ref_text = ""
+        if refs:
+            ref_text = ("# Reference files (read-only; the ONLY source of facts about the project. "
+                        "If something is not here, say it is unknown instead of guessing)\n" +
+                        "\n".join("## " + r["name"] + "\n```\n" + r["text"] + "\n```" for r in refs))
+        fixed = "\n\n".join(head + mid + [tail])
+        marker = "\n[...reference files truncated...]"
+        room = max_chars - len(fixed) - 2 - len(marker)  # 2 = the blank-line joiner
+        if ref_text and len(ref_text) + 2 > max_chars - len(fixed):
+            ref_text = ref_text[:room] + marker if room > 200 else ""
+        parts = head + ([ref_text] if ref_text else []) + mid + [tail]
         text = "\n\n".join(parts)
         if len(text) > max_chars:
-            # Keep the task and the newest material; drop from the front of the middle.
-            tail = parts[-1]
+            # Still too long (large dependency outputs): keep the newest material and the task.
             body = "\n\n".join(parts[:-1])[-(max_chars - len(tail) - 40):]
             text = "[...truncated...]\n" + body + "\n\n" + tail
         return text
@@ -154,6 +167,8 @@ class Board:
         for sid, s in state["steps"].items():
             deps = ", ".join(s["depends_on"]) or "-"
             lines.append("- `" + sid + "` [" + s["status"] + "] " + s.get("kind", "text") + " model=" + str(s["model"]) + " depends_on=" + deps)
+        if state.get("references"):
+            lines += ["## 참조 파일 / Reference files"] + ["- " + r["name"] for r in state["references"]] + [""]
         lines += ["", "## 공유 컨텍스트 / Shared context"]
         lines += ["- (" + c["author"] + ") " + c["note"] for c in state["context"]] or ["(none)"]
         lines += ["", "## 단계별 산출물 / Step outputs"]
