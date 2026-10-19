@@ -49,6 +49,7 @@ def run_opencode(prompt, workspace, *, enabled=False, timeout=600, model=None):
         command += ["--model", model]
     completed = subprocess.run(
         command + [prompt], cwd=directory, capture_output=True, text=True,
+        stdin=subprocess.DEVNULL,  # never wait for interactive input from a parent terminal
         timeout=timeout, check=False, env=os.environ.copy(),
     )
     return {"exit_code": completed.returncode,

@@ -21,6 +21,7 @@ from .providers import Providers
 OPENCODE_PROVIDERS = ("opencode", "openai")  # served by the OpenCode CLI, not a chat endpoint
 NO_TOOLS_NOTE = ("Answer in plain text only. Do not create, modify or delete files and do not run "
                  "commands.\n\n")
+TEXT_TIMEOUT = 240  # seconds per OpenCode text step
 TEXT_ATTEMPTS = 2  # text steps have no side effects, so one retry is safe
 
 
@@ -52,7 +53,8 @@ def _opencode_text(prompt, step, flags, sid, code_fn):
                               "use a -free/ollama model or pass --allow-paid-models")
     with tempfile.TemporaryDirectory(prefix="workshop-text-") as scratch:
         subprocess.run(["git", "init", "-q", scratch], check=True, capture_output=True)
-        result = code_fn(NO_TOOLS_NOTE + prompt, scratch, enabled=True, model=step["model"])
+        result = code_fn(NO_TOOLS_NOTE + prompt, scratch, enabled=True, model=step["model"],
+                         timeout=TEXT_TIMEOUT)
     if result.get("exit_code", 0) != 0:
         raise RuntimeError("OpenCode exited with code " + str(result["exit_code"]))
     return strip_banner(result.get("stdout", ""))

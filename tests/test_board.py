@@ -82,6 +82,16 @@ class OpenCodeModelTests(unittest.TestCase):
                          ["/bin/opencode", "run", "--model", "ollama/qwen2.5-coder:7b", "hi"])
         self.assertEqual(self.run_with(None), ["/bin/opencode", "run", "hi"])
 
+    def test_stdin_is_never_inherited(self):
+        import subprocess
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / ".git").mkdir()
+            done = MagicMock(returncode=0, stdout="", stderr="")
+            with patch("workshop.adapters.shutil.which", return_value="/bin/opencode"), \
+                 patch("workshop.adapters.subprocess.run", return_value=done) as run:
+                adapters.run_opencode("hi", d, enabled=True)
+                self.assertIs(run.call_args.kwargs["stdin"], subprocess.DEVNULL)
+
     def test_bad_model_rejected(self):
         for bad in ("--evil", "no-slash", "a/b; rm -rf", "a/ b", "x" * 300):
             with self.assertRaises(ValueError):
