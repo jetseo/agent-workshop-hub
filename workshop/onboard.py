@@ -12,7 +12,7 @@ import shutil
 import subprocess
 import sys
 
-from .adapters import find_opencode
+from .adapters import find_opencode, opencode_env
 from .chat import chat
 from .modelpolicy import parse_models_output
 from .providers import Providers, POLICIES
@@ -22,7 +22,8 @@ def _opencode(args):
     binary = find_opencode()
     if binary is None:
         return None
-    done = subprocess.run([binary, *args], capture_output=True, text=True, timeout=30, check=False)
+    done = subprocess.run([binary, *args], capture_output=True, text=True, timeout=30, check=False,
+                          stdin=subprocess.DEVNULL, env=opencode_env(binary))
     return done.stdout.strip() if done.returncode == 0 else "(exit " + str(done.returncode) + ")"
 
 

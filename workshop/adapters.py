@@ -23,17 +23,38 @@ def ollama_models(base_url="http://127.0.0.1:11434", timeout=3):
 
 MODEL_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._:/@-]*")
 
+def _nvm_opencode():
+    """Newest ~/.nvm/versions/node/*/bin/opencode, for shells that never sourced nvm.sh."""
+    base = Path(os.environ.get("NVM_DIR") or Path.home() / ".nvm") / "versions" / "node"
+    def version_key(path):
+        parts = path.parent.parent.name.lstrip("v").split(".")
+        return tuple(int(p) if p.isdigit() else 0 for p in parts)
+    found = [p for p in base.glob("*/bin/opencode") if p.is_file() and os.access(p, os.X_OK)]
+    return str(max(found, key=version_key)) if found else None
+
 def find_opencode():
     """Path of a Linux/native opencode, or None.
 
     Under WSL, the Windows PATH exposes Windows installs (/mnt/c/.../opencode.exe). Running those
     from a Linux cwd hangs or mangles arguments and uses Windows credentials, so they are refused
-    unless WORKSHOP_ALLOW_WINDOWS_OPENCODE=1.
+    unless WORKSHOP_ALLOW_WINDOWS_OPENCODE=1. A native install under nvm is found even when the
+    current shell has not loaded nvm.
     """
     binary = shutil.which("opencode")
-    if binary and binary.startswith("/mnt/") and os.environ.get("WORKSHOP_ALLOW_WINDOWS_OPENCODE") != "1":
-        return None
-    return binary
+    if binary and not binary.startswith("/mnt/"):
+        return binary
+    native = _nvm_opencode()
+    if native:
+        return native
+    if binary and os.environ.get("WORKSHOP_ALLOW_WINDOWS_OPENCODE") == "1":
+        return binary
+    return None
+
+def opencode_env(binary):
+    """Environment with the binary's own directory first so its `node` shebang resolves."""
+    env = os.environ.copy()
+    env["PATH"] = str(Path(binary).parent) + os.pathsep + env.get("PATH", "")
+    return env
 
 def run_opencode(prompt, workspace, *, enabled=False, timeout=600, model=None):
     """Execute a single explicitly enabled OpenCode run in an existing worktree.
@@ -66,7 +87,7 @@ def run_opencode(prompt, workspace, *, enabled=False, timeout=600, model=None):
     completed = subprocess.run(
         command + [prompt], cwd=directory, capture_output=True, text=True,
         stdin=subprocess.DEVNULL,  # never wait for interactive input from a parent terminal
-        timeout=timeout, check=False, env=os.environ.copy(),
+        timeout=timeout, check=False, env=opencode_env(binary),
     )
     return {"exit_code": completed.returncode,
             "stdout": completed.stdout[-16000:],

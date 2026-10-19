@@ -109,6 +109,7 @@ class WindowsInteropTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             (Path(d) / ".git").mkdir()
             with patch("workshop.adapters.shutil.which", return_value=win), \
+                 patch("workshop.adapters._nvm_opencode", return_value=None), \
                  patch.dict(os.environ, {}, clear=False):
                 os.environ.pop("WORKSHOP_ALLOW_WINDOWS_OPENCODE", None)
                 self.assertIsNone(adapters.find_opencode())
@@ -117,6 +118,28 @@ class WindowsInteropTests(unittest.TestCase):
                 self.assertIn("install-opencode.sh", str(ctx.exception))
             done = MagicMock(returncode=0, stdout="", stderr="")
             with patch("workshop.adapters.shutil.which", return_value=win), \
+                 patch("workshop.adapters._nvm_opencode", return_value=None), \
                  patch.dict(os.environ, {"WORKSHOP_ALLOW_WINDOWS_OPENCODE": "1"}), \
                  patch("workshop.adapters.subprocess.run", return_value=done):
                 self.assertEqual(adapters.find_opencode(), win)
+
+
+class NvmDiscoveryTests(unittest.TestCase):
+    def test_native_nvm_opencode_found_when_only_windows_one_on_path(self):
+        import os
+        win = "/mnt/c/Users/x/AppData/Roaming/npm/opencode"
+        with tempfile.TemporaryDirectory() as home:
+            for version in ("v20.1.0", "v22.23.3", "v9.0.0"):
+                binary = Path(home) / ".nvm" / "versions" / "node" / version / "bin" / "opencode"
+                binary.parent.mkdir(parents=True)
+                binary.write_text("#!/usr/bin/env node\n")
+                binary.chmod(0o755)
+            env = {"HOME": home}
+            with patch("workshop.adapters.shutil.which", return_value=win), \
+                 patch.dict(os.environ, env), patch("pathlib.Path.home", return_value=Path(home)):
+                os.environ.pop("NVM_DIR", None)
+                os.environ.pop("WORKSHOP_ALLOW_WINDOWS_OPENCODE", None)
+                found = adapters.find_opencode()
+                self.assertIn("v22.23.3", found)  # numeric, not lexicographic, newest
+                self.assertEqual(adapters.opencode_env(found)["PATH"].split(os.pathsep)[0],
+                                 str(Path(found).parent))
