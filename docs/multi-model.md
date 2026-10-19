@@ -67,3 +67,21 @@ python3 -m workshop.worktree remove <저장소> ~/.agent-workshop/worktrees/<보
 변경을 채택하려면 worktree 폴더에서 직접 diff를 확인하고 커밋/병합하세요.
 
 **남는 위험(샌드박스 아님):** worktree는 폴더 분리일 뿐 OpenCode의 도구 실행을 가두지 못합니다. 모델이 이 폴더 밖 파일이나 명령에 접근할 수 있으므로, 신뢰하는 저장소의 작은 작업에서 diff를 반드시 검토하세요.
+
+## 요청 한 줄로 보드 만들기 (`plan_board`)
+자연어 요청을 1~4개 작업으로 나누고 보드 명세(JSON)로 바꿉니다. **어떤 단계도 실행하지 않습니다.** 명세를 확인한 뒤 `orchestrator`로 실행하세요.
+```bash
+# 1) 계획 + 명세 생성 (무료 클라우드 모델로 계획; 요청 문장이 외부로 전송되므로 동의 플래그 필요)
+python3 -m workshop.plan_board "README에 빠른 시작 섹션을 추가하고 확인해줘" \
+  --opencode-model opencode/glm-5.3-flash-free --allow-opencode --allow-cloud --allow-may-train \
+  --step-model opencode/glm-5.3-flash-free --repo . --out spec.json
+# (로컬 Ollama 모델이 있으면) --ollama-model <모델> 로 요청이 PC 밖으로 나가지 않게 계획할 수 있습니다.
+# (이미 계획이 있으면) --plan plan.json  (python -m workshop.plan_cli 의 출력)
+
+# 2) 명세를 눈으로 확인한 뒤 보드만 생성해 보고, 실제 실행
+python3 -m workshop.orchestrator spec.json --dry-run
+python3 -m workshop.orchestrator spec.json --allow-opencode --approve-text-agents --allow-cloud --allow-may-train --approve-code t2
+```
+- 계획의 `code` 작업은 `--repo`가 있어야 하며 일회용 worktree에서 실행됩니다. `qa`/`plan` 작업은 텍스트 단계입니다.
+- 단계 id는 `t1…tn`, 의존성은 계획의 인덱스를 그대로 옮깁니다. 코드 단계는 위처럼 `--approve-code`로 하나씩 승인해야 합니다.
+- 모델이 만든 계획은 틀릴 수 있습니다. 실행 전에 `spec.json`을 읽고 필요하면 고치세요.
