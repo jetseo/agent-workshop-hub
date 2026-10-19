@@ -34,3 +34,11 @@ python3 -m workshop.orchestrator examples/board-spec.free.json --dry-run        
 python3 -m workshop.orchestrator examples/board-spec.free.json --allow-opencode --approve-text-agents
 ```
 `--approve-text-agents`는 텍스트 단계에만 적용되며 코드 단계는 계속 `--approve-code <id>`가 필요합니다.
+
+## 이어서 실행 (--resume)
+일부 단계가 실패해도 끝난 단계는 그대로 두고 이어서 실행할 수 있습니다.
+```bash
+python3 -m workshop.orchestrator --resume ~/.agent-workshop/boards/<보드-id> --allow-opencode --approve-text-agents
+```
+실패한 **텍스트** 단계만 다시 대기 상태로 돌립니다. 실패한 **코드** 단계는 파일을 바꿨을 수 있어 `--retry-code <단계-id>`로 직접 지정해야 다시 실행됩니다.
+실패 메시지에는 OpenCode가 낸 오류(stderr 끝부분)가 포함됩니다.

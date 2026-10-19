@@ -85,6 +85,19 @@ class Board:
     def steps(self):
         return self._load()["steps"]
 
+    def reset_failed(self, retry_code=()):
+        """Make failed text steps pending again. Failed code steps may have changed files, so they
+        are only reset when named explicitly."""
+        state = self._load()
+        reset = []
+        for sid, step in state["steps"].items():
+            if step["status"] == "failed" and (step.get("kind", "text") == "text" or sid in retry_code):
+                step["status"] = "pending"
+                reset.append(sid)
+        if reset:
+            self._save(state)
+        return reset
+
     def ready_steps(self):
         """Pending steps whose dependencies are all done and merged; may run in parallel."""
         steps = self._load()["steps"]

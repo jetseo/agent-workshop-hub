@@ -137,3 +137,38 @@ class ProgressTests(Fixture):
         self.assertIn("[start] a", text)
         self.assertIn("[done]  a", text)
         self.assertIn("[FAIL]  b", text)
+
+
+class ResumeTests(Fixture):
+    def test_resume_flow(self):
+        ran = []
+        def fail_b_once(provider, model, messages):
+            text = messages[0]["content"]
+            step = "b" if text.endswith("b") else "a" if text.endswith("a") else "c"
+            ran.append(step)
+            if step == "b" and ran.count("b") <= 2:   # both attempts of the first run fail
+                raise RuntimeError("model unavailable")
+            return "out"
+        # prompts end with the step id so the fake can tell steps apart
+        b2 = create_board(self.dir / "boards2", {"title": "T", "goal": "G", "steps": [
+            {"id": "a", "model": "loc/m", "prompt": "a"}, {"id": "b", "model": "loc/m", "prompt": "b"},
+            {"id": "c", "model": "loc/m", "depends_on": ["a", "b"], "prompt": "c"}]})
+        first = run_board(b2, self.providers, text_fn=fail_b_once)
+        self.assertEqual(first["done"], ["a"])
+        self.assertEqual(first["blocked"], ["c"])
+        self.assertEqual(b2.reset_failed(), ["b"])
+        second = run_board(b2, self.providers, text_fn=fail_b_once)
+        self.assertEqual(sorted(second["done"]), ["a", "b", "c"])
+        self.assertEqual(ran.count("a"), 1)  # finished step was not re-run
+
+    def test_failed_code_steps_need_explicit_retry(self):
+        b = create_board(self.dir / "boards3", {"title": "T", "goal": "G", "steps": [
+            {"id": "x", "kind": "code", "model": "ollama/q", "workspace": str(self.dir)}]})
+        run_board(b, self.providers)  # fails: not approved
+        self.assertEqual(b.reset_failed(), [])
+        self.assertEqual(b.reset_failed(retry_code=["x"]), ["x"])
+
+    def test_exit_error_includes_stderr(self):
+        from workshop.orchestrator import _exit_error
+        msg = _exit_error({"exit_code": 1, "stderr": "Error: model not available\n", "stdout": ""})
+        self.assertIn("model not available", msg)

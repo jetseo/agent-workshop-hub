@@ -33,6 +33,11 @@ def create_board(root, spec):
     return board
 
 
+def _exit_error(result):
+    detail = (result.get("stderr") or result.get("stdout") or "").strip()
+    return "OpenCode exited with code " + str(result["exit_code"]) + (": " + detail[-300:] if detail else "")
+
+
 def strip_banner(text):
     """Drop OpenCode's leading '> agent · model' header line(s)."""
     lines = text.splitlines()
@@ -56,7 +61,7 @@ def _opencode_text(prompt, step, flags, sid, code_fn):
         result = code_fn(NO_TOOLS_NOTE + prompt, scratch, enabled=True, model=step["model"],
                          timeout=TEXT_TIMEOUT)
     if result.get("exit_code", 0) != 0:
-        raise RuntimeError("OpenCode exited with code " + str(result["exit_code"]))
+        raise RuntimeError(_exit_error(result))
     return strip_banner(result.get("stdout", ""))
 
 
@@ -75,7 +80,7 @@ def _run_step(board, sid, step, providers, flags, text_fn, code_fn):
                                   "use a -free/ollama model or pass --allow-paid-models")
         result = code_fn(prompt, step["workspace"], enabled=True, model=step["model"])
         if result.get("exit_code", 0) != 0:
-            raise RuntimeError("OpenCode exited with code " + str(result["exit_code"]))
+            raise RuntimeError(_exit_error(result))
         return strip_banner(result.get("stdout", ""))
     provider = providers.get(provider_name)
     if provider is None and provider_name in OPENCODE_PROVIDERS:
@@ -134,7 +139,9 @@ def run_board(board, providers, *, allow_opencode=False, allow_cloud=False, allo
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Run a multi-model board")
-    parser.add_argument("spec", help="JSON spec file")
+    parser.add_argument("spec", nargs="?", help="JSON spec file (omit with --resume)")
+    parser.add_argument("--resume", metavar="BOARD_DIR", help="Continue an existing board: skips finished steps, re-runs failed text steps")
+    parser.add_argument("--retry-code", action="append", default=[], metavar="STEP_ID", help="Also re-run this failed code step (it may have changed files)")
     parser.add_argument("--root", default=str(Path.home() / ".agent-workshop" / "boards"))
     parser.add_argument("--allow-opencode", action="store_true")
     parser.add_argument("--approve-code", action="append", default=[], metavar="STEP_ID")
@@ -147,8 +154,15 @@ def main(argv=None):
     parser.add_argument("--max-parallel", type=int, default=2)
     parser.add_argument("--dry-run", action="store_true", help="Create the board only; call no model")
     args = parser.parse_args(argv)
-    spec = json.loads(Path(args.spec).read_text(encoding="utf-8"))
-    board = create_board(args.root, spec)
+    if args.resume:
+        board = Board(args.resume)
+        if not board.state_path.is_file():
+            parser.error("Not a board folder: " + args.resume)
+        print("Resuming; re-queued: " + (", ".join(board.reset_failed(args.retry_code)) or "nothing"), flush=True)
+    elif args.spec:
+        board = create_board(args.root, json.loads(Path(args.spec).read_text(encoding="utf-8")))
+    else:
+        parser.error("Provide a spec file or --resume BOARD_DIR")
     print("Board: " + str(board.folder / "board.md"), flush=True)
     if args.dry_run:
         return 0
