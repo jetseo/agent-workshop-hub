@@ -25,3 +25,12 @@
 Hub는 WSL(Ubuntu) 안에서 실행됩니다. Windows PowerShell에 설치한 OpenCode는 WSL에서 보이지 않고 로그인 정보(`auth.json`)도 별개입니다.
 WSL 안에 OpenCode를 설치(`install.ps1 -InstallOpenCode`)하고 거기서 `opencode auth login`을 다시 해야 합니다.
 Windows 네이티브 `.cmd` 실행기는 인자 이스케이프 문제가 있어 임의 프롬프트를 넘기는 용도로 사용하지 않습니다.
+
+## 무료 모델만으로 보드 실행 (등록한 공급자 없이)
+`opencode/…`, `openai/…` 모델의 텍스트 단계는 OpenCode가 임시 git 폴더에서 처리합니다(파일 수정·명령 실행 금지 문구를 앞에 붙임).
+그래도 도구를 쓸 수 있는 에이전트이므로 `--allow-opencode`와 승인이 필요합니다.
+```bash
+python3 -m workshop.orchestrator examples/board-spec.free.json --dry-run          # 보드만 생성
+python3 -m workshop.orchestrator examples/board-spec.free.json --allow-opencode --approve-text-agents
+```
+`--approve-text-agents`는 텍스트 단계에만 적용되며 코드 단계는 계속 `--approve-code <id>`가 필요합니다.
