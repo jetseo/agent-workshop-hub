@@ -1,6 +1,7 @@
 """Opt-in local integrations. No implicit CLI execution or paid API calls."""
 import json
 import os
+import re
 import shutil
 import subprocess
 import urllib.request
@@ -20,7 +21,9 @@ def ollama_models(base_url="http://127.0.0.1:11434", timeout=3):
         data = json.load(response)
     return [item["name"] for item in data.get("models", [])]
 
-def run_opencode(prompt, workspace, *, enabled=False, timeout=600):
+MODEL_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._:/@-]*")
+
+def run_opencode(prompt, workspace, *, enabled=False, timeout=600, model=None):
     """Execute a single explicitly enabled OpenCode run in an existing worktree.
 
     Callers must review prompt, workspace, permissions and provider configuration.
@@ -38,8 +41,14 @@ def run_opencode(prompt, workspace, *, enabled=False, timeout=600):
         raise ValueError("Use a dedicated Git worktree or repository directory")
     if not isinstance(prompt, str) or not prompt.strip() or len(prompt) > 20000:
         raise ValueError("Prompt must be nonempty and <= 20000 characters")
+    command = [binary, "run"]
+    if model is not None:
+        # provider/model as listed by `opencode models`; never passed through a shell.
+        if not isinstance(model, str) or len(model) > 200 or not MODEL_PATTERN.fullmatch(model):
+            raise ValueError("Model must look like provider/model")
+        command += ["--model", model]
     completed = subprocess.run(
-        [binary, "run", prompt], cwd=directory, capture_output=True, text=True,
+        command + [prompt], cwd=directory, capture_output=True, text=True,
         timeout=timeout, check=False, env=os.environ.copy(),
     )
     return {"exit_code": completed.returncode,
