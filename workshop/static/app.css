@@ -7,7 +7,7 @@ nav .spacer{flex:1}
 nav small{color:#9ca3af}
 main{flex:1;min-height:0;position:relative}
 main>iframe,main>#pane-terminal{position:absolute;inset:0;width:100%;height:100%;border:0;background:#111827}
-main>[hidden]{display:none}
+[hidden]{display:none!important}
 #pane-terminal{display:flex;flex-direction:column;background:#000}
 #term{flex:1;min-height:0;padding:6px}
 #term-bar{padding:6px 10px;background:#111827;border-top:1px solid #374151;font-size:13px;color:#9ca3af;display:flex;gap:10px;align-items:center}

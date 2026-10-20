@@ -109,6 +109,10 @@ def make_handler(queue, token, boards_root=None, providers=None, chat_fn=None, l
             line = re.sub(r"(key=)[^&\s]+", r"\1***", format % args)
             print("%s - - [%s] %s" % (self.address_string(), self.log_date_time_string(), line), flush=True)
 
+        def _embedded(self):
+            # Browsers label requests for framed documents (also form posts/redirects inside the frame).
+            return self.headers.get("Sec-Fetch-Dest") == "iframe"
+
         def _origin_ok(self):
             port = str(self.server.server_port)
             return self.headers.get("Origin") in ("http://127.0.0.1:" + port, "http://localhost:" + port)
@@ -231,7 +235,7 @@ def make_handler(queue, token, boards_root=None, providers=None, chat_fn=None, l
                                "form-action 'self'; frame-ancestors 'none'")
                 return
             if route == "/setup":
-                self._send(200, setup_html())
+                self._send(200, setup_html(embedded=self._embedded()))
                 return
             if route in ("/boards", "/board"):
                 # Read-only view of shared boards; running models stays in the CLI/worker.
@@ -240,7 +244,7 @@ def make_handler(queue, token, boards_root=None, providers=None, chat_fn=None, l
                     ids = sorted((d.name for d in root.glob("*") if (d / "board.md").is_file()), reverse=True) if root.is_dir() else []
                     items = "".join('<li><a href="/board?id=' + quote(i) + '">' + html.escape(i) + '</a></li>' for i in ids)
                     self._send(200, '<!doctype html><html lang="ko"><meta charset="utf-8"><body style="font-family:sans-serif;background:#111827;color:#e5e7eb;max-width:900px;margin:30px auto">'
-                               '<h1>Boards / 보드</h1><a href="/" style="color:#93c5fd">← Tasks</a><ul>' + (items or "<li>No boards yet. / 보드가 없습니다.</li>") + '</ul></body></html>')
+                               '<h1>Boards / 보드</h1>' + ("" if self._embedded() else '<a href="/" style="color:#93c5fd">← Tasks</a>') + '<ul>' + (items or "<li>No boards yet. / 보드가 없습니다.</li>") + '</ul></body></html>')
                     return
                 board_id = parse_qs(urlsplit(self.path).query).get("id", [""])[0]
                 target = root / board_id / "board.md"
@@ -293,6 +297,8 @@ def make_handler(queue, token, boards_root=None, providers=None, chat_fn=None, l
                              '<small>' + kind + ' · <span class="tag">' + state + STATE_KO.get(job["state"], "") + '</span></small></div>'
                              + detail + approve + '</div>')
             page = PAGE.replace("__TOKEN__", token).replace("__JOBS__", "".join(cards) or "<p>No tasks yet. / 아직 작업이 없습니다.</p>")
+            if self._embedded():
+                page = re.sub(r'<p><a href="/setup".*?</p>', "", page, count=1, flags=re.S)
             self._send(200, page)
 
         def do_POST(self):
@@ -321,14 +327,14 @@ def make_handler(queue, token, boards_root=None, providers=None, chat_fn=None, l
                     self._send(403, "Forbidden", "text/plain")
                     return
                 if path == "/setup/run":
-                    self._send(200, setup_html(result=setup_page.run_test(registry, form, do_chat)))
+                    self._send(200, setup_html(result=setup_page.run_test(registry, form, do_chat), embedded=self._embedded()))
                     return
                 if path == "/setup/models":
                     try:
                         listing = setup_page.run_models(registry, form.get("name", [""])[0], do_list)
-                        self._send(200, setup_html(models=listing))
+                        self._send(200, setup_html(models=listing, embedded=self._embedded()))
                     except (ValueError, RuntimeError, OSError) as error:
-                        self._send(200, setup_html(notice="모델 목록 실패: " + str(error)))
+                        self._send(200, setup_html(notice="모델 목록 실패: " + str(error), embedded=self._embedded()))
                     return
                 if path == "/setup/remove":
                     registry.remove(form.get("name", [""])[0])

@@ -11,6 +11,7 @@ const until = async (fn, ms, what) => { const end = Date.now() + ms; for (;;) { 
   console.log("url after key entry:", page.url());           // key must be gone from the URL
   const tabs = await page.$$eval("nav [data-tab]", els => els.map(e => e.textContent));
   console.log("tabs:", tabs.join(" | "));
+  if (await page.locator("#pane-terminal").isVisible()) throw new Error("hidden terminal pane is visible on the Setup tab");
   // the framed pages load (same-origin iframes under the CSP)
   const setupFrame = page.frameLocator("#pane-setup");
   console.log("setup iframe heading:", await setupFrame.locator("h1").first().textContent());

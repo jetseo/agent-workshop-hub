@@ -135,7 +135,8 @@ def _status_panel(ollama_models, opencode_path):
     return ("<section><h2>0. 현재 상태</h2><ul><li>OpenCode: " + oc + "</li><li>Ollama: " + ol + "</li></ul></section>")
 
 
-def render_page(providers, csrf, *, result=None, models=None, notice="", ollama_models=None, opencode_path=None):
+def render_page(providers, csrf, *, result=None, models=None, notice="", ollama_models=None, opencode_path=None,
+                embedded=False):
     options = "".join('<option value="' + _esc(c["id"]) + '">' + _esc(c["label"]) + "</option>" for c in CATALOG)
     notes = "".join("<li><b>" + _esc(c["label"]) + "</b>: "
                     + (('토큰 발급: <code>' + _esc(c["key_url"]) + "</code>. ") if c["key_url"] else "")
@@ -173,7 +174,7 @@ def render_page(providers, csrf, *, result=None, models=None, notice="", ollama_
             "input[type=text],input[type=password],textarea,select{width:100%;margin:4px 0 10px}button{cursor:pointer;background:#2563eb;border:0}"
             "code,pre{background:#0b1220;padding:2px 5px;border-radius:4px}pre{white-space:pre-wrap;overflow-wrap:anywhere;padding:10px}"
             "td,th{padding:6px 10px;text-align:left}small{color:#9ca3af}a{color:#93c5fd}</style></head><body>"
-            '<h1>시작하기 / Setup</h1><a href="/">← Tasks</a> · <a href="/boards">Boards</a>'
+            '<h1>시작하기 / Setup</h1>' + ("" if embedded else '<a href="/">← Tasks</a> · <a href="/boards">Boards</a>')
             + (("<p><b>" + _esc(notice) + "</b></p>") if notice else "")
             + _status_panel(ollama_models or [], opencode_path)
             + block

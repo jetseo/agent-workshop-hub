@@ -253,6 +253,21 @@ class TerminalHttpTests(unittest.TestCase):
         self.assertNotIn(KEY, out.getvalue())
         self.assertIn("key=***", out.getvalue())
 
+    def test_hidden_panes_cannot_be_overridden_by_display_rules(self):
+        # A pane with an id rule such as `display:flex` otherwise beats [hidden] and covers the other tabs.
+        self.start()
+        css = self.get("/static/app.css")[1].replace(" ", "")
+        self.assertIn("[hidden]{display:none!important}", css)
+
+    def test_navigation_links_are_hidden_only_when_framed(self):
+        """Pages shown inside the app window's tabs must not carry their own cross-page navigation."""
+        self.start()
+        framed = {"Sec-Fetch-Dest": "iframe"}
+        for path, link in (("/setup", 'href="/boards"'), ("/", 'href="/setup"'), ("/boards", 'href="/"')):
+            self.assertIn(link, self.get(path)[1], path)
+            self.assertNotIn(link, self.get(path, framed)[1], path)
+        self.assertIn("시작하기", self.get("/setup", framed)[1])    # the content itself is still there
+
     def test_static_files_are_whitelisted(self):
         self.start()
         response, body = self.get("/static/xterm.js")
@@ -261,3 +276,4 @@ class TerminalHttpTests(unittest.TestCase):
         self.assertEqual(response.getheader("X-Content-Type-Options"), "nosniff")
         for bad in ("/static/VENDOR.md", "/static/../dashboard.py", "/static/..%2fdashboard.py", "/static/LICENSE-xterm.txt"):
             self.assertEqual(self.get(bad)[0].status, 404, bad)
+
