@@ -98,6 +98,11 @@ class ProviderTests(Fixture):
         f = ["--file", str(self.dir / "p2.json")]
         self.assertEqual(onboard.main(f + ["add", "g", "--base-url", "https://x.com/v1", "--key-env", "G_KEY"]), 0)
         self.assertEqual(onboard.main(f + ["list"]), 0)
+        from unittest.mock import patch
+        with patch("workshop.onboard.getpass.getpass", return_value="sk-test-ABCDEFGH1234"):
+            self.assertEqual(onboard.main(f + ["set-key", "g"]), 0)
+            self.assertEqual(onboard.main(f + ["set-key", "nope"]), 1)
+        self.assertEqual(Providers(self.dir / "p2.json").get("g")["api_key"], "sk-test-ABCDEFGH1234")
         self.assertEqual(onboard.main(f + ["test", "g", "m"]), 1)  # no --yes: no request sent
         self.assertEqual(onboard.main(f + ["remove", "g"]), 0)
         self.assertEqual(onboard.main(f + ["remove", "g"]), 1)

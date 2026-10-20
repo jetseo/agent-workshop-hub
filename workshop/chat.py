@@ -5,6 +5,16 @@ import urllib.error
 import urllib.request
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """urllib would re-send the Authorization header to wherever a redirect points. Never follow."""
+
+    def redirect_request(self, *args, **kwargs):
+        return None
+
+
+_OPENER = urllib.request.build_opener(_NoRedirect)
+
+
 def chat(provider, model, messages, *, timeout=120, max_tokens=2000):
     key = provider.get("api_key")  # stored via the setup page; held in memory only
     if not key and provider.get("key_env"):
@@ -18,10 +28,12 @@ def chat(provider, model, messages, *, timeout=120, max_tokens=2000):
     request = urllib.request.Request(provider["base_url"] + "/chat/completions",
                                      data=body, headers=headers, method="POST")
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
+        with _OPENER.open(request, timeout=timeout) as response:
             data = json.load(response)
     except urllib.error.HTTPError as error:
-        hint = {401: " (token rejected)", 403: " (access denied)", 404: " (model or URL not found)",
+        hint = {301: " (redirect refused: check the base URL)", 302: " (redirect refused: check the base URL)",
+                307: " (redirect refused: check the base URL)", 308: " (redirect refused: check the base URL)",
+                401: " (token rejected)", 403: " (access denied)", 404: " (model or URL not found)",
                 429: " (rate limit reached)"}.get(error.code, "")
         raise RuntimeError("Provider returned HTTP " + str(error.code) + hint) from None
     except urllib.error.URLError as error:
@@ -38,7 +50,7 @@ def list_models(provider, *, timeout=20, limit=200):
     headers = {"Authorization": "Bearer " + key} if key else {}
     request = urllib.request.Request(provider["base_url"] + "/models", headers=headers, method="GET")
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
+        with _OPENER.open(request, timeout=timeout) as response:
             data = json.load(response)
     except urllib.error.HTTPError as error:
         raise RuntimeError("Provider returned HTTP " + str(error.code)) from None

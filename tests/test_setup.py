@@ -188,3 +188,40 @@ class HttpSetupTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RedirectSafetyTests(unittest.TestCase):
+    def test_token_is_never_forwarded_through_a_redirect(self):
+        from http.server import BaseHTTPRequestHandler
+        from workshop.chat import chat, list_models
+        seen = []
+
+        class Target(BaseHTTPRequestHandler):
+            def do_ANY(self):
+                seen.append(self.headers.get("Authorization"))
+                self.send_response(200); self.end_headers(); self.wfile.write(b"{}")
+            do_GET = do_POST = do_ANY
+            def log_message(self, *a): pass
+
+        target = ThreadingHTTPServer(("127.0.0.1", 0), Target)
+        target_url = "http://127.0.0.1:" + str(target.server_port) + "/stolen"
+
+        class Redirector(BaseHTTPRequestHandler):
+            def do_ANY(self):
+                self.send_response(307); self.send_header("Location", target_url)
+                self.send_header("Content-Length", "0"); self.end_headers()
+            do_GET = do_POST = do_ANY
+            def log_message(self, *a): pass
+
+        redirector = ThreadingHTTPServer(("127.0.0.1", 0), Redirector)
+        for server in (target, redirector):
+            threading.Thread(target=server.serve_forever, daemon=True).start()
+            self.addCleanup(lambda s=server: (s.shutdown(), s.server_close()))
+        provider = {"base_url": "http://127.0.0.1:" + str(redirector.server_port) + "/v1", "api_key": KEY}
+        with self.assertRaises(RuntimeError) as ctx:
+            chat(provider, "m", [{"role": "user", "content": "hi"}], timeout=5)
+        self.assertIn("HTTP 307", str(ctx.exception))
+        self.assertNotIn(KEY, str(ctx.exception))
+        with self.assertRaises(RuntimeError):
+            list_models(provider, timeout=5)
+        self.assertEqual(seen, [])  # the second server never saw a request, let alone the token

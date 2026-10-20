@@ -7,6 +7,7 @@
   python -m workshop.onboard test NAME MODEL --yes   # one tiny request, only after consent
 """
 import argparse
+import getpass
 import os
 import shutil
 import subprocess
@@ -39,6 +40,8 @@ def main(argv=None):
     add.add_argument("--key-env")
     add.add_argument("--policy", default="unknown", choices=POLICIES)
     add.add_argument("--rpm", type=int, default=0)
+    setk = sub.add_parser("set-key", help="Store a token for a registered provider (prompted, not echoed)")
+    setk.add_argument("name")
     rem = sub.add_parser("remove")
     rem.add_argument("name")
     test = sub.add_parser("test")
@@ -59,9 +62,13 @@ def main(argv=None):
             print("Removed " + args.name)
         elif args.command == "list":
             for name, p in registry.load().items():
-                key = "n/a" if not p["key_env"] else ("set" if os.environ.get(p["key_env"]) else "NOT SET")
                 print(name + "  " + p["base_url"] + "  policy=" + p["data_policy"] +
-                      "  rpm=" + str(p["rpm"]) + "  key(" + str(p["key_env"]) + ")=" + key)
+                      "  rpm=" + str(p["rpm"]) + "  token: " + registry.key_status(name))
+        elif args.command == "set-key":
+            if registry.get(args.name) is None:
+                raise ValueError("Unknown provider; add it first")
+            registry.set_key(args.name, getpass.getpass("Token for " + args.name + " (input hidden): "))
+            print("Saved (" + registry.key_status(args.name) + ")")
         elif args.command == "models":
             out = _opencode(["models"])
             if out is None:
