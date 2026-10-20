@@ -106,3 +106,13 @@ The dashboard shows up to 24 image previews for image tasks in review or done st
 ### CI diagnostics
 
 The validation workflow uploads unittest and runtime preflight logs for Windows and Ubuntu, Python 3.11 and 3.12. Open the GitHub Actions run, select the relevant job, and download the diagnostics artifact. Logs are retained for 14 days. The workflow preserves failing test exit codes, so a captured log does not conceal test failures.
+
+## 서비스 연결 · 토큰 입력 · 프롬프트 테스트 (한 화면)
+`.\start.ps1` (또는 WSL에서 `bash scripts/start.sh`)을 실행하면 브라우저가 `http://127.0.0.1:8787/setup`을 엽니다(`-NoBrowser`로 끌 수 있음).
+1. 서비스를 고르고(Ollama / OpenCode Zen / OpenRouter / Groq / Cerebras / Gemini / Mistral / GitHub Models / 직접 입력),
+2. 토큰을 붙여넣고, 모델 이름과 프롬프트를 쓴 뒤 **테스트 실행**을 누르면 짧은 텍스트 요청 1회(최대 300토큰)를 보내고 응답을 보여줍니다.
+3. 성공하고 "저장"이 체크돼 있으면 서비스가 등록되어 보드 명세에서 `서비스이름/모델`로 쓸 수 있습니다. 목록에서 모델 목록 조회와 삭제(토큰 포함)도 됩니다.
+
+안전 규칙: 토큰은 `~/.agent-workshop/secrets.json`(권한 600, 저장소 밖)에만 저장하고 화면·URL·로그·`providers.json`에 다시 나타나지 않습니다(마지막 4자리 마스킹만 표시). 테스트가 **성공했을 때만** 저장합니다.
+클라우드 서비스는 동의 체크가 필요합니다. 이 화면은 AI 에이전트나 명령을 실행하지 않고 텍스트 요청만 보냅니다. OpenCode 로그인은 터미널의 `opencode auth login`을 쓰세요.
+서비스 주소와 무료 한도는 확인되지 않은 기억 기준입니다. 실패하면 화면의 HTTP 번호(401 토큰, 404 모델/주소, 429 한도)를 보세요.

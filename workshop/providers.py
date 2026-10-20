@@ -38,9 +38,27 @@ def validate(name, entry):
             "data_policy": policy, "rpm": int(entry.get("rpm") or 0)}
 
 
+KEY_PATTERN = re.compile(r"[\x21-\x7e]{8,512}")  # printable ASCII, no whitespace
+
+
+def validate_key(key):
+    key = (key or "").strip()
+    if not KEY_PATTERN.fullmatch(key):
+        raise ValueError("Token must be 8-512 printable characters without spaces")
+    return key
+
+
+def mask_key(key):
+    return "\u2022\u2022\u2022\u2022" + key[-4:] if key and len(key) >= 8 else "\u2022\u2022\u2022\u2022"
+
+
 class Providers:
-    def __init__(self, path=None):
+    """Provider metadata lives in providers.json (no secrets). Tokens entered through the setup page
+    live in a separate secrets.json next to it (mode 0600) and are only ever handed to chat()."""
+
+    def __init__(self, path=None, secrets_path=None):
         self.path = Path(path) if path else default_path()
+        self.secrets_path = Path(secrets_path) if secrets_path else self.path.with_name("secrets.json")
 
     def load(self):
         if not self.path.exists():
@@ -63,6 +81,52 @@ class Providers:
         if data.pop(name, None) is None:
             raise ValueError("Unknown provider")
         self._save(data)
+        self.clear_key(name)
+
+    # --- tokens ---------------------------------------------------------------------------
+    def _load_keys(self):
+        if not self.secrets_path.exists():
+            return {}
+        try:
+            return json.loads(self.secrets_path.read_text(encoding="utf-8"))
+        except ValueError:
+            return {}
+
+    def _save_keys(self, keys):
+        self.secrets_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self.secrets_path.with_suffix(".tmp")
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(json.dumps(keys))
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, self.secrets_path)
+
+    def set_key(self, name, key):
+        if not NAME.fullmatch(name or ""):
+            raise ValueError("Invalid provider name")
+        keys = self._load_keys()
+        keys[name] = validate_key(key)
+        self._save_keys(keys)
+
+    def clear_key(self, name):
+        keys = self._load_keys()
+        if keys.pop(name, None) is not None:
+            self._save_keys(keys)
+
+    def key_status(self, name):
+        """Masked description for display; never the token itself."""
+        key = self._load_keys().get(name)
+        if key:
+            return "saved " + mask_key(key)
+        env = (self.load().get(name) or {}).get("key_env")
+        if env:
+            return "env " + env + (" (set)" if os.environ.get(env) else " (NOT SET)")
+        return "none"
 
     def get(self, name):
-        return self.load().get(name)
+        """Provider entry for use by chat(); includes api_key in memory only when one is stored."""
+        entry = self.load().get(name)
+        if entry is None:
+            return None
+        key = self._load_keys().get(name)
+        return {**entry, "api_key": key} if key else entry

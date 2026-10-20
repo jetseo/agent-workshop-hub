@@ -32,3 +32,10 @@
 - 설치 스크립트의 `command -v opencode/node/npm`도 Windows 바이너리를 잡아 "이미 설치됨"으로 끝날 수 있음.
 - 조치: 설치 스크립트와 `start.sh`는 PATH에서 `/mnt/<드라이브>/`를 제외, 코드는 Windows 쪽 OpenCode를 거부(`WORKSHOP_ALLOW_WINDOWS_OPENCODE=1`로만 허용), stdin 상속 제거, 텍스트 단계 240초 제한.
 - **WSL 네이티브 OpenCode 설치와 보드 E2E는 아직 미검증.**
+
+## 온보딩 페이지 `/setup` (2026-10-20)
+| 항목 | 환경 | 결과 | 비고 |
+|---|---|---|---|
+| 토큰 저장(0600)·마스킹·삭제, 동의 게이트, CSRF/Origin/Host, 응답 이스케이프, 저장 실패 시 미저장 | 클라우드(Linux), 모의 채팅 | 통과 | 모의 테스트. 실제 서비스 호출 아님 |
+| 실제 서비스(OpenCode Zen, OpenRouter, Groq 등) 테스트 호출 | 사용자 PC | **미검증** | 카탈로그의 주소는 확인되지 않은 기억 기준 |
+| `start.ps1` 브라우저 자동 열기 | 사용자 PC | **미검증** | CI의 Windows 문법 검사/dry-run만 통과 필요 |

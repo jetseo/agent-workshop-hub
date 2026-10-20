@@ -9,6 +9,8 @@ import hashlib
 import hmac
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+
+from .adapters import find_opencode
 from urllib.parse import parse_qs, urlsplit, quote
 from .queue import Queue
 
@@ -34,7 +36,7 @@ small{color:#9ca3af} .tag{color:#93c5fd}
 <input name="resource" placeholder="Code: absolute worktree path / Image: workflow JSON path" maxlength="2000">
 <label>Image output directory (optional) <input name="output_dir" placeholder="Absolute directory for generated images" maxlength="2000"></label>
 <button>Add / 추가</button></form></section>
-<h2>Tasks / 작업 목록</h2><p><a href="/boards" style="color:#93c5fd">Boards / 멀티 모델 보드 →</a></p>__JOBS__
+<h2>Tasks / 작업 목록</h2><p><a href="/setup" style="color:#93c5fd">Setup / 서비스 연결·테스트 →</a> · <a href="/boards" style="color:#93c5fd">Boards / 멀티 모델 보드 →</a></p>__JOBS__
 </body></html>"""
 
 STATE_KO = {"pending_approval": " (실행 승인 대기)", "queued": " (대기 중)",
@@ -74,8 +76,22 @@ def gallery_signature(token, job_id, index):
     return hmac.new(token.encode(), f"{job_id}:{index}".encode(), hashlib.sha256).hexdigest()
 
 
-def make_handler(queue, token, boards_root=None):
+def make_handler(queue, token, boards_root=None, providers=None, chat_fn=None, list_fn=None):
     boards_root = boards_root or str(Path.home() / ".agent-workshop" / "boards")
+    from . import setup_page
+    from .providers import Providers
+    registry = providers or Providers()
+    do_chat = chat_fn or setup_page.chat
+    do_list = list_fn or setup_page.list_models
+
+    def setup_html(**kwargs):
+        try:
+            from .adapters import ollama_models
+            ollama = ollama_models(timeout=1)
+        except Exception:
+            ollama = []
+        return setup_page.render_page(registry, token, ollama_models=ollama,
+                                      opencode_path=find_opencode(), **kwargs)
     class Handler(BaseHTTPRequestHandler):
         def _trusted_host(self):
             host = self.headers.get("Host", "")
@@ -149,6 +165,9 @@ def make_handler(queue, token, boards_root=None):
                 self._send(200, json.dumps(public_jobs), "application/json; charset=utf-8")
                 return
             route = urlsplit(self.path).path
+            if route == "/setup":
+                self._send(200, setup_html())
+                return
             if route in ("/boards", "/board"):
                 # Read-only view of shared boards; running models stays in the CLI/worker.
                 root = Path(boards_root)
@@ -216,7 +235,7 @@ def make_handler(queue, token, boards_root=None):
                 self._send(403, "Invalid Host", "text/plain")
                 return
             path = urlsplit(self.path).path
-            if path not in ("/add", "/approve", "/authorize"):
+            if path not in ("/add", "/approve", "/authorize", "/setup/run", "/setup/remove", "/setup/models"):
                 self._send(404, "Not found", "text/plain")
                 return
             try:
@@ -230,11 +249,28 @@ def make_handler(queue, token, boards_root=None):
                         self._send(403, "Invalid Origin", "text/plain")
                         return
                 size = int(self.headers.get("Content-Length", "0"))
-                if size <= 0 or size > 8192:
+                if size <= 0 or size > (32768 if path.startswith("/setup/") else 8192):
                     raise ValueError("Invalid request size")
                 form = parse_qs(self.rfile.read(size).decode("utf-8"), keep_blank_values=True)
                 if not secrets.compare_digest(form.get("token", [""])[0], token):
                     self._send(403, "Forbidden", "text/plain")
+                    return
+                if path == "/setup/run":
+                    self._send(200, setup_html(result=setup_page.run_test(registry, form, do_chat)))
+                    return
+                if path == "/setup/models":
+                    try:
+                        listing = setup_page.run_models(registry, form.get("name", [""])[0], do_list)
+                        self._send(200, setup_html(models=listing))
+                    except (ValueError, RuntimeError, OSError) as error:
+                        self._send(200, setup_html(notice="모델 목록 실패: " + str(error)))
+                    return
+                if path == "/setup/remove":
+                    registry.remove(form.get("name", [""])[0])
+                    self.send_response(303)
+                    self.send_header("Location", "/setup")
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
                     return
                 if path == "/add":
                     kind = form.get("kind", [""])[0]
@@ -273,6 +309,7 @@ def main():
     token = secrets.token_urlsafe(32)
     server = ThreadingHTTPServer(("127.0.0.1", args.port), make_handler(Queue(args.db), token))
     print(f"Dashboard: http://127.0.0.1:{args.port}/", flush=True)
+    print(f"Setup (connect a service and test a prompt): http://127.0.0.1:{args.port}/setup", flush=True)
     print("Loopback only. Stop with Ctrl+C.", flush=True)
     try:
         server.serve_forever()

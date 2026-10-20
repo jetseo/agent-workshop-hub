@@ -6,8 +6,8 @@ import urllib.request
 
 
 def chat(provider, model, messages, *, timeout=120, max_tokens=2000):
-    key = None
-    if provider.get("key_env"):
+    key = provider.get("api_key")  # stored via the setup page; held in memory only
+    if not key and provider.get("key_env"):
         key = os.environ.get(provider["key_env"])
         if not key:
             raise PermissionError("Environment variable " + provider["key_env"] + " is not set")
@@ -21,10 +21,29 @@ def chat(provider, model, messages, *, timeout=120, max_tokens=2000):
         with urllib.request.urlopen(request, timeout=timeout) as response:
             data = json.load(response)
     except urllib.error.HTTPError as error:
-        raise RuntimeError("Provider returned HTTP " + str(error.code)) from None
+        hint = {401: " (token rejected)", 403: " (access denied)", 404: " (model or URL not found)",
+                429: " (rate limit reached)"}.get(error.code, "")
+        raise RuntimeError("Provider returned HTTP " + str(error.code) + hint) from None
     except urllib.error.URLError as error:
         raise RuntimeError("Provider unreachable: " + str(error.reason)[:200]) from None
     try:
         return data["choices"][0]["message"]["content"]
     except (KeyError, IndexError, TypeError):
         raise RuntimeError("Unexpected provider response format") from None
+
+
+def list_models(provider, *, timeout=20, limit=200):
+    """GET {base_url}/models (OpenAI-compatible). Returns model id strings."""
+    key = provider.get("api_key") or (os.environ.get(provider["key_env"]) if provider.get("key_env") else None)
+    headers = {"Authorization": "Bearer " + key} if key else {}
+    request = urllib.request.Request(provider["base_url"] + "/models", headers=headers, method="GET")
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            data = json.load(response)
+    except urllib.error.HTTPError as error:
+        raise RuntimeError("Provider returned HTTP " + str(error.code)) from None
+    except urllib.error.URLError as error:
+        raise RuntimeError("Provider unreachable: " + str(error.reason)[:200]) from None
+    items = data.get("data") if isinstance(data, dict) else data
+    ids = [i.get("id") for i in (items or []) if isinstance(i, dict) and isinstance(i.get("id"), str)]
+    return ids[:limit]
