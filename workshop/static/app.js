@@ -118,7 +118,12 @@
   }
 
   /* ---------- theme / sidebar ---------- */
-  function applyTheme(t) { document.documentElement.dataset.theme = t; store("theme", t); }
+  function applyTheme(t) {
+    document.documentElement.dataset.theme = t; store("theme", t);
+    var b = $("theme");
+    b.textContent = t === "dark" ? "\u2600" : "\u263E";               // sun in dark mode, moon in light mode
+    b.title = b.ariaLabel = t === "dark" ? "밝은 테마로 전환" : "어두운 테마로 전환";
+  }
   applyTheme(store("theme") || (window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"));
   $("theme").addEventListener("click", function () { applyTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark"); });
   function setSide(open) {
@@ -128,6 +133,13 @@
     store("side", open ? "1" : "0");
   }
   setSide(window.innerWidth > 760 && store("side") !== "0");
+  var wasNarrow = window.innerWidth <= 760;
+  window.addEventListener("resize", function () {          // shrinking the window must not leave the sidebar covering the chat
+    var narrow = window.innerWidth <= 760;
+    if (narrow && !wasNarrow) setSide(false);
+    else if (!narrow && wasNarrow) setSide(store("side") !== "0");
+    wasNarrow = narrow;
+  });
   $("side-close").addEventListener("click", function () { setSide(false); });
   $("side-open").addEventListener("click", function () { setSide(true); });
   $("scrim").addEventListener("click", function () { setSide(false); });
