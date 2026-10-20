@@ -48,5 +48,5 @@
 | PTY 셸(명령 실행, 크기 변경, 종료) | 클라우드(Linux) | 통과 | |
 | 보안 경계: 키/쿠키/Origin/Host/토큰, 잘못된 토큰이면 프로세스 미생성, 연결 종료 시 셸 종료, 세션 3개 제한, 정적 파일 화이트리스트, 키 로그 가림 | 클라우드(Linux), 실제 소켓 | 통과 | |
 | 실제 Chromium에서 xterm.js: 키 입장→URL 정리, 탭/iframe, 입력·출력 표시, 창 크기 변경→`stty size`, 쿠키 없는 접속은 locked, 엄격한 CSP 하에서 콘솔 오류 없음 | 클라우드(Linux, Chromium 1194) | 통과 | `scripts/e2e/terminal-browser.js`. Windows Edge 아님 |
-| Windows 러너 CI(PowerShell 문법, `start.ps1 -DryRun -Terminal`, `create-shortcut.ps1 -DryRun`) | GitHub | 확인 대기 | 아래 CI 기록 참조 |
+| Windows 러너 CI(PowerShell 문법, `start.ps1 -DryRun -Terminal`, `create-shortcut.ps1 -DryRun`, 단위 테스트 136개) | GitHub 러너 | **통과** (커밋 `11e176f`) | Windows **실기기 아님**. 이 dry-run은 바로가기를 실제로 만들거나 창을 열지 않음 |
 | Edge 앱 창 열기, 바탕화면 바로가기 생성, WSL에서의 터미널 동작 | 사용자 PC | **미검증** | |
