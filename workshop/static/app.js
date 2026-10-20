@@ -1,62 +1,581 @@
 (function () {
   "use strict";
-  var body = document.body;
-  var state = body.dataset.terminal;            // off | locked | ready
-  var tabs = Array.prototype.slice.call(document.querySelectorAll("nav [data-tab]"));
-  var panes = {
-    setup: document.getElementById("pane-setup"), tasks: document.getElementById("pane-tasks"),
-    boards: document.getElementById("pane-boards"), terminal: document.getElementById("pane-terminal")
-  };
-  var term = null, fit = null, socket = null;
-  var status = document.getElementById("term-status");
-  var reconnect = document.getElementById("term-reconnect");
+  var body = document.body, CSRF = body.dataset.csrf, TERM = body.dataset.terminal;
+  var state = { providers: [], catalog: [], onboarded: false, chats: [], chat: null, model: "",
+                view: "chat", streaming: null, wiz: null };
+  var VIEWS = ["chat", "settings", "tasks", "boards", "terminal"];
+  var SUGGESTIONS = ["이 프로젝트의 빠른 시작 가이드를 5줄로 요약해줘",
+                     "파이썬으로 CSV 파일을 읽어서 열별 합계를 구하는 코드를 작성해줘",
+                     "다음 문장을 자연스러운 영어로 번역해줘: 오늘 회의는 3시에 시작합니다.",
+                     "회의록을 깔끔하게 정리하는 방법을 단계별로 알려줘"];
 
-  function show(name) {
-    tabs.forEach(function (b) { b.setAttribute("aria-selected", String(b.dataset.tab === name)); });
-    Object.keys(panes).forEach(function (k) { if (panes[k]) panes[k].hidden = (k !== name); });
-    if (name === "terminal" && state === "ready") startTerminal();
+  function $(id) { return document.getElementById(id); }
+  function h(tag, props) {
+    var el = document.createElement(tag), i;
+    props = props || {};
+    Object.keys(props).forEach(function (k) {
+      var v = props[k];
+      if (k === "class") el.className = v;
+      else if (k === "text") el.textContent = v;
+      else if (k.slice(0, 2) === "on") el.addEventListener(k.slice(2), v);
+      else if (v !== false && v != null) el.setAttribute(k, v);
+    });
+    for (i = 2; i < arguments.length; i++) append(el, arguments[i]);
+    return el;
+  }
+  function append(el, c) {
+    if (c == null || c === false) return;
+    if (Array.isArray(c)) c.forEach(function (x) { append(el, x); });
+    else el.appendChild(typeof c === "string" ? document.createTextNode(c) : c);
+  }
+  function toast(message) {
+    var t = $("toast");
+    t.textContent = message; t.hidden = false;
+    clearTimeout(toast.timer);
+    toast.timer = setTimeout(function () { t.hidden = true; }, 2200);
+  }
+  function store(key, value) { try { if (value === undefined) return localStorage.getItem(key); localStorage.setItem(key, value); } catch (e) { return null; } }
+
+  /* ---------- API ---------- */
+  async function api(method, path, data) {
+    var res = await fetch("/api/v1" + path, { method: method,
+      headers: { "X-CSRF-Token": CSRF, "Content-Type": "application/json" },
+      body: data === undefined ? undefined : JSON.stringify(data) });
+    var json = {};
+    try { json = await res.json(); } catch (e) { /* empty body */ }
+    if (!res.ok) throw new Error(json.error || ("HTTP " + res.status));
+    return json;
+  }
+  async function* sseEvents(res) {
+    var reader = res.body.getReader(), dec = new TextDecoder("utf-8"), buf = "", r, idx;
+    for (;;) {
+      r = await reader.read();
+      if (r.done) break;
+      buf += dec.decode(r.value, { stream: true });
+      while ((idx = buf.indexOf("\n\n")) >= 0) {
+        var block = buf.slice(0, idx), ev = { event: "message", data: "" };
+        buf = buf.slice(idx + 2);
+        block.split("\n").forEach(function (line) {
+          if (line.indexOf("event: ") === 0) ev.event = line.slice(7);
+          else if (line.indexOf("data: ") === 0) ev.data += line.slice(6);
+        });
+        try { ev.data = JSON.parse(ev.data); } catch (e) { continue; }
+        yield ev;
+      }
+    }
   }
 
-  function send(obj) { if (socket && socket.readyState === 1) socket.send(JSON.stringify(obj)); }
+  /* ---------- safe markdown (everything is escaped before any tag is added) ---------- */
+  function esc(s) { return s.replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
+  function inline(s) {
+    return s.replace(/`([^`\n]+)`/g, "<code>$1</code>")
+      .replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>")
+      .replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<em>$2</em>")
+      .replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+  }
+  function mdBlocks(text) {
+    var out = [], para = [], list = null, m;
+    function flushPara() { if (para.length) { out.push("<p>" + inline(esc(para.join("\n"))).replace(/\n/g, "<br>") + "</p>"); para = []; } }
+    function flushList() {
+      if (list) { out.push("<" + list.tag + ">" + list.items.map(function (i) { return "<li>" + inline(esc(i)) + "</li>"; }).join("") + "</" + list.tag + ">"); list = null; }
+    }
+    text.split("\n").forEach(function (line) {
+      if ((m = /^(#{1,3})\s+(.*)$/.exec(line))) { flushPara(); flushList(); out.push("<h" + m[1].length + ">" + inline(esc(m[2])) + "</h" + m[1].length + ">"); }
+      else if ((m = /^\s*[-*]\s+(.*)$/.exec(line))) { flushPara(); if (!list || list.tag !== "ul") { flushList(); list = { tag: "ul", items: [] }; } list.items.push(m[1]); }
+      else if ((m = /^\s*\d+[.)]\s+(.*)$/.exec(line))) { flushPara(); if (!list || list.tag !== "ol") { flushList(); list = { tag: "ol", items: [] }; } list.items.push(m[1]); }
+      else if ((m = /^>\s?(.*)$/.exec(line))) { flushPara(); flushList(); out.push("<blockquote><p>" + inline(esc(m[1])) + "</p></blockquote>"); }
+      else if (!line.trim()) { flushPara(); flushList(); }
+      else { flushList(); para.push(line); }
+    });
+    flushPara(); flushList();
+    return out.join("");
+  }
+  function renderMarkdown(src) {
+    var parts = [], re = /```([\w+-]*)[^\S\n]*\n([\s\S]*?)(?:```|$)/g, last = 0, m;
+    while ((m = re.exec(src))) {
+      parts.push(mdBlocks(src.slice(last, m.index)));
+      parts.push('<div class="codebox"><div class="bar"><span>' + esc(m[1] || "code") + '</span><button type="button" data-copy="1">복사</button></div><pre><code>' +
+                 esc(m[2].replace(/\n$/, "")) + "</code></pre></div>");
+      last = re.lastIndex;
+      if (m[0].length === 0) re.lastIndex++;
+    }
+    parts.push(mdBlocks(src.slice(last)));
+    return parts.join("");
+  }
+  function copyText(text) {
+    // Copy synchronously inside the click first: navigator.clipboard can wait forever on a permission prompt.
+    if (fallbackCopy(text)) { toast("복사했습니다"); return; }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function () { toast("복사했습니다"); }, function () { toast("복사하지 못했습니다"); });
+    } else toast("복사하지 못했습니다");
+  }
+  function fallbackCopy(text) {
+    var ta = h("textarea", { style: "position:fixed;top:0;left:0;opacity:0", "aria-hidden": "true" }), ok = false;
+    ta.value = text; document.body.appendChild(ta); ta.select();
+    try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+    ta.remove();
+    return ok;
+  }
 
-  function connect() {
-    var scheme = location.protocol === "https:" ? "wss://" : "ws://";
-    socket = new WebSocket(scheme + location.host + "/terminal/ws");
+  /* ---------- theme / sidebar ---------- */
+  function applyTheme(t) { document.documentElement.dataset.theme = t; store("theme", t); }
+  applyTheme(store("theme") || (window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"));
+  $("theme").addEventListener("click", function () { applyTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark"); });
+  function setSide(open) {
+    $("side").classList.toggle("collapsed", !open);
+    body.classList.toggle("side-closed", !open);
+    $("scrim").hidden = !(open && window.innerWidth <= 760);
+    store("side", open ? "1" : "0");
+  }
+  setSide(window.innerWidth > 760 && store("side") !== "0");
+  $("side-close").addEventListener("click", function () { setSide(false); });
+  $("side-open").addEventListener("click", function () { setSide(true); });
+  $("scrim").addEventListener("click", function () { setSide(false); });
+
+  /* ---------- state ---------- */
+  function modelOptions() {
+    var o = [];
+    state.providers.forEach(function (p) { p.models.forEach(function (m) { o.push({ ref: p.name + "/" + m, provider: p, model: m }); }); });
+    return o;
+  }
+  function isFree(m) { return /(-free|:free)$/.test(m); }
+  function modelLabel(ref) {
+    var o = modelOptions().filter(function (x) { return x.ref === ref; })[0];
+    return o ? o.provider.label + " · " + o.model : "";
+  }
+  function pickDefaultModel() {
+    var opts = modelOptions();
+    if (state.model && opts.some(function (o) { return o.ref === state.model; })) return;
+    var ref = state.chats[0] && state.chats[0].model;
+    state.model = (ref && opts.some(function (o) { return o.ref === ref; })) ? ref : (opts[0] ? opts[0].ref : "");
+  }
+  async function loadState() {
+    var s = await api("GET", "/state");
+    state.providers = s.providers; state.catalog = s.catalog; state.onboarded = s.onboarded;
+    pickDefaultModel(); renderModelBtn(); renderWelcome();
+  }
+  async function loadChats() { state.chats = (await api("GET", "/chats")).chats; pickDefaultModel(); renderChats(); renderModelBtn(); }
+
+  /* ---------- sidebar chat list ---------- */
+  function groupName(ts) {
+    var now = new Date(), d = new Date(ts * 1000), start = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    if (d.getTime() >= start) return "오늘";
+    if (d.getTime() >= start - 86400000) return "어제";
+    if (d.getTime() >= start - 6 * 86400000) return "지난 7일";
+    return "이전";
+  }
+  function renderChats() {
+    var list = $("chatlist"), lastGroup = "";
+    list.textContent = "";
+    state.chats.forEach(function (c) {
+      var g = groupName(c.updated);
+      if (g !== lastGroup) { list.appendChild(h("div", { class: "group", text: g })); lastGroup = g; }
+      var item = h("div", { class: "chat-item" + (state.chat && state.chat.id === c.id ? " active" : ""), role: "listitem", "data-id": c.id },
+        h("button", { class: "t", text: c.title, title: c.title, onclick: function () { openChat(c.id); } }),
+        h("span", { class: "acts" },
+          h("button", { title: "이름 변경", "aria-label": "이름 변경", text: "✎", onclick: function (e) { e.stopPropagation(); renameChat(c, item); } }),
+          h("button", { title: "삭제", "aria-label": "삭제", text: "✕", onclick: function (e) { e.stopPropagation(); deleteChat(c); } })));
+      list.appendChild(item);
+    });
+  }
+  function renameChat(c, item) {
+    var input = h("input", { value: c.title, maxlength: "80", "aria-label": "대화 이름" });
+    item.textContent = ""; item.appendChild(input); input.focus(); input.select();
+    var finished = false;
+    async function commit(save) {
+      if (finished) return; finished = true;
+      if (save && input.value.trim() && input.value.trim() !== c.title) {
+        try { await api("PATCH", "/chats/" + c.id, { title: input.value.trim() }); if (state.chat && state.chat.id === c.id) state.chat.title = input.value.trim(); }
+        catch (e) { toast(e.message); }
+      }
+      loadChats();
+    }
+    input.addEventListener("keydown", function (e) { if (e.key === "Enter" && !e.isComposing) commit(true); else if (e.key === "Escape") commit(false); });
+    input.addEventListener("blur", function () { commit(true); });
+  }
+  async function deleteChat(c) {
+    if (!window.confirm("'" + c.title + "' 대화를 삭제할까요?")) return;
+    try { await api("DELETE", "/chats/" + c.id); } catch (e) { toast(e.message); return; }
+    if (state.chat && state.chat.id === c.id) newChat();
+    loadChats();
+  }
+
+  /* ---------- views ---------- */
+  function showView(name) {
+    state.view = name;
+    VIEWS.forEach(function (v) {
+      var el = $("view-" + v);
+      if (!el) return;
+      el.hidden = (v !== name);
+      if (v === name && el.tagName === "IFRAME" && el.getAttribute("src") === "about:blank") el.setAttribute("src", el.dataset.src);
+    });
+    Array.prototype.forEach.call(document.querySelectorAll(".side-nav [data-view]"), function (b) { b.classList.toggle("active", b.dataset.view === name); });
+    $("modelbtn").parentNode.style.visibility = name === "chat" ? "visible" : "hidden";
+    if (name === "terminal") startTerminal();
+    if (name === "chat") loadState();
+    if (window.innerWidth <= 760) setSide(false);
+  }
+  Array.prototype.forEach.call(document.querySelectorAll(".side-nav [data-view]"), function (b) { b.addEventListener("click", function () { showView(b.dataset.view); }); });
+
+  /* ---------- chat view ---------- */
+  function renderModelBtn() {
+    var label = modelLabel(state.model);
+    var btn = $("modelbtn");
+    btn.firstChild.nodeValue = label || (state.onboarded ? "모델 선택" : "서비스 연결 필요");
+  }
+  function renderWelcome() {
+    var w = $("welcome");
+    w.textContent = "";
+    if (state.chat && state.chat.messages.length) { w.hidden = true; return; }
+    w.hidden = false;
+    if (!state.onboarded) {
+      w.append(h("h1", { text: "시작해 볼까요?" }),
+        h("p", { text: "먼저 AI 서비스를 하나 연결하세요. 토큰 입력과 테스트까지 1분이면 끝납니다." }),
+        h("button", { class: "cta", text: "서비스 연결하기", onclick: function () { openWizard(); } }));
+      return;
+    }
+    w.append(h("h1", { text: "무엇을 도와드릴까요?" }), h("p", { text: modelLabel(state.model) ? modelLabel(state.model) + " 모델로 대화합니다." : "" }),
+      h("div", { class: "chips" }, SUGGESTIONS.map(function (s) {
+        return h("button", { class: "chip", type: "button", text: s, onclick: function () { $("input").value = s; autosize(); updateSend(); $("input").focus(); } });
+      })));
+  }
+  function scrollDown(force) {
+    var s = $("scroller");
+    if (force || s.scrollHeight - s.scrollTop - s.clientHeight < 140) s.scrollTop = s.scrollHeight;
+  }
+  function typing() { return h("span", { class: "typing", "aria-label": "답변 작성 중" }, h("b"), h("b"), h("b")); }
+  function fillActions(actions, getText, withRegen) {
+    actions.textContent = "";
+    actions.appendChild(h("button", { type: "button", text: "복사", onclick: function () { copyText(getText()); } }));
+    if (withRegen) actions.appendChild(h("button", { type: "button", text: "다시 생성", "data-regen": "1", onclick: function () { regenerate(); } }));
+  }
+  function assistantNode(content, withRegen) {
+    var md = h("div", { class: "md" }), actions = h("div", { class: "actions" });
+    md.innerHTML = renderMarkdown(content);
+    fillActions(actions, function () { return content; }, withRegen);
+    return { md: md, actions: actions, wrap: h("div", { class: "msg assistant" }, h("div", { class: "avatar", text: "A" }), h("div", { class: "col" }, md, actions)) };
+  }
+  function renderMessages() {
+    var box = $("messages"), msgs = state.chat ? state.chat.messages : [];
+    box.textContent = "";
+    msgs.forEach(function (m, i) {
+      if (m.role === "user") box.appendChild(h("div", { class: "msg user" }, h("div", { class: "bubble", text: m.content })));
+      else box.appendChild(assistantNode(m.content, i === msgs.length - 1).wrap);
+    });
+    renderWelcome(); scrollDown(true);
+  }
+  function newChat() {
+    state.chat = null; state.streaming = null;
+    $("messages").textContent = ""; renderChats(); renderWelcome(); showView("chat");
+    $("input").focus();
+  }
+  async function openChat(id) {
+    if (state.streaming) { toast("응답을 만드는 중입니다. 중지하거나 끝날 때까지 기다려 주세요."); return; }
+    try { state.chat = await api("GET", "/chats/" + id); } catch (e) { toast(e.message); return; }
+    if (state.chat.model && modelOptions().some(function (o) { return o.ref === state.chat.model; })) state.model = state.chat.model;
+    renderModelBtn(); renderMessages(); renderChats(); showView("chat");
+  }
+  function updateSend() {
+    var b = $("send"), busy = !!state.streaming;
+    b.classList.toggle("stop", busy);
+    b.textContent = busy ? "■" : "↑";
+    b.setAttribute("aria-label", busy ? "중지" : "보내기");
+    b.disabled = !busy && !$("input").value.trim();
+  }
+  function autosize() { var t = $("input"); t.style.height = "auto"; t.style.height = Math.min(t.scrollHeight, 200) + "px"; }
+
+  async function send(text, regenerateMode) {
+    if (state.streaming) return;
+    if (!state.model) { openWizard(); return; }
+    var chat = state.chat;
+    if (!chat) {
+      try { chat = state.chat = await api("POST", "/chats", { model: state.model }); } catch (e) { toast(e.message); return; }
+    }
+    $("welcome").hidden = true;
+    var box = $("messages");
+    if (regenerateMode) {
+      if (chat.messages.length && chat.messages[chat.messages.length - 1].role === "assistant") chat.messages.pop();
+      if (box.lastChild && box.lastChild.classList.contains("assistant")) box.removeChild(box.lastChild);
+    } else {
+      chat.messages.push({ role: "user", content: text });
+      box.appendChild(h("div", { class: "msg user" }, h("div", { class: "bubble", text: text })));
+    }
+    Array.prototype.forEach.call(box.querySelectorAll("[data-regen]"), function (b) { b.remove(); });   // only the newest answer can be regenerated
+    var node = assistantNode("", false);
+    node.md.textContent = ""; node.md.appendChild(typing());
+    node.actions.hidden = true;
+    box.appendChild(node.wrap); scrollDown(true);
+    var ctrl = new AbortController();
+    state.streaming = { ctrl: ctrl }; updateSend(); renderChats();
+    var acc = "", failed = "", aborted = false, title = "", raf = 0;
+    function paint() { raf = 0; node.md.innerHTML = renderMarkdown(acc); scrollDown(false); }
+    try {
+      var res = await fetch("/api/v1/chats/" + chat.id + "/send", { method: "POST", signal: ctrl.signal,
+        headers: { "X-CSRF-Token": CSRF, "Content-Type": "application/json" },
+        body: JSON.stringify(regenerateMode ? { regenerate: true, model: state.model } : { content: text, model: state.model }) });
+      if (!res.ok) { var j = {}; try { j = await res.json(); } catch (e) { /* ignore */ } throw new Error(j.error || ("HTTP " + res.status)); }
+      for await (var ev of sseEvents(res)) {
+        if (ev.event === "meta") loadChats();            // the chat now has its title: show it in the sidebar right away
+        else if (ev.event === "delta") { acc += ev.data.t; if (!raf) raf = requestAnimationFrame(paint); }
+        else if (ev.event === "done") title = ev.data.title;
+        else if (ev.event === "error") failed = ev.data.message;
+      }
+    } catch (e) {
+      if (e.name === "AbortError") aborted = true; else failed = e.message;
+    } finally {
+      if (raf) cancelAnimationFrame(raf);
+      state.streaming = null;
+    }
+    if (aborted && acc) acc += "\n\n*(중단됨)*";
+    var finalText = acc;
+    // Finish in place: replacing the node would drop a click or text selection made at the last moment.
+    node.md.innerHTML = acc ? renderMarkdown(acc) : (aborted ? "(중단됨)" : "");
+    if (acc) {
+      chat.messages.push({ role: "assistant", content: acc });
+      fillActions(node.actions, function () { return finalText; }, true);
+      node.actions.hidden = false;
+    }
+    if (failed) {
+      node.wrap.querySelector(".col").appendChild(h("div", { class: "err" }, failed + " ",
+        h("button", { class: "btn", type: "button", text: "다시 시도", onclick: function () { regenerate(); } })));
+    }
+    if (title) chat.title = title;
+    updateSend(); await loadChats();
+  }
+  function regenerate() { if (!state.streaming && state.chat) send(null, true); }
+
+  $("composer").addEventListener("submit", function (e) {
+    e.preventDefault();
+    if (state.streaming) { state.streaming.ctrl.abort(); return; }
+    var text = $("input").value.trim();
+    if (!text) return;
+    $("input").value = ""; autosize(); updateSend(); send(text, false);
+  });
+  $("input").addEventListener("input", function () { autosize(); updateSend(); });
+  $("input").addEventListener("keydown", function (e) {
+    // Korean/Japanese IME: Enter that commits a composition must not send the message.
+    if (e.key === "Enter" && !e.shiftKey && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); if (!state.streaming) $("composer").requestSubmit(); }
+  });
+  $("newchat").addEventListener("click", newChat);
+  $("messages").addEventListener("click", function (e) {
+    var b = e.target.closest && e.target.closest("button[data-copy]");
+    if (b) copyText(b.closest(".codebox").querySelector("pre").textContent);
+  });
+
+  /* ---------- model picker ---------- */
+  function closeMenu() { $("modelmenu").hidden = true; $("modelbtn").setAttribute("aria-expanded", "false"); }
+  async function chooseModel(ref) {
+    state.model = ref; renderModelBtn(); renderWelcome(); closeMenu();
+    if (state.chat) { try { await api("PATCH", "/chats/" + state.chat.id, { model: ref }); } catch (er) { toast(er.message); } }
+  }
+  function renderMenu() {
+    var menu = $("modelmenu");
+    menu.textContent = "";
+    state.providers.forEach(function (p) {
+      if (!p.models.length) return;
+      menu.appendChild(h("div", { class: "mh" }, p.label, h("span", { class: "tag", text: p.policy === "local" ? "내 PC" : "클라우드" })));
+      p.models.forEach(function (m) {
+        var ref = p.name + "/" + m;
+        menu.appendChild(h("button", { type: "button", role: "option", class: ref === state.model ? "sel" : "", "data-ref": ref, onclick: function () { chooseModel(ref); } },
+          h("span", { text: m }), isFree(m) ? h("span", { class: "tag free", text: "무료" }) : null));
+      });
+      menu.appendChild(h("button", { type: "button", class: "more", "data-more": p.name, text: "모델 더 보기…", onclick: function (e) { e.stopPropagation(); renderMoreModels(p); } }));
+    });
+    menu.appendChild(h("button", { type: "button", class: "foot", text: "+ 서비스 연결 · 서비스 추가", onclick: function () { closeMenu(); openWizard(); } }));
+  }
+  async function renderMoreModels(p) {
+    var menu = $("modelmenu");
+    menu.textContent = "";
+    menu.appendChild(h("div", { class: "mh" }, h("button", { type: "button", text: "\u2190 " + p.label, onclick: function (e) { e.stopPropagation(); renderMenu(); } })));
+    var status = h("div", { class: "mh", text: "모델 목록을 불러오는 중…" });
+    var box = h("div", { id: "more-list" });
+    var filter = h("input", { type: "search", id: "more-filter", placeholder: "모델 검색", "aria-label": "모델 검색", style: "width:calc(100% - 12px);margin:4px 6px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--fg);font:inherit" });
+    menu.append(filter, status, box);
+    var all = [];
+    function paint() {
+      box.textContent = "";
+      var f = filter.value.trim().toLowerCase();
+      all.filter(function (m) { return !f || m.toLowerCase().indexOf(f) >= 0; }).slice(0, 60).forEach(function (m) {
+        box.appendChild(h("button", { type: "button", "data-pick": m, onclick: async function (e) {
+          e.stopPropagation();
+          try { if (p.models.indexOf(m) < 0) await api("POST", "/providers/models", { name: p.name, model: m }); await loadState(); await chooseModel(p.name + "/" + m); }
+          catch (er) { toast(er.message); }
+        } }, h("span", { text: m }), isFree(m) ? h("span", { class: "tag free", text: "무료" }) : null));
+      });
+    }
+    filter.addEventListener("input", paint); filter.addEventListener("click", function (e) { e.stopPropagation(); });
+    try { all = (await api("POST", "/onboard/models", { service: p.name })).models; status.textContent = all.length + "개 모델 · 이름이 -free/:free로 끝나면 무료"; paint(); filter.focus(); }
+    catch (e) { status.textContent = "불러오지 못했습니다: " + e.message; }
+  }
+  $("modelbtn").addEventListener("click", function (e) {
+    e.stopPropagation();
+    if (!$("modelmenu").hidden) { closeMenu(); return; }
+    renderMenu();
+    $("modelmenu").hidden = false; $("modelbtn").setAttribute("aria-expanded", "true");
+  });
+  document.addEventListener("click", function (e) { if (!e.target.closest || !e.target.closest(".model-wrap")) closeMenu(); });
+
+  /* ---------- onboarding wizard ---------- */
+  function openWizard() {
+    state.wiz = { step: 1, service: null, customName: "", customUrl: "", key: "", showKey: false, consent: false,
+                  models: [], modelsError: "", model: "", filter: "", busy: false, error: "", result: null };
+    $("wizard").hidden = false; renderWizard();
+  }
+  function closeWizard() { $("wizard").hidden = true; state.wiz = null; $("wizard").textContent = ""; }
+  function svc() {
+    var w = state.wiz;
+    if (w.service === "custom") {
+      var local = /^http:\/\/(127\.0\.0\.1|localhost)([:\/]|$)/.test(w.customUrl);
+      return { id: "custom", label: "직접 입력 (OpenAI 호환)", policy: local ? "local" : "cloud-may-train", needs_key: !local, key_url: "",
+               note: "OpenAI 호환 주소(…/v1)를 입력하세요. 이 PC(127.0.0.1)의 서버라면 토큰이 필요 없습니다." };
+    }
+    return state.catalog.filter(function (c) { return c.id === w.service; })[0];
+  }
+  function wizPayload(extra) {
+    var w = state.wiz, p = { service: w.service };
+    if (w.service === "custom") { p.custom_name = w.customName.trim(); p.custom_url = w.customUrl.trim(); }
+    if (w.key) p.key = w.key.trim();
+    if (w.consent) p.consent = "on";
+    return Object.assign(p, extra || {});
+  }
+  function renderWizard() {
+    var w = state.wiz, root = $("wizard");
+    if (!w) return;
+    root.textContent = "";
+    var title = ["서비스 선택", "연결 정보", "모델 선택과 테스트"][w.step - 1];
+    var card = h("div", { class: "card", role: "dialog", "aria-modal": "true", "aria-label": "서비스 연결" },
+      h("header", {}, h("div", {}, h("h2", { text: "서비스 연결 · " + title }), h("p", { class: "sub", text: "토큰은 이 PC에만 저장되며 화면에 다시 나타나지 않습니다." })),
+        h("button", { class: "icon", "aria-label": "닫기", text: "✕", onclick: function () { if (!w.busy) closeWizard(); } })),
+      h("div", { class: "steps" }, [1, 2, 3].map(function (n) { return h("i", { class: n <= w.step ? "on" : "" }); })));
+    if (w.step === 1) wizStep1(card, w); else if (w.step === 2) wizStep2(card, w); else wizStep3(card, w);
+    root.appendChild(h("div", { class: "card-wrap", style: "display:contents" }, card));
+  }
+  function wizStep1(card, w) {
+    var items = state.catalog.map(function (c) {
+      return h("button", { class: "svc", type: "button", "data-service": c.id, onclick: function () { w.service = c.id; w.step = 2; w.error = ""; renderWizard(); } },
+        h("b", { text: c.label }), h("span", { text: c.policy === "local" ? "토큰 불필요 · 내 PC에서 실행" : "클라우드 · 토큰 필요" }));
+    });
+    items.push(h("button", { class: "svc", type: "button", "data-service": "custom", onclick: function () { w.service = "custom"; w.step = 2; w.error = ""; renderWizard(); } },
+      h("b", { text: "직접 입력" }), h("span", { text: "OpenAI 호환 주소를 직접 지정" })));
+    card.appendChild(h("div", { class: "grid" }, items));
+    card.appendChild(h("p", { class: "note", text: "처음이라면 무료 티어가 있는 서비스나 Ollama(내 PC)를 추천합니다. 무료 서비스는 입력이 학습에 쓰일 수 있고 한도가 자주 바뀝니다." }));
+  }
+  function wizStep2(card, w) {
+    var meta = svc();
+    var cloud = meta.policy !== "local";
+    card.appendChild(h("p", { class: "note", text: meta.label + " — " + meta.note }));
+    if (w.service === "custom") {
+      card.appendChild(h("label", { class: "field" }, h("span", { text: "이름 (영문 소문자·숫자·-·_)" }),
+        h("input", { type: "text", maxlength: "32", value: w.customName, placeholder: "예: myservice", id: "w-name", oninput: function (e) { w.customName = e.target.value; } })));
+      card.appendChild(h("label", { class: "field" }, h("span", { text: "주소" }),
+        h("input", { type: "text", maxlength: "300", value: w.customUrl, placeholder: "https://…/v1  또는  http://127.0.0.1:포트/v1", id: "w-url",
+          oninput: function (e) { w.customUrl = e.target.value; var c = svc().policy !== "local"; $("w-consent-row").hidden = !c; $("w-token-row").hidden = !svc().needs_key && !w.key; } })));
+    }
+    var keyInput = h("input", { type: w.showKey ? "text" : "password", id: "w-key", maxlength: "512", autocomplete: "off", spellcheck: "false", value: w.key,
+      placeholder: meta.needs_key ? "토큰 / API 키 붙여넣기" : "필요하면 입력 (이 서비스는 보통 불필요)", oninput: function (e) { w.key = e.target.value; } });
+    card.appendChild(h("label", { class: "field", id: "w-token-row", hidden: w.service !== "custom" && !meta.needs_key && !w.key },
+      h("span", { text: "토큰 / API 키" }),
+      h("div", { class: "row" }, keyInput, h("button", { class: "btn", type: "button", text: w.showKey ? "숨기기" : "보기", onclick: function () { w.showKey = !w.showKey; keyInput.type = w.showKey ? "text" : "password"; this.textContent = w.showKey ? "숨기기" : "보기"; } }))));
+    if (meta.key_url) card.appendChild(h("p", { class: "sub" }, "토큰 발급: ", h("a", { href: meta.key_url, target: "_blank", rel: "noopener noreferrer", text: meta.key_url })));
+    card.appendChild(h("label", { class: "check", id: "w-consent-row", hidden: !cloud },
+      h("input", { type: "checkbox", id: "w-consent", checked: w.consent ? "checked" : false, onchange: function (e) { w.consent = e.target.checked; sync(); } }),
+      h("span", { text: "토큰과 대화 내용이 이 서비스로 전송되고, 무료 티어는 입력이 학습에 쓰일 수 있으며, 모델에 따라 요금이 부과될 수 있음을 이해했습니다." })));
+    var err = h("p", { class: "err", id: "w-err", text: w.error });
+    var next = h("button", { class: "btn primary", type: "button", id: "w-next", text: w.busy ? "확인 중…" : "연결 확인", onclick: async function () {
+      w.busy = true; w.error = ""; sync();
+      try { w.models = (await api("POST", "/onboard/models", wizPayload())).models; w.modelsError = ""; }
+      catch (e) { w.models = []; w.modelsError = e.message; }
+      w.busy = false; w.step = 3; w.model = w.models[0] || ""; renderWizard();
+    } });
+    card.appendChild(err);
+    card.appendChild(h("div", { class: "foot" }, h("button", { class: "btn", type: "button", text: "뒤로", onclick: function () { w.step = 1; w.error = ""; renderWizard(); } }), next));
+    function sync() {
+      var meta2 = svc();
+      next.disabled = w.busy || (meta2.policy !== "local" && !w.consent) || (meta2.needs_key && !w.key.trim()) || (w.service === "custom" && (!w.customName.trim() || !w.customUrl.trim()));
+      next.textContent = w.busy ? "확인 중…" : "연결 확인";
+    }
+    card.addEventListener("input", sync); sync();
+  }
+  function wizStep3(card, w) {
+    if (w.result && w.result.ok) {
+      card.appendChild(h("p", { class: "ok", text: "연결에 성공했고 저장했습니다 (" + w.result.seconds + "초)" }));
+      card.appendChild(h("div", { class: "reply", text: w.result.reply }));
+      card.appendChild(h("div", { class: "foot" }, h("span"), h("button", { class: "btn primary", type: "button", id: "w-start", text: "대화 시작", onclick: async function () {
+        var ref = w.result.provider + "/" + w.result.model;
+        await loadState(); state.model = ref; renderModelBtn();   // update first, then close: no flash of the "connect a service" screen
+        closeWizard(); newChat();
+      } })));
+      return;
+    }
+    if (w.modelsError) card.appendChild(h("p", { class: "note", text: "모델 목록을 불러오지 못했습니다 (" + w.modelsError + "). 모델 이름을 직접 입력해도 됩니다." }));
+    var listBox = h("div", { class: "models", id: "w-models" });
+    function paintList() {
+      listBox.textContent = "";
+      var f = w.filter.trim().toLowerCase();
+      var shown = w.models.filter(function (m) { return !f || m.toLowerCase().indexOf(f) >= 0; }).slice(0, 80);
+      shown.forEach(function (m) {
+        listBox.appendChild(h("button", { type: "button", class: m === w.model ? "sel" : "", "data-model": m, onclick: function () { w.model = m; manual.value = m; paintList(); } },
+          h("span", { text: m }), isFree(m) ? h("span", { class: "tag free", text: "무료" }) : null));
+      });
+      listBox.hidden = !shown.length;
+    }
+    var manual = h("input", { type: "text", id: "w-model", maxlength: "200", value: w.model, placeholder: "모델 이름", oninput: function (e) { w.model = e.target.value; paintList(); sync(); } });
+    if (w.models.length) card.appendChild(h("label", { class: "field" }, h("span", { text: "모델 검색 (" + w.models.length + "개)" }),
+      h("input", { type: "search", id: "w-filter", value: w.filter, placeholder: "이름으로 찾기", oninput: function (e) { w.filter = e.target.value; paintList(); } })));
+    card.appendChild(listBox);
+    card.appendChild(h("label", { class: "field" }, h("span", { text: "선택한 모델 (직접 입력 가능)" }), manual));
+    card.appendChild(h("p", { class: "note", text: "이름이 -free 또는 :free로 끝나는 모델이 무료입니다. 그 밖의 모델은 요금이 부과될 수 있으니 서비스의 요금 안내를 확인하세요." }));
+    var err = h("p", { class: "err", text: w.error });
+    var go = h("button", { class: "btn primary", type: "button", id: "w-test", text: w.busy ? "테스트 중…" : "테스트하고 저장", onclick: async function () {
+      w.busy = true; w.error = ""; renderWizard();
+      try {
+        var r = await api("POST", "/onboard/test", wizPayload({ model: w.model.trim(), prompt: "한 문장으로 짧게 인사해줘.", save: "on" }));
+        if (r.ok) { w.result = r; w.key = ""; } else w.error = r.error;
+      } catch (e) { w.error = e.message; }
+      w.busy = false; renderWizard();
+    } });
+    function sync() { go.disabled = w.busy || !w.model.trim(); }
+    card.appendChild(err);
+    card.appendChild(h("div", { class: "foot" }, h("button", { class: "btn", type: "button", text: "뒤로", onclick: function () { w.step = 2; w.error = ""; renderWizard(); } }), go));
+    paintList(); sync();
+  }
+  document.addEventListener("keydown", function (e) { if (e.key === "Escape" && state.wiz && !state.wiz.busy) closeWizard(); });
+
+  /* ---------- terminal ---------- */
+  var term = null, fit = null, socket = null;
+  function termSend(obj) { if (socket && socket.readyState === 1) socket.send(JSON.stringify(obj)); }
+  function termConnect() {
+    var status = $("term-status"), reconnect = $("term-reconnect");
+    socket = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/terminal/ws");
     socket.binaryType = "arraybuffer";
-    status.textContent = "연결 중…";
-    reconnect.hidden = true;
+    status.textContent = "연결 중…"; reconnect.hidden = true;
     socket.onopen = function () {
       fit.fit();
-      send({ t: "auth", token: body.dataset.termToken, cols: term.cols, rows: term.rows });
-      status.textContent = "연결됨 (WSL 셸)";
-      term.focus();
+      termSend({ t: "auth", token: body.dataset.termToken, cols: term.cols, rows: term.rows });
+      status.textContent = "연결됨 (WSL 셸)"; term.focus();
     };
-    socket.onmessage = function (event) {
-      term.write(event.data instanceof ArrayBuffer ? new Uint8Array(event.data) : event.data);
-    };
-    socket.onclose = function () {
-      status.textContent = "연결 종료됨";
-      reconnect.hidden = false;
-    };
+    socket.onmessage = function (event) { term.write(event.data instanceof ArrayBuffer ? new Uint8Array(event.data) : event.data); };
+    socket.onclose = function () { status.textContent = "연결 종료됨"; reconnect.hidden = false; };
   }
-
   function startTerminal() {
+    if (TERM !== "ready") return;
     if (term) { fit.fit(); term.focus(); return; }
-    term = new Terminal({ cursorBlink: true, fontSize: 14, scrollback: 5000,
-                          fontFamily: "Consolas, 'Cascadia Mono', monospace",
-                          theme: { background: "#000000" } });
+    term = new Terminal({ cursorBlink: true, fontSize: 14, scrollback: 5000, fontFamily: "Consolas, 'Cascadia Mono', monospace", theme: { background: "#000000" } });
     fit = new FitAddon.FitAddon();
-    term.loadAddon(fit);
-    term.open(document.getElementById("term"));
-    fit.fit();
-    term.onData(function (data) { send({ t: "i", d: data }); });
-    term.onResize(function (size) { send({ t: "r", c: size.cols, r: size.rows }); });
-    new ResizeObserver(function () { if (!panes.terminal.hidden) fit.fit(); })
-      .observe(document.getElementById("term"));
-    reconnect.addEventListener("click", function () { term.reset(); connect(); });
-    connect();
+    term.loadAddon(fit); term.open($("term")); fit.fit();
+    term.onData(function (data) { termSend({ t: "i", d: data }); });
+    term.onResize(function (size) { termSend({ t: "r", c: size.cols, r: size.rows }); });
+    new ResizeObserver(function () { if (!$("view-terminal").hidden) fit.fit(); }).observe($("term"));
+    $("term-reconnect").addEventListener("click", function () { term.reset(); termConnect(); });
+    termConnect();
   }
 
-  tabs.forEach(function (b) { b.addEventListener("click", function () { show(b.dataset.tab); }); });
-  show(location.hash === "#terminal" && state !== "off" ? "terminal" : "setup");
+  /* ---------- start ---------- */
+  (async function init() {
+    updateSend();
+    try { await loadState(); await loadChats(); } catch (e) { toast("상태를 불러오지 못했습니다: " + e.message); }
+    renderWelcome(); showView("chat");
+    if (!state.onboarded) openWizard();
+    $("input").focus();
+  })();
 })();

@@ -54,15 +54,19 @@ def looks_free(model):
     return model.endswith(":free") or model.endswith("-free")
 
 
-def resolve_service(form):
-    """-> (name, entry). Catalog id, or 'custom' with its own name and URL."""
+def resolve_service(form, providers=None):
+    """-> (name, entry). Catalog id, 'custom' with its own name and URL, or an already registered service."""
     service = _field(form, "service")
     if service in BY_ID:
         c = BY_ID[service]
         return c["id"], {"base_url": c["base_url"], "data_policy": c["policy"], "needs_key": c["needs_key"],
                          "default_model": c["model"]}
     if service != "custom":
-        raise ValueError("Choose a service")
+        stored = providers.get(service) if providers is not None and NAME.fullmatch(service) else None
+        if not stored:
+            raise ValueError("Choose a service")
+        return service, {"base_url": stored["base_url"], "data_policy": stored["data_policy"],
+                         "needs_key": stored["data_policy"] != "local", "default_model": ""}
     name, url = _field(form, "custom_name"), _field(form, "custom_url")
     if not NAME.fullmatch(name):
         raise ValueError("Custom name: lowercase letters, digits, - or _ (max 32)")
@@ -79,7 +83,7 @@ def run_test(providers, form, chat_fn=chat):
     result = {"ok": False, "provider": "", "model": "", "reply": "", "error": "", "saved": False, "seconds": 0.0}
     key = ""
     try:
-        name, entry = resolve_service(form)
+        name, entry = resolve_service(form, providers)
         result["provider"] = name
         model = _field(form, "model") or entry["default_model"]
         prompt = _field(form, "prompt")
@@ -125,7 +129,7 @@ def public_catalog():
 
 def models_for_form(providers, form, list_fn=list_models):
     """Model names offered by a service, using a typed token or the stored one. Nothing is saved."""
-    name, entry = resolve_service(form)
+    name, entry = resolve_service(form, providers)
     stored = providers.get(name) or {}
     key = _field(form, "key")
     key = validate_key(key) if key else stored.get("api_key")

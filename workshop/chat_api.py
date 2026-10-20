@@ -180,6 +180,14 @@ def dispatch(ctx, method, path, body):
             return Json(200, {"models": setup_page.models_for_form(ctx.providers, _form(body), ctx.list_fn)})
         if parts == ["onboard", "test"] and method == "POST":
             return Json(200, setup_page.run_test(ctx.providers, _form(body), ctx.chat_fn))
+        if parts == ["providers", "models"] and method == "POST":
+            name, model = str(body.get("name", "")), str(body.get("model", "")).strip()
+            if ctx.providers.get(name) is None:
+                raise ApiError(400, "연결되지 않은 서비스입니다.")
+            if not 1 <= len(model) <= 200 or any(ch.isspace() for ch in model):
+                raise ApiError(400, "모델 이름이 올바르지 않습니다.")
+            ctx.providers.add_model(name, model)
+            return Json(200, {"ok": True})
         if parts == ["providers", "remove"] and method == "POST":
             ctx.providers.remove(str(body.get("name", "")))
             return Json(200, {"ok": True})

@@ -50,3 +50,12 @@
 | 실제 Chromium에서 xterm.js: 키 입장→URL 정리, 탭/iframe, 입력·출력 표시, 창 크기 변경→`stty size`, 쿠키 없는 접속은 locked, 엄격한 CSP 하에서 콘솔 오류 없음 | 클라우드(Linux, Chromium 1194) | 통과 | `scripts/e2e/terminal-browser.js`. Windows Edge 아님 |
 | Windows 러너 CI(PowerShell 문법, `start.ps1 -DryRun -Terminal`, `create-shortcut.ps1 -DryRun`, 단위 테스트 136개) | GitHub 러너 | **통과** (커밋 `11e176f`) | Windows **실기기 아님**. 이 dry-run은 바로가기를 실제로 만들거나 창을 열지 않음 |
 | Edge 앱 창 열기, 바탕화면 바로가기 생성, WSL에서의 터미널 동작 | 사용자 PC | **미검증** | |
+
+## 채팅 화면 + 온보딩 마법사 (2026-10-20)
+| 항목 | 환경 | 결과 | 비고 |
+|---|---|---|---|
+| 대화 저장소(경로 이탈 방지, 한도, 권한 700/600, 정렬), 서비스별 모델·동의 기록 | 클라우드(Linux) | 통과 | 단위 테스트. 같은 초에 갱신된 대화 정렬 결함을 테스트가 잡아 수정 |
+| `/api/v1` 인증(Host/Origin/CSRF 헤더), 스트리밍, 중지 시 부분 응답 저장, 동시 전송 차단, 오류 표시, 클라우드 동의 게이트, 토큰이 응답에 나오지 않음 | 클라우드(Linux), 실제 HTTP + 모의 OpenAI 서버 | 통과 | |
+| 실제 Chromium: 첫 실행 마법사 → 모델 목록 → 테스트·저장 → 한글 대화 스트리밍, IME Enter, 마크다운/XSS 차단, 중지, 모델 전체 목록, 사이드바 이름 변경·삭제·새로고침 유지, 테마, 좁은 창 | 클라우드(Linux, Chromium 1194) | 통과 (6회 연속) | `scripts/e2e/chat-browser.js`. 간헐 실패 3건(복사 클릭 유실, 마법사 닫힘 순간 깜빡임, 새 대화가 응답 끝나야 목록에 표시)을 제품 쪽에서 수정 |
+| 실제 서비스(OpenRouter, Groq 등)로 연결·대화 | 사용자 PC | **미검증** | 카탈로그 주소는 기억 기준. 모의 서버로만 확인 |
+| Windows Edge 앱 창에서의 화면·입력(한글 IME 포함) | 사용자 PC | **미검증** | |

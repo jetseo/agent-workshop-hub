@@ -64,8 +64,12 @@ from workshop.dashboard import make_handler
 from workshop.providers import Providers
 from workshop.queue import Queue
 
+import hashlib
+import hmac
+
 KEY = "start-up-key-for-tests"
 CSRF = "csrf-token-for-tests"
+TERM_TOKEN = hmac.new(CSRF.encode(), b"terminal-websocket", hashlib.sha256).hexdigest()
 
 
 def masked_text(text):
@@ -172,7 +176,8 @@ class TerminalHttpTests(unittest.TestCase):
         self.start()
         response, body = self.get("/app")
         self.assertIn('data-terminal="locked"', body)
-        self.assertNotIn(CSRF, body)                       # the token is not handed to cookie-less callers
+        self.assertNotIn(TERM_TOKEN, body)                 # the shell token is not handed to cookie-less callers
+        self.assertIn('data-csrf="' + CSRF + '"', body)    # (the chat API token is: it only opens chat, not a shell)
         self.assertEqual(self.get("/app?key=wrong")[0].status, 403)
         cookie_value, header = self.login()
         self.assertIn("HttpOnly", header)
@@ -180,7 +185,7 @@ class TerminalHttpTests(unittest.TestCase):
         self.assertNotIn(KEY, header)                      # the cookie is not the URL key
         response, body = self.get("/app", {"Cookie": "workshop_term=" + cookie_value})
         self.assertIn('data-terminal="ready"', body)
-        self.assertIn(CSRF, body)
+        self.assertIn('data-term-token="' + TERM_TOKEN + '"', body)
         csp = response.getheader("Content-Security-Policy")
         self.assertIn("frame-ancestors 'none'", csp)
         self.assertIn("ws://127.0.0.1:%d" % self.port, csp)
@@ -203,7 +208,8 @@ class TerminalHttpTests(unittest.TestCase):
         self.start(argv=["sh", "-c", "touch marker; sleep 5"])
         marker = self.dir / "marker"
         cookie, _ = self.login()
-        for hello in ({"t": "auth", "token": "wrong"}, {"t": "i", "d": "x"}):
+        # the page-wide API token must not unlock the shell either
+        for hello in ({"t": "auth", "token": "wrong"}, {"t": "auth", "token": CSRF}, {"t": "i", "d": "x"}):
             client = self.ws(cookie=cookie)
             client.send_json(**hello)
             opcode, _ = client.frame()
@@ -216,7 +222,7 @@ class TerminalHttpTests(unittest.TestCase):
         self.start()
         cookie, _ = self.login()
         client = self.ws(cookie=cookie)
-        client.send_json(t="auth", token=CSRF, cols=100, rows=30)
+        client.send_json(t="auth", token=TERM_TOKEN, cols=100, rows=30)
         client.send_json(t="i", d="echo $((6*7)) > out.txt; cat out.txt; echo $$ > pid.txt; stty size\n")
         seen = client.read_until(b"30 100")
         self.assertIn(b"42", seen)

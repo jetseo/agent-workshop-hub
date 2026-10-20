@@ -8,14 +8,18 @@ const until = async (fn, ms, what) => { const end = Date.now() + ms; for (;;) { 
   page.on("console", m => { if (["error", "warning"].includes(m.type())) problems.push(m.type() + ": " + m.text()); });
   page.on("pageerror", e => problems.push("pageerror: " + e.message));
   await page.goto(`http://127.0.0.1:${port}/app?key=${key}`);
-  console.log("url after key entry:", page.url());           // key must be gone from the URL
-  const tabs = await page.$$eval("nav [data-tab]", els => els.map(e => e.textContent));
-  console.log("tabs:", tabs.join(" | "));
-  if (await page.locator("#pane-terminal").isVisible()) throw new Error("hidden terminal pane is visible on the Setup tab");
+  console.log("url after key entry:", page.url());
+  await until(async () => await page.locator("#wizard").isVisible(), 8000, "first-run wizard");
+  await page.locator('#wizard [aria-label="닫기"]').click();      // the wizard can be dismissed
+  await until(async () => !(await page.locator("#wizard").isVisible()), 3000, "wizard closed");           // key must be gone from the URL
+  const tabs = await page.$$eval(".side-nav [data-view]", els => els.map(e => e.textContent.replace(/\s+/g, "")));
+  console.log("sidebar views:", tabs.join(" | "));
+  if (await page.locator("#view-terminal").isVisible()) throw new Error("hidden terminal view is visible on the chat view");
   // the framed pages load (same-origin iframes under the CSP)
-  const setupFrame = page.frameLocator("#pane-setup");
-  console.log("setup iframe heading:", await setupFrame.locator("h1").first().textContent());
-  await page.click('nav [data-tab="terminal"]');
+  await page.click('.side-nav [data-view="settings"]');
+  const setupFrame = page.frameLocator("#view-settings");
+  console.log("settings iframe heading:", await setupFrame.locator("h1").first().textContent());
+  await page.click('.side-nav [data-view="terminal"]');
   await page.waitForSelector(".xterm-rows", { timeout: 10000 });
   await until(async () => (await page.locator("#term-status").textContent()).includes("연결됨"), 10000, "terminal connected");
   await page.click(".xterm");

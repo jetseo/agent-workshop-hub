@@ -89,6 +89,9 @@ def make_handler(queue, token, boards_root=None, providers=None, chat_fn=None, l
 
     api = api_ctx or Context(registry, ChatStore(chats_dir),
                              chat_fn=do_chat if chat_fn else setup_page.chat, list_fn=do_list)
+    # The terminal WebSocket token is derived separately and only rendered for holders of the entry cookie,
+    # so the page-wide API token (needed by the chat window) never unlocks the shell.
+    terminal_token = hmac.new(token.encode(), b"terminal-websocket", hashlib.sha256).hexdigest()
     terminal_cookie = (hmac.new(token.encode(), terminal_key.encode(), hashlib.sha256).hexdigest()
                        if terminal_key else None)
 
@@ -278,7 +281,7 @@ def make_handler(queue, token, boards_root=None, providers=None, chat_fn=None, l
                 elif not (self._origin_ok() and self._terminal_cookie_ok()):
                     self._send(403, "Forbidden", "text/plain")
                 else:
-                    terminal.serve_socket(self, token=token, argv=terminal_argv, cwd=terminal_cwd)
+                    terminal.serve_socket(self, token=terminal_token, argv=terminal_argv, cwd=terminal_cwd)
                 return
             if route == "/app":
                 supplied = parse_qs(urlsplit(self.path).query).get("key", [""])[0]
@@ -293,7 +296,7 @@ def make_handler(queue, token, boards_root=None, providers=None, chat_fn=None, l
                         self._send(403, "Invalid key", "text/plain")
                     return
                 state = "off" if not terminal_key else ("ready" if self._terminal_cookie_ok() else "locked")
-                self._send(200, app_page.render(state, token if state == "ready" else ""),
+                self._send(200, app_page.render(state, terminal_token if state == "ready" else "", token),
                            csp="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
                                "img-src 'self' data:; font-src 'self'; frame-src 'self'; "
                                "connect-src 'self' ws://127.0.0.1:" + str(self.server.server_port) +

@@ -294,3 +294,22 @@ class StreamParserTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ModelManagementTests(ApiBase):
+    def test_registered_service_models_can_be_listed_and_added_without_a_new_token(self):
+        self.onboard()
+        status, listing = self.jcall("POST", "/onboard/models", {"service": "mock"})     # by registered name
+        self.assertEqual(status, 200)
+        self.assertIn("demo-free:free", listing["models"])
+        self.assertTrue(any(r[2] == "Bearer " + SECRET for r in self.mock.requests if r[1] == "/v1/models"))  # stored token is used
+        self.assertEqual(self.jcall("POST", "/providers/models", {"name": "mock", "model": "demo-free:free"})[0], 200)
+        state = self.jcall("GET", "/state")[1]
+        self.assertEqual(state["providers"][0]["models"], ["demo-free:free", "demo-model"])
+        chat_id = self.new_chat("mock/demo-free:free")
+        self.assertEqual(self.sse(chat_id, {"content": "hi"})[1][-1][0], "done")
+        for bad in ({"name": "nope", "model": "x"}, {"name": "mock", "model": ""}, {"name": "mock", "model": "has space"},
+                    {"name": "mock", "model": "x" * 201}):
+            self.assertEqual(self.jcall("POST", "/providers/models", bad)[0], 400, bad)
+        self.assertEqual(self.jcall("POST", "/onboard/models", {"service": "not-registered"})[0], 400)
+        self.assertFalse(any(SECRET in text for text in self.transcript))
