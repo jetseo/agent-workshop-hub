@@ -18,6 +18,12 @@ from workshop.queue import Queue
 KEY = "sk-test-SECRET-1234567890abcd"
 
 
+def assert_private(test, path):
+    """0600 is enforced on Linux/WSL (ext4). NTFS has no Unix mode bits (always reports 0o666)."""
+    if os.name != "nt":
+        test.assertEqual(stat.S_IMODE(os.stat(path).st_mode), 0o600)
+
+
 def form(**values):
     return {k: [v] for k, v in values.items()}
 
@@ -32,8 +38,7 @@ class TokenStoreTests(unittest.TestCase):
     def test_key_is_stored_privately_and_never_in_provider_metadata(self):
         self.providers.add("svc", base_url="https://api.example.com/v1", data_policy="cloud-may-train")
         self.providers.set_key("svc", KEY)
-        mode = stat.S_IMODE(os.stat(self.providers.secrets_path).st_mode)
-        self.assertEqual(mode, 0o600)
+        assert_private(self, self.providers.secrets_path)
         self.assertNotIn(KEY, (self.dir / "providers.json").read_text(encoding="utf-8"))
         self.assertNotIn("api_key", self.providers.load()["svc"])
         self.assertEqual(self.providers.get("svc")["api_key"], KEY)
@@ -163,7 +168,7 @@ class HttpSetupTests(unittest.TestCase):
         self.assertNotIn(KEY, listing)
         self.assertIn(mask_key(KEY), listing)
         self.assertNotIn(KEY, (Path(self.tmp.name) / "providers.json").read_text(encoding="utf-8"))
-        self.assertEqual(stat.S_IMODE(os.stat(self.providers.secrets_path).st_mode), 0o600)
+        assert_private(self, self.providers.secrets_path)
 
     def test_csrf_origin_and_host_are_enforced(self):
         self.assertEqual(self.run_form(token="wrong")[0], 403)
