@@ -15,8 +15,20 @@ ROLES = ("user", "assistant")
 DEFAULT_TITLE = "새 채팅"
 
 
+_clock_lock = threading.Lock()
+_last_stamp = 0.0
+
+
 def _now():
-    return round(time.time(), 3)        # milliseconds: chats touched in the same second must still sort correctly
+    """Strictly increasing microsecond timestamps: two writes in the same instant must still sort in the
+    order they happened (a fast machine can otherwise stamp them identically)."""
+    global _last_stamp
+    with _clock_lock:
+        stamp = round(time.time(), 6)
+        if stamp <= _last_stamp:
+            stamp = round(_last_stamp + 0.000001, 6)
+        _last_stamp = stamp
+        return stamp
 
 
 def default_dir():

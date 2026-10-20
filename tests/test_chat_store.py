@@ -33,6 +33,18 @@ class ChatStoreTests(unittest.TestCase):
         with self.assertRaises(LookupError):
             self.store.get(a["id"])
 
+    def test_recency_order_holds_even_when_everything_happens_back_to_back(self):
+        # CI machines are fast enough to touch two chats within the same clock tick.
+        for _ in range(60):
+            a, b = self.store.create(), self.store.create()
+            self.store.append(a["id"], "user", "later than b was created")
+            self.assertEqual(self.store.list()[0]["id"], a["id"])
+            self.store.append(b["id"], "user", "even later")
+            self.assertEqual(self.store.list()[0]["id"], b["id"])
+            self.store.delete(a["id"]); self.store.delete(b["id"])
+        stamps = [self.store.create()["updated"] for _ in range(200)]
+        self.assertEqual(stamps, sorted(set(stamps)))              # strictly increasing, no duplicates
+
     def test_ids_are_validated_against_path_tricks(self):
         for bad in ("../x", "..", "", "a" * 36, "00000000-0000-0000-0000-00000000000/../x", None, 5,
                     "00000000-0000-0000-0000-000000000000.json"):
