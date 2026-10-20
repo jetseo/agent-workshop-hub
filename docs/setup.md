@@ -118,3 +118,22 @@ The validation workflow uploads unittest and runtime preflight logs for Windows 
 서비스 주소와 무료 한도는 확인되지 않은 기억 기준입니다. 실패하면 화면의 HTTP 번호(401 토큰, 404 모델/주소, 429 한도)를 보세요.
 
 참고: 권한 600은 WSL/Linux 파일 시스템에서만 강제됩니다. Windows 네이티브 NTFS는 이 권한 비트가 없어 사용자 프로필 폴더의 기본 접근 권한에 의존합니다(Hub는 WSL에서 실행하는 것을 전제로 합니다).
+
+## 프로그램처럼 쓰기: 앱 창 + 내장 터미널
+```powershell
+.\scripts\create-shortcut.ps1 -DryRun     # 먼저 무엇을 만들지 확인
+.\scripts\create-shortcut.ps1             # 바탕화면에 "Agent Workshop" 바로가기 생성
+```
+바로가기를 실행하면 `start.ps1 -Terminal`이 WSL에서 허브를 시작하고, 서버가 뜨면 **Edge 앱 창**(주소창·탭 없는 별도 창)을 엽니다. Edge가 없으면 기본 브라우저가 열립니다. 직접 실행: `.\start.ps1 -Terminal`
+(창을 열지 않으려면 `-NoBrowser`). 창 안에는 탭 4개가 있습니다: **설정 · 작업 · 보드 · 터미널**.
+
+- **터미널 탭**은 WSL의 bash를 그대로 보여줍니다(색·방향키·대화형 화면 지원, 예: `opencode auth login`, `python3 -m workshop.onboard models`). 작업 폴더는 허브 저장소이고, Windows PATH를 섞지 않아 WSL 안에 설치한 OpenCode가 잡힙니다.
+- 콘솔 창은 최소화되어 있지만 **서버를 담고 있으니 닫으면 허브가 종료**됩니다.
+
+### 터미널 보안 (중요)
+내장 터미널은 **사용자 계정 권한으로 명령을 실행하는 셸**입니다. 그래서 기본은 꺼져 있고 `-Terminal`(또는 `--enable-terminal`)을 줘야만 켜집니다.
+- 입장에는 서버 시작 때마다 새로 만드는 **비공개 키 링크**(`/app?key=…`)가 필요합니다. 키는 `~/.agent-workshop/terminal.key`(권한 600)에 저장되고, 서버 로그에는 `key=***`로 가려집니다. 링크를 공유하지 마세요.
+- 입장하면 HttpOnly·SameSite=Strict 쿠키가 발급되고 주소창에서 키가 사라집니다. 쿠키가 없는 접속은 토큰조차 받지 못합니다.
+- WebSocket 연결은 loopback Host, 이 서버의 Origin, 쿠키, 첫 메시지의 토큰을 모두 통과해야 하고, 동시 세션은 3개로 제한됩니다. 연결이 끊기면 셸 프로세스도 종료됩니다.
+- 허브는 계속 `127.0.0.1`에만 바인딩됩니다. 포트를 외부에 노출하지 마세요(포트포워딩·터널 금지).
+- 같은 PC의 다른 프로그램이 이 셸에 접근하려면 키를 알아야 합니다. 키 파일을 읽을 수 있는 같은 사용자 계정의 프로세스는 어차피 같은 권한이라는 점은 변하지 않습니다.

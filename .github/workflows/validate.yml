@@ -23,7 +23,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          foreach ($file in @("install.ps1", "start.ps1", "scripts/ollama.ps1", "scripts/comfyui-status.ps1", "scripts/install-comfyui.ps1", "scripts/setup-comfyui-env.ps1", "scripts/comfyui-gpu.ps1", "scripts/start-comfyui.ps1", "scripts/install-comfyui-torch.ps1", "scripts/download-comfyui-model.ps1")) {
+          foreach ($file in @("install.ps1", "start.ps1", "scripts/ollama.ps1", "scripts/comfyui-status.ps1", "scripts/install-comfyui.ps1", "scripts/setup-comfyui-env.ps1", "scripts/comfyui-gpu.ps1", "scripts/start-comfyui.ps1", "scripts/install-comfyui-torch.ps1", "scripts/download-comfyui-model.ps1", "scripts/create-shortcut.ps1")) {
             $tokens = $null; $errors = $null
             [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file), [ref]$tokens, [ref]$errors) | Out-Null
             if ($errors.Count -gt 0) { $errors | Out-String | Write-Error; exit 1 }
@@ -57,7 +57,11 @@ jobs:
       - name: Launcher dry run (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        run: ./start.ps1 -DryRun -Port 8787
+        run: |
+          ./start.ps1 -DryRun -Port 8787
+          ./start.ps1 -DryRun -Port 8787 -Terminal
+          ./scripts/create-shortcut.ps1 -DryRun
+          ./scripts/create-shortcut.ps1 -DryRun -NoTerminal -Name "Agent Workshop Test"
       - name: Compile modules
         run: python -m compileall -q workshop tests
       - name: Unit and local HTTP integration tests

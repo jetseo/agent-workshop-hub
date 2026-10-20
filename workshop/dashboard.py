@@ -76,13 +76,17 @@ def gallery_signature(token, job_id, index):
     return hmac.new(token.encode(), f"{job_id}:{index}".encode(), hashlib.sha256).hexdigest()
 
 
-def make_handler(queue, token, boards_root=None, providers=None, chat_fn=None, list_fn=None):
+def make_handler(queue, token, boards_root=None, providers=None, chat_fn=None, list_fn=None,
+                 terminal_key=None, terminal_argv=None, terminal_cwd=None):
     boards_root = boards_root or str(Path.home() / ".agent-workshop" / "boards")
-    from . import setup_page
+    from . import app_page, setup_page, terminal
     from .providers import Providers
     registry = providers or Providers()
     do_chat = chat_fn or setup_page.chat
     do_list = list_fn or setup_page.list_models
+
+    terminal_cookie = (hmac.new(token.encode(), terminal_key.encode(), hashlib.sha256).hexdigest()
+                       if terminal_key else None)
 
     def setup_html(**kwargs):
         try:
@@ -100,14 +104,34 @@ def make_handler(queue, token, boards_root=None, providers=None, chat_fn=None, l
                 "localhost:" + str(self.server.server_port),
             )
 
-        def _send(self, code, body, content_type="text/html; charset=utf-8"):
-            data = body.encode("utf-8")
+        def log_message(self, format, *args):
+            # The one-time terminal entry key must not be echoed into logs.
+            line = re.sub(r"(key=)[^&\s]+", r"\1***", format % args)
+            print("%s - - [%s] %s" % (self.address_string(), self.log_date_time_string(), line), flush=True)
+
+        def _origin_ok(self):
+            port = str(self.server.server_port)
+            return self.headers.get("Origin") in ("http://127.0.0.1:" + port, "http://localhost:" + port)
+
+        def _terminal_cookie_ok(self):
+            if not terminal_cookie:
+                return False
+            for part in self.headers.get("Cookie", "").split(";"):
+                name, _, value = part.strip().partition("=")
+                if name == "workshop_term" and secrets.compare_digest(value, terminal_cookie):
+                    return True
+            return False
+
+        def _send(self, code, body, content_type="text/html; charset=utf-8", csp=None, headers=None):
+            data = body.encode("utf-8") if isinstance(body, str) else body
             self.send_response(code)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(data)))
             self.send_header("Cache-Control", "no-store")
             self.send_header("X-Content-Type-Options", "nosniff")
-            self.send_header("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; img-src 'self'; form-action 'self'; base-uri 'none'")
+            self.send_header("Content-Security-Policy", csp or "default-src 'none'; style-src 'unsafe-inline'; img-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'self'")
+            for name, value in (headers or {}):
+                self.send_header(name, value)
             self.end_headers()
             self.wfile.write(data)
 
@@ -165,6 +189,47 @@ def make_handler(queue, token, boards_root=None, providers=None, chat_fn=None, l
                 self._send(200, json.dumps(public_jobs), "application/json; charset=utf-8")
                 return
             route = urlsplit(self.path).path
+            if route.startswith("/static/") and route[8:] in app_page.STATIC_FILES:
+                name = route[8:]
+                body = (Path(__file__).parent / "static" / name).read_bytes()
+                self._send(200, body, app_page.STATIC_FILES[name],
+                           csp="default-src 'none'; frame-ancestors 'self'")
+                return
+            if route == "/favicon.ico":
+                self.send_response(204)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+            if route == "/terminal/ws":
+                # A shell as the current user: needs the feature on, loopback Host, a browser Origin from
+                # this server, and the entry cookie that only the start-up key link hands out.
+                if not terminal_key:
+                    self._send(404, "Not found", "text/plain")
+                elif not (self._origin_ok() and self._terminal_cookie_ok()):
+                    self._send(403, "Forbidden", "text/plain")
+                else:
+                    terminal.serve_socket(self, token=token, argv=terminal_argv, cwd=terminal_cwd)
+                return
+            if route == "/app":
+                supplied = parse_qs(urlsplit(self.path).query).get("key", [""])[0]
+                if supplied:
+                    if terminal_key and secrets.compare_digest(supplied, terminal_key):
+                        self.send_response(303)
+                        self.send_header("Set-Cookie", "workshop_term=" + terminal_cookie + "; HttpOnly; SameSite=Strict; Path=/")
+                        self.send_header("Location", "/app")
+                        self.send_header("Content-Length", "0")
+                        self.end_headers()
+                    else:
+                        self._send(403, "Invalid key", "text/plain")
+                    return
+                state = "off" if not terminal_key else ("ready" if self._terminal_cookie_ok() else "locked")
+                self._send(200, app_page.render(state, token if state == "ready" else ""),
+                           csp="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+                               "img-src 'self' data:; font-src 'self'; frame-src 'self'; "
+                               "connect-src 'self' ws://127.0.0.1:" + str(self.server.server_port) +
+                               " ws://localhost:" + str(self.server.server_port) + "; base-uri 'none'; "
+                               "form-action 'self'; frame-ancestors 'none'")
+                return
             if route == "/setup":
                 self._send(200, setup_html())
                 return
@@ -305,11 +370,28 @@ def main():
     parser = argparse.ArgumentParser(description="Local-only Agent Workshop dashboard")
     parser.add_argument("--db", default=str(Path.home() / ".agent-workshop" / "jobs.sqlite3"))
     parser.add_argument("--port", type=int, default=8787)
+    parser.add_argument("--enable-terminal", action="store_true",
+                        help="Enable the in-browser WSL shell (runs commands as YOUR user; entry needs a start-up key)")
     args = parser.parse_args()
     token = secrets.token_urlsafe(32)
-    server = ThreadingHTTPServer(("127.0.0.1", args.port), make_handler(Queue(args.db), token))
+    terminal_key = None
+    if args.enable_terminal:
+        terminal_key = secrets.token_urlsafe(24)
+        key_file = Path.home() / ".agent-workshop" / "terminal.key"
+        key_file.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(key_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(terminal_key)
+        os.chmod(key_file, 0o600)
+    server = ThreadingHTTPServer(("127.0.0.1", args.port), make_handler(
+        Queue(args.db), token, terminal_key=terminal_key, terminal_cwd=str(Path(__file__).resolve().parent.parent)))
     print(f"Dashboard: http://127.0.0.1:{args.port}/", flush=True)
     print(f"Setup (connect a service and test a prompt): http://127.0.0.1:{args.port}/setup", flush=True)
+    print(f"App window (tabs): http://127.0.0.1:{args.port}/app", flush=True)
+    if terminal_key:
+        print("TERMINAL ENABLED: a shell running as your user. Open it once with this private link "
+              "(do not share it):", flush=True)
+        print(f"  http://127.0.0.1:{args.port}/app?key={terminal_key}", flush=True)
     print("Loopback only. Stop with Ctrl+C.", flush=True)
     try:
         server.serve_forever()

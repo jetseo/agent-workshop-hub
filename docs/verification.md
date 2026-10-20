@@ -39,3 +39,13 @@
 | 토큰 저장(0600)·마스킹·삭제, 동의 게이트, CSRF/Origin/Host, 응답 이스케이프, 저장 실패 시 미저장 | 클라우드(Linux), 모의 채팅 | 통과 | 모의 테스트. 실제 서비스 호출 아님 |
 | 실제 서비스(OpenCode Zen, OpenRouter, Groq 등) 테스트 호출 | 사용자 PC | **미검증** | 카탈로그의 주소는 확인되지 않은 기억 기준 |
 | `start.ps1` 브라우저 자동 열기 | 사용자 PC | **미검증** | CI의 Windows 문법 검사/dry-run만 통과 필요 |
+
+## 앱 창 + 내장 터미널 `/app` (2026-10-20)
+| 항목 | 환경 | 결과 | 비고 |
+|---|---|---|---|
+| WebSocket 프레임(마스크·단편화·ping·close·크기 제한, RFC 예제 accept 키) | 클라우드 | 통과 | 단위 테스트 |
+| PTY 셸(명령 실행, 크기 변경, 종료) | 클라우드(Linux) | 통과 | |
+| 보안 경계: 키/쿠키/Origin/Host/토큰, 잘못된 토큰이면 프로세스 미생성, 연결 종료 시 셸 종료, 세션 3개 제한, 정적 파일 화이트리스트, 키 로그 가림 | 클라우드(Linux), 실제 소켓 | 통과 | |
+| 실제 Chromium에서 xterm.js: 키 입장→URL 정리, 탭/iframe, 입력·출력 표시, 창 크기 변경→`stty size`, 쿠키 없는 접속은 locked, 엄격한 CSP 하에서 콘솔 오류 없음 | 클라우드(Linux, Chromium 1194) | 통과 | `scripts/e2e/terminal-browser.js`. Windows Edge 아님 |
+| Windows 러너 CI(PowerShell 문법, `start.ps1 -DryRun -Terminal`, `create-shortcut.ps1 -DryRun`) | GitHub | 확인 대기 | 아래 CI 기록 참조 |
+| Edge 앱 창 열기, 바탕화면 바로가기 생성, WSL에서의 터미널 동작 | 사용자 PC | **미검증** | |
