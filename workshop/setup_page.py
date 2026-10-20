@@ -107,12 +107,32 @@ def run_test(providers, form, chat_fn=chat):
                           data_policy=entry["data_policy"], rpm=stored.get("rpm", 0))
             if key:
                 providers.set_key(name, key)
+            providers.add_model(name, model)
+            if entry["data_policy"] != "local":
+                providers.set_consent(name, True)     # the user ticked the consent box for this service
             result["saved"] = True
     except (ValueError, PermissionError, RuntimeError, OSError) as error:
         text = str(error)
         result["error"] = text.replace(key, "***") if key else text
     result["seconds"] = round(time.monotonic() - started, 1)
     return result
+
+
+def public_catalog():
+    return [{k: c[k] for k in ("id", "label", "base_url", "policy", "key_url", "model", "needs_key", "note")}
+            for c in CATALOG]
+
+
+def models_for_form(providers, form, list_fn=list_models):
+    """Model names offered by a service, using a typed token or the stored one. Nothing is saved."""
+    name, entry = resolve_service(form)
+    stored = providers.get(name) or {}
+    key = _field(form, "key")
+    key = validate_key(key) if key else stored.get("api_key")
+    if entry["needs_key"] and not key and not (stored.get("key_env") and os.environ.get(stored["key_env"])):
+        raise ValueError("Paste your token")
+    return list_fn({"base_url": entry["base_url"], "data_policy": entry["data_policy"],
+                    "key_env": stored.get("key_env"), "api_key": key})
 
 
 def run_models(providers, name, list_fn=list_models):

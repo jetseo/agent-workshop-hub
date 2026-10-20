@@ -10,6 +10,7 @@ from urllib.parse import urlparse
 
 POLICIES = ("local", "cloud-no-train", "cloud-may-train", "unknown")
 NAME = re.compile(r"[a-z0-9][a-z0-9_-]{0,31}")
+MAX_MODELS = 50
 ENV = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,63}")
 
 
@@ -34,8 +35,17 @@ def validate(name, entry):
     key_env = entry.get("key_env")
     if key_env is not None and not ENV.fullmatch(key_env):
         raise ValueError("key_env must be an environment variable NAME, not a key")
-    return {"base_url": entry["base_url"].rstrip("/"), "key_env": key_env,
-            "data_policy": policy, "rpm": int(entry.get("rpm") or 0)}
+    result = {"base_url": entry["base_url"].rstrip("/"), "key_env": key_env,
+              "data_policy": policy, "rpm": int(entry.get("rpm") or 0)}
+    models = entry.get("models")
+    if models is not None:
+        if (not isinstance(models, list) or len(models) > MAX_MODELS
+                or any(not isinstance(m, str) or not 1 <= len(m) <= 200 for m in models)):
+            raise ValueError("models must be a list of up to " + str(MAX_MODELS) + " model names")
+        result["models"] = models
+    if entry.get("consented") is not None:
+        result["consented"] = bool(entry["consented"])
+    return result
 
 
 KEY_PATTERN = re.compile(r"[\x21-\x7e]{8,512}")  # printable ASCII, no whitespace
@@ -73,7 +83,27 @@ class Providers:
 
     def add(self, name, **entry):
         data = self.load()
+        previous = data.get(name, {})
+        for keep in ("models", "consented"):        # re-registering must not forget these
+            if keep not in entry and keep in previous:
+                entry[keep] = previous[keep]
         data[name] = validate(name, entry)
+        self._save(data)
+
+    def add_model(self, name, model):
+        """Remember a model the user has verified for this provider (newest first, no duplicates)."""
+        data = self.load()
+        if name not in data:
+            raise ValueError("Unknown provider")
+        models = [m for m in data[name].get("models", []) if m != model]
+        data[name]["models"] = validate(name, {**data[name], "models": [model] + models[:MAX_MODELS - 1]})["models"]
+        self._save(data)
+
+    def set_consent(self, name, consented=True):
+        data = self.load()
+        if name not in data:
+            raise ValueError("Unknown provider")
+        data[name]["consented"] = bool(consented)
         self._save(data)
 
     def remove(self, name):

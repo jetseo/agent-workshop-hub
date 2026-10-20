@@ -77,14 +77,18 @@ def gallery_signature(token, job_id, index):
 
 
 def make_handler(queue, token, boards_root=None, providers=None, chat_fn=None, list_fn=None,
-                 terminal_key=None, terminal_argv=None, terminal_cwd=None):
+                 terminal_key=None, terminal_argv=None, terminal_cwd=None, chats_dir=None, api_ctx=None):
     boards_root = boards_root or str(Path.home() / ".agent-workshop" / "boards")
     from . import app_page, setup_page, terminal
+    from .chat_api import ApiError, Context, Json, dispatch
+    from .chat_store import ChatStore
     from .providers import Providers
     registry = providers or Providers()
     do_chat = chat_fn or setup_page.chat
     do_list = list_fn or setup_page.list_models
 
+    api = api_ctx or Context(registry, ChatStore(chats_dir),
+                             chat_fn=do_chat if chat_fn else setup_page.chat, list_fn=do_list)
     terminal_cookie = (hmac.new(token.encode(), terminal_key.encode(), hashlib.sha256).hexdigest()
                        if terminal_key else None)
 
@@ -108,6 +112,66 @@ def make_handler(queue, token, boards_root=None, providers=None, chat_fn=None, l
             # The one-time terminal entry key must not be echoed into logs.
             line = re.sub(r"(key=)[^&\s]+", r"\1***", format % args)
             print("%s - - [%s] %s" % (self.address_string(), self.log_date_time_string(), line), flush=True)
+
+        def _json(self, status, payload):
+            self._send(status, json.dumps(payload, ensure_ascii=False), "application/json; charset=utf-8",
+                       csp="default-src 'none'")
+
+        def _stream(self, events):
+            """Server-sent events. Closing the generator (browser stop / disconnect) lets it save the partial reply."""
+            try:
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("X-Content-Type-Options", "nosniff")
+                self.send_header("Content-Security-Policy", "default-src 'none'")
+                self.send_header("Connection", "close")
+                self.end_headers()
+                self.close_connection = True
+                for name, data in events:
+                    self.wfile.write(("event: " + name + "\ndata: " + json.dumps(data, ensure_ascii=False) + "\n\n").encode("utf-8"))
+                    self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError, OSError):
+                pass
+            finally:
+                events.close()
+
+        def _api(self, method):
+            if not self._trusted_host():
+                return self._json(403, {"error": "Invalid Host"})
+            if self.headers.get("Origin") is not None and not self._origin_ok():
+                return self._json(403, {"error": "Invalid Origin"})
+            if not secrets.compare_digest(self.headers.get("X-CSRF-Token", ""), token):
+                return self._json(403, {"error": "Forbidden"})
+            body = {}
+            try:
+                size = int(self.headers.get("Content-Length", "0") or 0)
+                if size < 0 or size > 262144:
+                    return self._json(413, {"error": "Request too large"})
+                if size:
+                    if not self.headers.get("Content-Type", "").startswith("application/json"):
+                        return self._json(415, {"error": "JSON required"})
+                    body = json.loads(self.rfile.read(size).decode("utf-8"))
+                result = dispatch(api, method, urlsplit(self.path).path[len("/api/v1"):], body)
+            except ApiError as error:
+                return self._json(error.status, {"error": error.message})
+            except LookupError:
+                return self._json(404, {"error": "Not found"})
+            except (ValueError, UnicodeDecodeError):
+                return self._json(400, {"error": "Invalid request"})
+            if isinstance(result, Json):
+                return self._json(result.status, result.payload)
+            self._stream(result.events)
+
+        def do_PATCH(self):
+            if urlsplit(self.path).path.startswith("/api/v1/"):
+                return self._api("PATCH")
+            self._send(404, "Not found", "text/plain")
+
+        def do_DELETE(self):
+            if urlsplit(self.path).path.startswith("/api/v1/"):
+                return self._api("DELETE")
+            self._send(404, "Not found", "text/plain")
 
         def _embedded(self):
             # Browsers label requests for framed documents (also form posts/redirects inside the frame).
@@ -193,6 +257,8 @@ def make_handler(queue, token, boards_root=None, providers=None, chat_fn=None, l
                 self._send(200, json.dumps(public_jobs), "application/json; charset=utf-8")
                 return
             route = urlsplit(self.path).path
+            if route.startswith("/api/v1/"):
+                return self._api("GET")
             if route.startswith("/static/") and route[8:] in app_page.STATIC_FILES:
                 name = route[8:]
                 body = (Path(__file__).parent / "static" / name).read_bytes()
@@ -306,6 +372,8 @@ def make_handler(queue, token, boards_root=None, providers=None, chat_fn=None, l
                 self._send(403, "Invalid Host", "text/plain")
                 return
             path = urlsplit(self.path).path
+            if path.startswith("/api/v1/"):
+                return self._api("POST")
             if path not in ("/add", "/approve", "/authorize", "/setup/run", "/setup/remove", "/setup/models"):
                 self._send(404, "Not found", "text/plain")
                 return
