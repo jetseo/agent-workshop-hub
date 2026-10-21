@@ -14,10 +14,11 @@ JetAI Hub의 목적은 **개발 토큰 절약**입니다(`CLAUDE.md`의 프로�
 | 비용 안전장치 | `modelpolicy.py`, orchestrator 게이트 | 유료·구독 모델 기본 차단(`-free`, `:free`, 로컬만 허용), 클라우드는 명시적 동의 |
 | 일회용 worktree 코드 단계 | `worktree.py` | 코드 수정은 임시 worktree에서만, diff만 보고하고 커밋·병합 안 함 |
 | OpenCode 연동 | `adapters.py` | WSL 네이티브 OpenCode로 무료 모델 실행(Windows 쪽 바이너리는 거부) |
+| 모델 라우터 | `router.py`, `docs/queue.md` | 난이도·역할별로 로컬→무료 순 모델 선택, 유료는 자동 선택 안 함(승인 필요 표시), 실패율 높은 모델 제외. 판단만 하고 호출하지 않음 |
 | 로컬 계획 | `planner.py`, `plan_cli.py` | 로컬 Ollama로 요청을 작업 1~4개로 분해(읽기 전용) |
 
 ## 인프라 (보존)
-작업 큐(`queue.py`: 승인·하트비트 복구), 워커(`worker.py`), 대시보드(`dashboard.py`), 진단(`diagnostics.py`, `preflight.py`, `doctor.py`),
+작업 큐(`queue.py`: 승인·하트비트 복구·의존성·취소·재시도·체크포인트·동시 실행 제한), 워커(`worker.py`), 대시보드(`dashboard.py`), 진단(`diagnostics.py`, `preflight.py`, `doctor.py`),
 내장 터미널(`terminal.py`, `websocket.py`, xterm.js), Windows 런처와 설치 스크립트(`start.ps1`, `install.ps1`, `scripts/`), CI(`.github/workflows/validate.yml`).
 
 ## 이전에 만든 이미지·ComfyUI 기능 (보존, 확장하지 않음)

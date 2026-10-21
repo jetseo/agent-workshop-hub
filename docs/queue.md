@@ -12,8 +12,35 @@ The queue defaults to manual review before completion. Interrupted running tasks
 
 ## Notes
 
-- `max_attempts` is retained for schema compatibility but is intentionally unused: failed or
-  interrupted tasks are never retried automatically because they may have side effects.
-  Review the result, then add the task again.
+- Failed or interrupted tasks are never retried automatically because they may have side effects.
+  `Queue.retry(id)` is an explicit operator action: it re-queues a failed/cancelled task only while
+  `attempts < max_attempts` (default 2); `force=True` overrides after the side effects were reviewed.
 - The unmerged `feat/durable-task-queue` branch is left untouched; this branch already
   provides the durable SQLite queue, approvals, and heartbeat-based recovery.
+
+## Dependencies, cancel, checkpoint, concurrency (2026-10-21)
+- `add(..., depends_on=[ids])`: only existing jobs may be named (no cycles). A job is claimed only when
+  every dependency is `done` (an approved result); `review`, `failed` and `cancelled` dependencies block it.
+  `waiting_on(id)` explains what a job is waiting for.
+- `cancel(id)`: queued/pending/failed/review jobs become `cancelled` at once. A running job is only flagged
+  (`cancel_requested`) and ends as `cancelled` when its worker reports; the executor process is not killed.
+- `checkpoint(id, data)`: progress JSON for a running job, kept after a crash or stale recovery for the operator.
+- `claim(max_running=N)` / `worker --max-running N`: cap on concurrently running jobs across all workers.
+- Old databases are migrated additively (new columns only).
+
+## Model router (`workshop/router.py`)
+Decision only, no model call: `route(prompt, models, kind, role, files, stats)` returns model, tier,
+difficulty and reason. Local first, then free; paid is never picked automatically (`needs_approval=True`
+and only when `allow_paid`). Easy work gets the smallest adequate model, hard work the largest; code prefers
+`*coder*` names; models with a failure rate above 50% over at least 3 runs are skipped.
+`python -m workshop.router "prompt" --kind code --role coder [--model id ...]`.
+
+### Board wiring and run statistics
+A board step may use `"model": "auto"` (optional `"role"`: planner/router/coder/reviewer/tester/reporter).
+`python -m workshop.orchestrator spec.json --auto-model ollama/qwen2.5-coder:7b --auto-model ...` routes each
+auto step just before it runs, among the given candidates only; a registered provider's tier comes from its data
+policy. Paid models are never picked: with no local/free candidate the step fails (`RoutingError`) before any call.
+The chosen model is written back to the board. Every executed step's outcome (success/failure, seconds) is appended to
+`~/.agent-workshop/runstats.jsonl` (`workshop/runstats.py`, no prompts or outputs); permission refusals are not counted,
+and a model with more than 50% failures over >= 3 runs in the last 30 days is skipped next time.
+Not yet wired into chat or the queue worker; the cost side is still the usage ledger (`/usage`).

@@ -18,6 +18,8 @@ from .chat import chat
 from .modelpolicy import classify
 from . import worktree
 from .providers import Providers
+from .router import ROLES, route
+from .runstats import RunStats
 from .usage import UsageLedger, estimate_tokens, tier_of
 
 OPENCODE_PROVIDERS = ("opencode", "openai")  # served by the OpenCode CLI, not a chat endpoint
@@ -76,8 +78,14 @@ def create_board(root, spec, context_root=None):
     for step in spec["steps"]:
         board.add_step(step["id"], step["model"], step.get("depends_on", ()),
                        step.get("prompt", ""), step.get("kind", "text"), step.get("workspace"),
-                       _resolve_repo(step.get("repo")))
+                       _resolve_repo(step.get("repo")), role=_valid_role(step.get("role")))
     return board
+
+
+def _valid_role(role):
+    if role is not None and role not in ROLES:
+        raise ValueError("Unknown step role: " + str(role))
+    return role
 
 
 def _exit_error(result):
@@ -192,9 +200,65 @@ def _run_step(board, sid, step, providers, flags, text_fn, code_fn):
     raise last
 
 
+def _timed_step(*args):
+    started = time.time()
+    return _run_step(*args), time.time() - started
+
+
+def _note_outcome(stats, model, step, ok, seconds):
+    if stats is None or model == "auto":
+        return
+    try:
+        stats.record(model, ok=ok, seconds=seconds, kind=step.get("kind", "text"))
+    except OSError:
+        pass                                   # statistics must never fail a step
+
+
+def _tier_fn(providers):
+    """Tier of a model id: registered providers by their data policy (local/-free), else by name."""
+    def tier(model):
+        name, _, short = model.partition("/")
+        entry = providers.get(name)
+        if entry is not None:
+            return {"local": "local", "free": "free"}.get(tier_of(entry["data_policy"], short), "paid")
+        return classify(model)
+    return tier
+
+
+def _resolve_auto(board, ready, auto_models, stats, errors, say, providers):
+    """Replace model "auto" with the router's pick (local/free only). Steps with no usable model fail
+    here, before anything is sent anywhere."""
+    steps = board.steps()
+    runnable = []
+    history = None
+    for sid in ready:
+        step = steps[sid]
+        if step["model"] != "auto":
+            runnable.append(sid)
+            continue
+        if history is None:
+            try:
+                history = stats.load() if stats is not None else {}
+            except OSError:
+                history = {}
+        decision = route(board.context_for(sid), auto_models, kind=step.get("kind", "text"),
+                         role=step.get("role") or "coder", stats=history,
+                         tier_fn=_tier_fn(providers))
+        if decision["model"] is None:
+            errors[sid] = "RoutingError: " + decision["reason"] + " (pass --auto-model with local/free models)"
+            board.set_status(sid, "failed")
+            say("[FAIL]  " + sid + "  " + errors[sid])
+            continue
+        board.set_model(sid, decision["model"])
+        say("[route] " + sid + " -> " + decision["model"] + "  (" + decision["reason"] + ")")
+        runnable.append(sid)
+    return runnable
+
+
 def run_board(board, providers, *, allow_opencode=False, allow_cloud=False, allow_may_train=False,
               allow_paid=False, approve_text_agents=False, allow_main_checkout=False,
-              worktree_base=None, approved_code=(), max_parallel=2, text_fn=chat, code_fn=run_opencode, progress=None, ledger=None):
+              worktree_base=None, approved_code=(), max_parallel=2, text_fn=chat, code_fn=run_opencode, progress=None, ledger=None,
+              auto_models=(), stats=None):
     flags = {"ledger": ledger, "allow_opencode": allow_opencode, "allow_cloud": allow_cloud,
              "allow_may_train": allow_may_train, "allow_paid": allow_paid, "approve_text_agents": approve_text_agents,
              "allow_main_checkout": allow_main_checkout,
@@ -207,21 +271,28 @@ def run_board(board, providers, *, allow_opencode=False, allow_cloud=False, allo
             ready = board.ready_steps()
             if not ready:
                 break
+            ready = _resolve_auto(board, ready, auto_models, stats, errors, say, providers)
             steps = board.steps()
             for sid in ready:
                 board.set_status(sid, "running")
                 say("[start] " + sid + "  (" + steps[sid]["model"] + ")")
             started = time.time()
-            futures = {sid: pool.submit(_run_step, board, sid, steps[sid], providers, flags, text_fn, code_fn)
+            futures = {sid: pool.submit(_timed_step, board, sid, steps[sid], providers, flags, text_fn, code_fn)
                        for sid in ready}
             for sid, future in futures.items():
+                model = steps[sid]["model"]
                 try:
-                    board.write_step_output(sid, future.result())
+                    output, seconds = future.result()
+                    board.write_step_output(sid, output)
                     board.merge_step(sid)  # single writer: only this loop merges
+                    _note_outcome(stats, model, steps[sid], True, seconds)
                     say("[done]  " + sid + "  " + str(int(time.time() - started)) + "s")
                 except Exception as error:
                     errors[sid] = type(error).__name__ + ": " + str(error)[:300]
                     board.set_status(sid, "failed")
+                    # Refusals (missing approval/consent) say nothing about model quality.
+                    if not isinstance(error, PermissionError):
+                        _note_outcome(stats, model, steps[sid], False, time.time() - started)
                     say("[FAIL]  " + sid + "  " + errors[sid])
     steps = board.steps()
     return {"done": [s for s, v in steps.items() if v["status"] == "done"],
@@ -247,6 +318,8 @@ def main(argv=None):
     parser.add_argument("--allow-paid-models", action="store_true",
                         help="Permit paid/subscription-backed OpenCode models (default: free and local only)")
     parser.add_argument("--max-parallel", type=int, default=2)
+    parser.add_argument("--auto-model", action="append", default=[], metavar="MODEL_ID",
+                        help="Candidate for steps whose model is \"auto\" (repeatable; paid ids are never picked)")
     parser.add_argument("--dry-run", action="store_true", help="Create the board only; call no model")
     args = parser.parse_args(argv)
     if args.resume:
@@ -267,7 +340,8 @@ def main(argv=None):
                         allow_paid=args.allow_paid_models,
                         approve_text_agents=args.approve_text_agents,
                         allow_main_checkout=args.allow_main_checkout, approved_code=args.approve_code, max_parallel=args.max_parallel,
-                        progress=lambda m: print(m, file=sys.stderr, flush=True), ledger=UsageLedger())
+                        progress=lambda m: print(m, file=sys.stderr, flush=True), ledger=UsageLedger(),
+                        auto_models=args.auto_model, stats=RunStats())
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     return 0 if not summary["failed"] and not summary["blocked"] else 1
 
