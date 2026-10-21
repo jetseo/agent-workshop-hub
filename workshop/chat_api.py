@@ -6,7 +6,7 @@ Sending to a cloud service additionally requires the consent recorded when it wa
 import re
 import threading
 
-from . import setup_page, usage
+from . import digest, setup_page, usage
 from .chat import chat, chat_stream, list_models
 from .chat_store import DEFAULT_TITLE, CHAT_ID, ChatStore
 from .usage import UsageLedger
@@ -219,6 +219,12 @@ def dispatch(ctx, method, path, body):
     parts = [p for p in path.split("/") if p]
     body = body if isinstance(body, dict) else {}
     try:
+        if parts == ["digest"] and method == "POST":
+            return Stream(digest.stream(
+                resolve=lambda ref: _resolve_model(ctx, ref),
+                candidates=lambda ref, enabled: fallback_candidates(ctx, ref, enabled),
+                chat_fn=ctx.chat_fn, ledger=ctx.ledger, body=body,
+                claim=lambda: ctx.claim("digest"), release=lambda: ctx.release("digest")))
         if parts == ["usage"] and method == "GET":
             return Json(200, ctx.ledger.summary())
         if parts == ["state"] and method == "GET":

@@ -125,7 +125,7 @@ def render_page(summary):
                                for t in TIERS if d[t]), _n(d["local"] + d["free"] + d["other"])) for d in summary["by_day"]) \
         or "<p>아직 기록이 없습니다.</p>"
     share = "%.0f%%" % (summary["free_share"] * 100)
-    labels = {"chat": "채팅", "board": "보드(멀티 모델 작업)"}
+    labels = {"chat": "채팅", "board": "보드(멀티 모델 작업)", "digest": "긴 글 압축"}
     sources = " · ".join(esc(labels.get(k, k)) + " " + _n(v["tokens"]) for k, v in sorted(summary.get("by_source", {}).items())) or "기록 없음"
     note = ("일부 수치는 서비스가 사용량을 알려주지 않아 글자 수로 추정했습니다 (%.0f%%)." % (summary["estimated_share"] * 100)
             if summary["estimated_share"] else "모든 수치는 서비스가 보고한 사용량입니다.")

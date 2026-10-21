@@ -429,6 +429,61 @@ class FallbackTests(ApiBase):
         self.assertEqual([m["role"] for m in chat["messages"]], ["user"])           # the question is kept for a retry
 
 
+class DigestApiTests(ApiBase):
+    def setUp(self):
+        super().setUp()
+        self.onboard()
+        for model in ("ratelimit-free", "demo-free:free", "pricey"):
+            self.providers.add_model("mock", model)
+
+    def digest(self, body):
+        status, text = self.call("POST", "/digest", body)
+        if status != 200:
+            return status, json.loads(text)
+        events = []
+        for block in text.strip().split("\n\n"):
+            lines = dict(line.split(": ", 1) for line in block.split("\n") if ": " in line)
+            events.append((lines["event"], json.loads(lines["data"])))
+        return status, events
+
+    def test_digest_streams_progress_and_books_usage_as_digest(self):
+        status, events = self.digest({"model": "mock/demo-model", "text": "긴 글 " * 50})
+        self.assertEqual(status, 200)
+        names = [e[0] for e in events]
+        self.assertEqual(names[-1], "done")
+        self.assertIn("progress", names)
+        self.assertTrue(events[-1][1]["digest"])
+        sources = set(self.ledger.summary()["by_source"])
+        self.assertEqual(sources, {"digest"})
+
+    def test_paid_model_needs_cost_confirmation(self):
+        self.providers.add("mock", base_url=self.mock_url, data_policy="cloud-no-train", models=["pricey"])
+        self.providers.set_consent("mock", True)
+        status, body = self.digest({"model": "mock/pricey", "text": "abc " * 30})
+        self.assertEqual(status, 403)
+        status, events = self.digest({"model": "mock/pricey", "text": "abc " * 30, "confirm_cost": True})
+        self.assertEqual((status, events[-1][0]), (200, "done"))
+
+    def test_unconsented_cloud_is_refused(self):
+        self.providers.add("mock", base_url=self.mock_url, data_policy="cloud-no-train", models=["demo-free:free"])
+        status, body = self.digest({"model": "mock/demo-free:free", "text": "abc " * 30})
+        self.assertEqual(status, 403)
+
+    def test_empty_text_is_rejected(self):
+        status, body = self.digest({"model": "mock/demo-model", "text": "  "})
+        self.assertEqual(status, 400)
+
+    def test_rate_limited_model_falls_back_with_notice(self):
+        status, events = self.digest({"model": "mock/ratelimit-free", "text": "abc " * 30})
+        names = [e[0] for e in events]
+        self.assertIn("notice", names)
+        self.assertEqual(names[-1], "done")
+
+    def test_no_fallback_reports_the_error(self):
+        status, events = self.digest({"model": "mock/ratelimit-free", "text": "abc " * 30, "fallback": False})
+        self.assertEqual(events[-1][0], "error")
+
+
 class FallbackCandidateTests(unittest.TestCase):
     def test_candidates_never_include_paid_or_unconsented_models(self):
         from workshop.chat_api import fallback_candidates
