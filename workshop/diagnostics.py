@@ -11,7 +11,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from .adapters import comfyui_health, ollama_models
+from .adapters import ollama_models
 from .preflight import describe_error, inspect_environment
 from .queue import Queue
 
@@ -54,7 +54,6 @@ HINTS = {
     "opencode": "WSL 안에 설치되지 않았거나 Windows용만 보입니다. bash scripts/install-opencode.sh --dry-run 으로 절차를 확인한 뒤 설치하세요.",
     "ollama": "선택 사항: Windows에서 .\\scripts\\ollama.ps1 -DryRun 으로 확인하세요.",
     "ollama_api": "Ollama가 꺼져 있습니다. 'ollama serve' 실행 후 다시 확인하세요 (127.0.0.1:11434).",
-    "comfyui_api": "ComfyUI가 꺼져 있습니다. scripts/start-comfyui.ps1 로 시작 후 다시 확인하세요 (127.0.0.1:8188).",
     "queue_self_test": "임시 SQLite 자체 테스트 실패: 디스크 공간과 임시 폴더 쓰기 권한을 확인하세요.",
 }
 
@@ -72,8 +71,6 @@ def inspect_runtime(*, check_services=True):
     if check_services:
         checks["ollama_api"] = _check_service(
             ollama_models, lambda models: str(len(models)) + " local models available")
-        checks["comfyui_api"] = _check_service(
-            comfyui_health, lambda stats: "Local ComfyUI API reachable")
     return _add_hints(checks)
 
 
@@ -83,7 +80,7 @@ def main(argv=None):
     parser.add_argument("--strict", action="store_true",
                         help="Require enabled optional integrations to be reachable")
     parser.add_argument("--no-services", action="store_true",
-                        help="Skip loopback Ollama and ComfyUI connectivity checks")
+                        help="Skip loopback Ollama connectivity check")
     args = parser.parse_args(argv)
     # Korean hints must not crash legacy Windows code pages (cp1252/cp949 pipes).
     if hasattr(sys.stdout, "reconfigure"):

@@ -8,12 +8,10 @@ PATH="$(printf '%s' "$PATH" | tr ':' '\n' | grep -v '^/mnt/[a-zA-Z]/' | paste -s
 export PATH
 PORT=8787
 ALLOW_OPENCODE=0
-ALLOW_COMFYUI=0
 ENABLE_TERMINAL=0
 for arg in "$@"; do
   case "$arg" in
     --allow-opencode) ALLOW_OPENCODE=1 ;;
-    --allow-comfyui) ALLOW_COMFYUI=1 ;;
     --enable-terminal) ENABLE_TERMINAL=1 ;;
     --port=*) PORT="${arg#--port=}" ;;
     *) echo "Unknown option: $arg" >&2; exit 2 ;;
@@ -37,10 +35,9 @@ cleanup() {
   fi
 }
 trap cleanup EXIT INT TERM
-if (( ALLOW_OPENCODE || ALLOW_COMFYUI )); then
+if (( ALLOW_OPENCODE )); then
   flags=()
   if (( ALLOW_OPENCODE )); then flags+=(--allow-opencode); fi
-  if (( ALLOW_COMFYUI )); then flags+=(--allow-comfyui); fi
   python3 -m workshop.worker --watch "${flags[@]}" &
   child_pid=$!
   echo "Worker enabled: ${flags[*]}"

@@ -64,7 +64,7 @@ class DashboardHTTPTests(unittest.TestCase):
 
     def test_reject_missing_resource(self):
         self.assertEqual(
-            self.post("/add", token="integration-token", kind="image", title="Sprite"), 400
+            self.post("/add", token="integration-token", kind="code", title="Sprite"), 400
         )
         self.assertEqual(self.queue.list(), [])
 

@@ -2,7 +2,6 @@
 [CmdletBinding()]
 param(
     [switch]$AllowOpenCode,
-    [switch]$AllowComfyUI,
     [ValidateRange(1024,65535)][int]$Port = 8787,
     [ValidateNotNullOrEmpty()][string]$Distro = "Ubuntu-24.04",
     [switch]$Terminal,
@@ -14,7 +13,6 @@ $launcher = Join-Path $PSScriptRoot "scripts/start.sh"
 if (-not (Test-Path -LiteralPath $launcher)) { throw "Missing scripts/start.sh" }
 $flags = @("--port=$Port")
 if ($AllowOpenCode) { $flags += "--allow-opencode" }
-if ($AllowComfyUI) { $flags += "--allow-comfyui" }
 if ($Terminal) { $flags += "--enable-terminal" }
 if ($DryRun) {
     Write-Host "[dry-run] WSL distro: $Distro"

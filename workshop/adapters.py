@@ -92,12 +92,3 @@ def run_opencode(prompt, workspace, *, enabled=False, timeout=600, model=None):
     return {"exit_code": completed.returncode,
             "stdout": completed.stdout[-16000:],
             "stderr": completed.stderr[-8000:]}
-
-def comfyui_health(base_url="http://127.0.0.1:8188", timeout=3):
-    """Read-only ComfyUI connectivity check, without submitting a workflow."""
-    from urllib.parse import urlparse
-    parsed = urlparse(base_url)
-    if parsed.scheme != "http" or parsed.hostname not in ("127.0.0.1", "localhost") or parsed.username or parsed.password:
-        raise ValueError("ComfyUI health check must target local HTTP loopback")
-    with urllib.request.urlopen(base_url.rstrip("/") + "/system_stats", timeout=timeout) as response:
-        return json.load(response)

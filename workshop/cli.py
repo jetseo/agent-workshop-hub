@@ -9,13 +9,11 @@ def main():
     p.add_argument("--db", default=str(Path.home() / ".agent-workshop" / "jobs.sqlite3"))
     sub = p.add_subparsers(dest="command", required=True)
     add = sub.add_parser("add")
-    add.add_argument("kind", choices=["plan", "code", "image", "qa"])
+    add.add_argument("kind", choices=["plan", "code", "qa"])
     add.add_argument("title")
     add.add_argument("--workspace", help="Existing Git worktree or repository directory")
-    add.add_argument("--workflow", help="ComfyUI API-format workflow JSON file")
-    add.add_argument("--output-dir", help="Absolute output directory for generated ComfyUI images")
     add.add_argument("--skip-execution-approval", action="store_true",
-                     help="Unsafe: allow immediate execution of newly queued code/image tasks")
+                     help="Unsafe: allow immediate execution of newly queued code tasks")
     sub.add_parser("list")
     claim = sub.add_parser("claim")
     claim.add_argument("--unsafe-manual", action="store_true", help="Advanced queue administration only")
@@ -30,15 +28,9 @@ def main():
     args = p.parse_args()
     q = Queue(args.db)
     if args.command == "add":
-        if args.output_dir and (args.kind != "image" or not Path(args.output_dir).is_absolute()):
-            p.error("--output-dir requires an image task and absolute path")
-        payload = ({"workspace": args.workspace} if args.workspace else
-                   {"workflow": args.workflow} if args.workflow else {})
-        if args.output_dir:
-            payload.update({"save_outputs": True, "output_dir": args.output_dir})
+        payload = {"workspace": args.workspace} if args.workspace else {}
         result = {"id": q.add(args.kind, args.title, payload,
-                              require_approval=(args.kind in ("code", "image") and
-                                                not args.skip_execution_approval))}
+                              require_approval=(args.kind == "code" and not args.skip_execution_approval))}
     elif args.command == "list":
         result = q.list()
     elif args.command == "claim":

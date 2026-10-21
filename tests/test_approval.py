@@ -21,7 +21,7 @@ class ApprovalTests(unittest.TestCase):
     def test_no_double_authorization(self):
         with tempfile.TemporaryDirectory() as directory:
             queue = Queue(Path(directory) / "tasks.db")
-            job_id = queue.add("image", "Generate", require_approval=True)
+            job_id = queue.add("code", "Generate", require_approval=True)
             queue.authorize(job_id)
             with self.assertRaises(ValueError):
                 queue.authorize(job_id)

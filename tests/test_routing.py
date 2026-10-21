@@ -21,7 +21,7 @@ class RoutingTests(unittest.TestCase):
     def test_skips_disabled_executor_without_looping(self):
         with tempfile.TemporaryDirectory() as directory:
             q = Queue(Path(directory) / "tasks.db")
-            q.add("image", "Generate", {"workflow": "/tmp/workflow.json"})
+            q.add("plan", "Write a plan")
             with patch("workshop.worker.run_opencode") as runner:
                 self.assertIsNone(process_one(q, allow_opencode=True))
                 runner.assert_not_called()
@@ -30,7 +30,7 @@ class RoutingTests(unittest.TestCase):
     def test_claim_filter(self):
         with tempfile.TemporaryDirectory() as directory:
             q = Queue(Path(directory) / "tasks.db")
-            q.add("image", "Generate")
+            q.add("plan", "Write a plan")
             code_id = q.add("code", "Implement")
             self.assertEqual(q.claim(kinds=["code"])["id"], code_id)
             self.assertIsNone(q.claim(kinds=["code"]))

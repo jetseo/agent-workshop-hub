@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
-from workshop.adapters import run_opencode, ollama_models, comfyui_health
+from workshop.adapters import run_opencode, ollama_models
 
 class AdapterTests(unittest.TestCase):
     def test_opencode_disabled_by_default(self):
@@ -23,8 +23,6 @@ class AdapterTests(unittest.TestCase):
     def test_reject_remote_health_check(self):
         with self.assertRaises(ValueError):
             ollama_models("http://example.com:11434")
-        with self.assertRaises(ValueError):
-            comfyui_health("http://example.com:8188")
 
     def test_command_arguments_not_shell(self):
         with tempfile.TemporaryDirectory() as d:

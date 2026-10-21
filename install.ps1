@@ -7,9 +7,6 @@ param(
     [switch]$InstallNode,
     [switch]$UseNvmFallback,
     [switch]$InstallOllama,
-    [switch]$InstallComfyUISource,
-    [switch]$SetupComfyUIEnv,
-    [switch]$InstallComfyUIRequirements,
     [ValidateNotNullOrEmpty()][string]$Distro = "Ubuntu-24.04",
     [switch]$DryRun
 )
@@ -21,8 +18,6 @@ Write-Host "JetAI Hub | Windows preflight"
 if ($DryRun) {
     Write-Host "[dry-run] WSL distro: $Distro"
     if ($InstallOllama) { Write-Host "[dry-run] Would install Ollama on Windows using winget --id Ollama.Ollama --exact" }
-    if ($InstallComfyUISource) { Write-Host "[dry-run] Would clone ComfyUI source into $HOME/ComfyUI" }
-    if ($SetupComfyUIEnv -or $InstallComfyUIRequirements) { Write-Host "[dry-run] Would set up ComfyUI Python environment (requirements: $InstallComfyUIRequirements)" }
     if ($InstallWSL) { Write-Host "[dry-run] Would install WSL distro if absent: $Distro" }
     if ($InstallOpenCode -or $InstallNode) { Write-Host "[dry-run] Would check/install Node.js prerequisite in $Distro" }
     if ($UseNvmFallback) { Write-Host "[dry-run] Would allow nvm fallback if Ubuntu Node.js is too old" }
@@ -42,15 +37,7 @@ if ($InstallOllama) {
     if ($LASTEXITCODE -ne 0) { throw "Ollama winget installation failed ($LASTEXITCODE)" }
     Write-Host "Ollama install command finished. Verify service/model access separately."
 }
-if ($InstallComfyUISource) {
-    & (Join-Path $PSScriptRoot "scripts/install-comfyui.ps1")
-}
-if ($SetupComfyUIEnv -or $InstallComfyUIRequirements) {
-    $args = @()
-    if ($InstallComfyUIRequirements) { $args += "-InstallRequirements" }
-    & (Join-Path $PSScriptRoot "scripts/setup-comfyui-env.ps1") @args
-}
-if (($InstallOllama -or $InstallComfyUISource -or $SetupComfyUIEnv -or $InstallComfyUIRequirements) -and -not ($InstallWSL -or $RunUbuntuBootstrap -or $InstallNode -or $InstallOpenCode)) {
+if ($InstallOllama -and -not ($InstallWSL -or $RunUbuntuBootstrap -or $InstallNode -or $InstallOpenCode)) {
     Write-Host "Windows-only installation steps complete; WSL is not required."
     return
 }

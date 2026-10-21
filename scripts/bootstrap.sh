@@ -15,4 +15,4 @@ if [[ "$DRY_RUN" == 1 ]]; then echo "[dry-run] sudo apt-get update && sudo apt-g
 sudo apt-get update
 sudo apt-get install -y "${packages[@]}"
 echo "Base prerequisites installed."
-echo "Next: review docs/setup.md before installing OpenCode, Ollama or ComfyUI."
+echo "Next: review docs/setup.md before installing OpenCode or Ollama."

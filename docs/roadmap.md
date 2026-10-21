@@ -26,7 +26,7 @@
 
 ## 사용자가 결정해야 하는 것
 - 저장소 이름 변경(GitHub 설정에서 직접) — 변경하면 알려 주기.
-- 이미지·ComfyUI 기능을 Jet Studio로 옮길지(지금은 보존만, 확장 안 함).
+- (결정됨) 이미지·ComfyUI 기능은 이 저장소에서 제거하고 `docs/handoff/jet-studio-comfyui-prompt.md`로 Jet Studio에 넘김. Jet Studio 세션에 그 문서를 붙여 넣는 일은 사용자가 함.
 - 설치 프로그램 형태: 압축 파일만 / 설치 프로그램(.exe)까지.
 
 ## 하지 않는 것

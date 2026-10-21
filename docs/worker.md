@@ -11,7 +11,7 @@ python3 -m workshop.cli approve JOB_ID
 
 **Warning:** OpenCode may modify files, run commands, access the network and incur paid model costs depending on its configuration. Use a dedicated disposable Git worktree, restrict agent permissions and verify the provider and budget before execution. Never run against sensitive repositories or your main checkout.
 
-Current limitations: no scheduler, no ComfyUI execution, no dashboard, no per-job model policy, and no sandbox. Failed code tasks must not be automatically replayed. The queue currently has a generic retry state, so operators must manually inspect any queued failed task before another worker run.
+Current limitations: no scheduler, no per-job model policy, and no sandbox. Failed code tasks must not be automatically replayed. The queue currently has a generic retry state, so operators must manually inspect any queued failed task before another worker run.
 
 ## Interruption and stale-job recovery
 
