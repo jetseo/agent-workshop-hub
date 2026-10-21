@@ -45,3 +45,23 @@ class HintTests(unittest.TestCase):
                              capture_output=True, env=env, check=False)
         self.assertEqual(out.returncode, 0, out.stderr)
         self.assertNotIn(b"UnicodeEncodeError", out.stderr)
+
+
+class DescribeErrorTests(unittest.TestCase):
+    def test_connection_refused_is_explained_in_korean(self):
+        import urllib.error
+        from workshop.preflight import describe_error
+        text = describe_error(urllib.error.URLError(ConnectionRefusedError(10061, "refused")))
+        self.assertIn("실행 중이 아닙니다", text)
+        self.assertIn("URLError", text)
+
+    def test_timeout_and_other_errors(self):
+        from workshop.preflight import describe_error
+        self.assertIn("시간 초과", describe_error(TimeoutError("slow")))
+        self.assertIn("확인하세요", describe_error(OSError("no route")))
+        self.assertIn("형식", describe_error(ValueError("bad json")))
+        self.assertEqual(describe_error(KeyError("x")), "KeyError: 'x'")
+
+    def test_every_mandatory_check_has_a_hint(self):
+        for name in ("python", "platform", "git", "queue_self_test"):
+            self.assertIn(name, diagnostics.HINTS)

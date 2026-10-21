@@ -3,8 +3,24 @@ import json
 import os
 import platform
 import shutil
+import socket
 import sys
 from pathlib import Path
+
+def describe_error(error):
+    """Short Korean explanation of a failed local-service call, keeping the raw cause for debugging."""
+    cause = getattr(error, "reason", error)  # urllib wraps the OSError in URLError.reason
+    raw = (type(error).__name__ + ": " + str(cause))[:250]
+    if isinstance(cause, (TimeoutError, socket.timeout)):
+        return "응답 시간 초과 - 서비스가 멈췄거나 매우 느립니다 (" + raw + ")"
+    if isinstance(cause, ConnectionRefusedError) or getattr(cause, "errno", None) in (111, 10061):
+        return "연결 거부 - 서비스가 실행 중이 아닙니다 (" + raw + ")"
+    if isinstance(cause, OSError):
+        return "연결 실패 - 주소/포트와 방화벽을 확인하세요 (" + raw + ")"
+    if isinstance(error, ValueError):
+        return "응답 형식이 올바르지 않습니다 (" + raw + ")"
+    return raw
+
 
 def inspect_environment():
     checks = {}
