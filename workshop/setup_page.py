@@ -87,6 +87,17 @@ for _c in CATALOG:
     if _c.get("free") in ("all", "match"):
         _c["note"] += NO_BILLING
 BY_ID = {c["id"]: c for c in CATALOG}
+EXTRA = {}                      # services found in the daily public list (servicefeed); never trusted as free
+
+
+def set_extra(entries):
+    """Replace the discovered services shown next to the built-in ones. Built-in ids always win."""
+    EXTRA.clear()
+    EXTRA.update({e["id"]: e for e in entries if e["id"] not in BY_ID})
+
+
+def find_service(service_id):
+    return BY_ID.get(service_id) or EXTRA.get(service_id)
 MAX_PROMPT = 2000
 DEFAULT_PROMPT = "한 문장으로 간단히 자기소개를 해줘."
 
@@ -102,11 +113,12 @@ def looks_free(model):
 def resolve_service(form, providers=None):
     """-> (name, entry). Catalog id, 'custom' with its own name and URL, or an already registered service."""
     service = _field(form, "service")
-    if service in BY_ID:
-        c = BY_ID[service]
+    c = find_service(service)
+    if c is not None:
+        # A discovered service is free only if the user says THEIR key has no payment method attached.
+        free_all = (_field(form, "free_confirmed") == "on") if c.get("discovered") else c.get("free") == "all"
         return c["id"], {"base_url": c["base_url"], "data_policy": c["policy"], "needs_key": c["needs_key"],
-                         "default_model": c["model"], "free_all": c.get("free") == "all",
-                         "free_match": c.get("free_match", [])}
+                         "default_model": c["model"], "free_all": free_all, "free_match": c.get("free_match", [])}
     if service != "custom":
         stored = providers.get(service) if providers is not None and NAME.fullmatch(service) else None
         if not stored:
@@ -187,8 +199,11 @@ def run_test(providers, form, chat_fn=chat):
 
 
 def public_catalog():
-    return [{k: c[k] for k in ("id", "label", "base_url", "policy", "key_url", "model", "needs_key", "note", "group", "limits", "free", "free_match")}
-            for c in CATALOG]
+    rows = [{**{k: c[k] for k in ("id", "label", "base_url", "policy", "key_url", "model", "needs_key", "note", "group", "limits", "free", "free_match")},
+             "discovered": False, "is_new": False} for c in CATALOG]
+    rows += [{**{k: c[k] for k in ("id", "label", "base_url", "policy", "key_url", "model", "needs_key", "note", "group", "limits", "free", "free_match")},
+              "discovered": True, "is_new": bool(c.get("is_new"))} for c in EXTRA.values()]
+    return rows
 
 
 def models_for_form(providers, form, list_fn=list_models):

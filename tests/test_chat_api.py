@@ -864,3 +864,33 @@ class ModelNewsApiTests(ApiBase):
         self.ctx.info.refresh()
         status, listing = self.jcall("POST", "/onboard/models", dict(service="custom", custom_name="mock", custom_url=self.mock_url, key=SECRET))
         self.assertIn("추론", listing["info"].get("demo-model", {}).get("tags", []))
+
+class CatalogRefreshApiTests(ApiBase):
+    README = ("  ### [Fresh Free AI](https://fresh.example.com/keys)\n  | **Rate Limits** | 10 RPM |\n"
+              "  | **OpenAI Compat** | Yes - `https://api.fresh.example.com/v1` |\n")
+
+    def setUp(self):
+        super().setUp()
+        from workshop import setup_page
+        self.addCleanup(setup_page.set_extra, [])
+        self.ctx.feed.fetch = lambda: self.README
+        self.ctx.feed.prober = lambda url: (401, "x")
+
+    def test_refresh_adds_newly_listed_services_to_the_catalog_and_state(self):
+        status, result = self.jcall("POST", "/catalog/refresh", {"force": True})
+        self.assertEqual(status, 200)
+        self.assertEqual(result["added"], ["Fresh Free AI"])
+        self.assertIn("fresh-free-ai", [c["id"] for c in result["catalog"]])
+        state = self.jcall("GET", "/state")[1]
+        self.assertIn("fresh-free-ai", [c["id"] for c in state["catalog"]])
+        self.assertEqual(state["feed"]["count"], 1)
+
+    def test_plain_refresh_is_throttled(self):
+        self.jcall("POST", "/catalog/refresh", {"force": True})
+        again = self.jcall("POST", "/catalog/refresh", {})[1]
+        self.assertEqual((again["skipped"], again["added"]), ("recently refreshed", []))
+
+    def test_a_discovered_service_can_be_listed_for_models_only_with_a_key(self):
+        self.jcall("POST", "/catalog/refresh", {"force": True})
+        status, body = self.jcall("POST", "/onboard/models", {"service": "fresh-free-ai"})
+        self.assertEqual(status, 400)                                       # needs a token like every cloud service

@@ -34,7 +34,8 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(len(rows), len(CATALOG))
         self.assertTrue(all("group" in r and "limits" in r for r in rows))
         self.assertEqual(set(rows[0]), {"id", "label", "base_url", "policy", "key_url", "model", "needs_key", "note", "group", "limits",
-                                        "free", "free_match"})
+                                        "free", "free_match", "discovered", "is_new"})
+        self.assertFalse(any(r["discovered"] or r["is_new"] for r in rows))      # nothing found on the internet is built in
 
     def test_free_tier_markers_are_consistent(self):
         by_id = {c["id"]: c for c in CATALOG}

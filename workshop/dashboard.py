@@ -392,6 +392,7 @@ def main():
     modelinfo.install(api_ctx.info)                  # routing may use the public catalog's benchmark data from now on
     if not os.environ.get("JETAI_NO_BACKGROUND_CHECK"):      # tests and offline setups can opt out
         api_ctx.watch.start_in_background()          # refresh that catalog and look for new free/local models, off the main thread
+        threading.Thread(target=api_ctx.refresh_catalog, name="service-feed", daemon=True).start()   # new free services, off the main thread
         if api_ctx.watch.settings()["engine_autostart"]:
             threading.Thread(target=api_ctx.engine.autostart, name="engine-autostart", daemon=True).start()   # only if installed
     # A termination request (closing the window, `kill`) should stop the server cleanly like Ctrl+C does.
