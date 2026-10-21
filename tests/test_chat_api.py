@@ -101,7 +101,13 @@ class ApiBase(unittest.TestCase):
         hdrs.update(headers or {})
         hdrs = {k: v for k, v in hdrs.items() if v is not None}
         data = raw_body if raw_body is not None else (json.dumps(body).encode() if body is not None else None)
-        conn.request(method, "/api/v1" + path, body=data, headers=hdrs)
+        try:
+            conn.request(method, "/api/v1" + path, body=data, headers=hdrs)
+        except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError):
+            # The server may answer (e.g. 413) and close before the whole body is sent; the
+            # reply is still waiting on the socket (seen on Windows runners).
+            if data is None or len(data) < 65536:
+                raise
         response = conn.getresponse()
         text = response.read().decode("utf-8")
         self.transcript.append(text)
