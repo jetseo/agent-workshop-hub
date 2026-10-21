@@ -60,8 +60,27 @@ jobs:
         run: |
           ./start.ps1 -DryRun -Port 8787
           ./start.ps1 -DryRun -Port 8787 -Terminal
+          ./jetai.ps1 -DryRun
+          ./scripts/create-shortcut.ps1 -DryRun -Native
           ./scripts/create-shortcut.ps1 -DryRun
           ./scripts/create-shortcut.ps1 -DryRun -NoTerminal -Name "JetAI Hub Test"
+      - name: Native launcher smoke test (Windows, no WSL)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $p = Start-Process pwsh -ArgumentList "-NoProfile","-File","./jetai.ps1","-NoBrowser","-Port","8799" -PassThru -WindowStyle Hidden
+          try {
+            $body = $null
+            for ($i = 0; $i -lt 40 -and -not $body; $i++) {
+              try { $body = (Invoke-WebRequest -Uri "http://127.0.0.1:8799/app" -UseBasicParsing -TimeoutSec 2).Content } catch { Start-Sleep -Milliseconds 500 }
+            }
+            if (-not $body) { throw "jetai.ps1 did not serve /app" }
+            if ($body -notmatch "JetAI Hub") { throw "/app did not render the app shell" }
+            Write-Host "native launcher served /app on Windows without WSL"
+          } finally {
+            Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match "workshop.dashboard" } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+            Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+          }
       - name: Compile modules
         run: python -m compileall -q workshop tests
       - name: Unit and local HTTP integration tests

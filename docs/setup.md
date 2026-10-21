@@ -162,3 +162,15 @@ The validation workflow uploads unittest and runtime preflight logs for Windows 
 - 후보는 연결한 서비스 중 로컬 모델 → `-free`/`:free` 모델 순서로 최대 3개입니다. **요금이 나올 수 있는 모델로는 절대 넘어가지 않고**, 동의하지 않은 클라우드 서비스도 후보에서 제외됩니다.
 - 답변이 이미 일부 나온 뒤에는 모델을 바꾸지 않습니다(한 답변에 두 모델이 섞이지 않게). 말풍선에 전환 안내가 표시되고, 각 답변 아래에 **실제로 답한 모델**이 표시됩니다.
 - 끄면 오류가 그대로 보입니다. 모든 후보가 실패하면 각 모델의 실패 이유를 함께 보여줍니다.
+
+## Windows 단독 실행 (WSL 없이)
+WSL 설정 없이 Windows 파이썬(3.10 이상)만으로 채팅·온보딩·압축·사용량을 쓸 수 있습니다.
+```powershell
+.\jetai.ps1 -DryRun        # 무엇을 실행할지 미리 보기(아무것도 시작하지 않음)
+.\jetai.ps1                # 서버 시작 + Edge 앱 창 열기 (닫으면 종료: Ctrl+C)
+.\scripts\create-shortcut.ps1 -Native    # 바탕화면 바로가기(WSL 없는 실행)
+```
+- 파이썬이 없으면 설치 방법을 안내하고 멈춥니다(자동 설치 안 함). `winget install Python.Python.3.12`로 설치할 수 있습니다.
+- 키·대화·사용량은 `C:\Users\<이름>\.agent-workshop`에 저장됩니다(WSL에서 쓰던 폴더와 별개). NTFS에는 유닉스 권한 비트가 없어, 사용자 프로필 폴더의 기본 접근 권한(본인 계정만)에 의존합니다.
+- **이 방식에서 쓸 수 없는 것:** 내장 터미널 탭, OpenCode, 코드 단계(worktree). 이들은 `start.ps1`(WSL)이 필요합니다.
+- 검증 상태: GitHub Windows 러너에서 서버가 뜨고 `/app`이 렌더링되는지만 자동 확인합니다. 실제 PC에서의 동작은 **미검증**입니다.

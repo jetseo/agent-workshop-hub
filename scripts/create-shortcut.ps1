@@ -1,20 +1,22 @@
-# JetAI Hub - create a desktop shortcut that starts the app window with the built-in terminal.
+# JetAI Hub - create a desktop shortcut. -Native starts jetai.ps1 (no WSL); otherwise start.ps1 with the WSL terminal.
 [CmdletBinding()]
 param(
     [ValidateNotNullOrEmpty()][string]$Name = "JetAI Hub",
     [ValidateNotNullOrEmpty()][string]$Distro = "Ubuntu-24.04",
     [switch]$NoTerminal,
+    [switch]$Native,
     [switch]$DryRun
 )
 $ErrorActionPreference = "Stop"
 $repo = Split-Path -Parent $PSScriptRoot
-$launcher = Join-Path $repo "start.ps1"
-if (-not (Test-Path -LiteralPath $launcher)) { throw "Missing start.ps1 next to the scripts folder" }
+$launcherName = if ($Native) { "jetai.ps1" } else { "start.ps1" }
+$launcher = Join-Path $repo $launcherName
+if (-not (Test-Path -LiteralPath $launcher)) { throw "Missing $launcherName next to the scripts folder" }
 $desktop = [Environment]::GetFolderPath("Desktop")
 if (-not $desktop) { $desktop = Join-Path $HOME "Desktop" }
 $link = Join-Path $desktop ($Name + ".lnk")
-$arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$launcher`" -Distro $Distro"
-if (-not $NoTerminal) { $arguments += " -Terminal" }
+$arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$launcher`""
+if (-not $Native) { $arguments += " -Distro $Distro"; if (-not $NoTerminal) { $arguments += " -Terminal" } }
 if ($DryRun) {
     Write-Host "[dry-run] Would create shortcut: $link"
     Write-Host "[dry-run] Target: powershell.exe $arguments"
