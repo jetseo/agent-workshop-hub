@@ -6,6 +6,8 @@ Sending to a cloud service additionally requires the consent recorded when it wa
 import re
 import threading
 import time
+import webbrowser
+from urllib.parse import urlparse
 
 from . import digest, envcheck, setup_page, usage
 from .explain import explain
@@ -38,11 +40,13 @@ class Stream:
 
 
 class Context:
-    def __init__(self, providers, store=None, chat_fn=chat, stream_fn=chat_stream, list_fn=list_models, ledger=None, env_fn=envcheck.inspect):
+    def __init__(self, providers, store=None, chat_fn=chat, stream_fn=chat_stream, list_fn=list_models, ledger=None, env_fn=envcheck.inspect,
+                 open_url_fn=webbrowser.open):
         self.providers, self.store = providers, store or ChatStore()
         self.ledger = ledger or UsageLedger()
         self.chat_fn, self.stream_fn, self.list_fn = chat_fn, stream_fn, list_fn
         self.env_fn = env_fn
+        self.open_url_fn = open_url_fn
         self.active = set()
         self._active_lock = threading.Lock()
 
@@ -56,6 +60,26 @@ class Context:
     def release(self, chat_id):
         with self._active_lock:
             self.active.discard(chat_id)
+
+
+def allowed_link_hosts():
+    """Hosts the app may open in the default browser: the sign-up pages of the catalog services (plus their docs)."""
+    hosts = {"github.com", "docs.github.com"}
+    for entry in setup_page.CATALOG:
+        host = urlparse(entry.get("key_url") or "").hostname
+        if host:
+            hosts.add(host)
+    return hosts
+
+
+def open_external(ctx, url):
+    """Open an https page in the user's DEFAULT browser (the app window itself is an Edge app window, which
+    would otherwise keep every link inside Edge). Only known service pages, never an arbitrary address."""
+    parsed = urlparse(url) if isinstance(url, str) and len(url) <= 500 else None
+    if parsed is None or parsed.scheme != "https" or parsed.hostname not in allowed_link_hosts() or parsed.username or parsed.password:
+        raise ApiError(400, "열 수 없는 주소입니다.")
+    ctx.open_url_fn(url)
+    return {"ok": True}
 
 
 def _form(body):
@@ -299,6 +323,8 @@ def dispatch(ctx, method, path, body):
                 candidates=lambda ref, enabled: fallback_candidates(ctx, ref, enabled),
                 chat_fn=ctx.chat_fn, ledger=ctx.ledger, body=body,
                 claim=lambda: ctx.claim("digest"), release=lambda: ctx.release("digest")))
+        if parts == ["open-url"] and method == "POST":
+            return Json(200, open_external(ctx, body.get("url")))
         if parts == ["usage"] and method == "GET":
             return Json(200, usage.summary_with_savings(ctx.ledger))
         if parts == ["env"] and method == "GET":
