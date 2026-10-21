@@ -182,6 +182,18 @@ const ok = (cond, msg) => { if (!cond) throw new Error("CHECK FAILED: " + msg); 
   await shot("14-usage");
   await $('.side-nav [data-view="boards"]').click();
 
+  console.log("7b. digest view");
+  await $('.side-nav [data-view="digest"]').click();
+  await until(async () => (await $("#dg-model option").count()) > 0, 4000, "digest models");
+  ok(await $(".digest .warn").isVisible(), "accuracy warning is always visible");
+  await $("#dg-model").selectOption({ index: 0 });
+  await $("#dg-text").fill("긴 로그 줄입니다. ".repeat(40));
+  await $("#dg-run").click();
+  await until(async () => await $("#dg-result").isVisible(), 15000, "digest result");
+  ok((await $("#dg-out").textContent()).length > 0, "digest shows a result");
+  ok((await $("#dg-stats").textContent()).includes("토큰"), "digest shows token stats");
+  await shot("15-digest");
+
   console.log("8. other views, theme");
   await $('.side-nav [data-view="settings"]').click();
   await until(async () => (await page.frameLocator("#view-settings").locator("h1").first().textContent()).includes("Setup"), 6000, "settings iframe");

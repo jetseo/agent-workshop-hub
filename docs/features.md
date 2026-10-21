@@ -8,6 +8,8 @@ Agent Workshop Hub의 목적은 **개발 토큰 절약**입니다(`CLAUDE.md`의
 |---|---|---|
 | 채팅 창 + 온보딩 마법사 | `workshop/app_page.py`, `static/app.js`, `chat_api.py`, `setup_page.py` | ChatGPT/Claude 형태의 대화 화면에서 무료·로컬·저비용 서비스를 연결하고 대화 |
 | 서비스 등록과 토큰 보관 | `providers.py` | 키는 저장소 밖(`secrets.json`, 600), 데이터 정책 태그, 클라우드 동의 기록 |
+| 사용량 기록·자동 전환 | `usage.py`, `chat_api.py` | 등급(로컬/무료/유료)별 토큰 기록(추정 vs 서비스 보고), 429 시 로컬·무료 모델로만 자동 전환 |
+| 긴 글 압축(digest) | `digest.py`, 압축 탭, `python -m workshop.digest` | 긴 로그·문서를 무료/로컬 모델로 조각별 요약 후 합쳐 유료 모델에 넘길 토큰 절약. 유료 모델은 비용 확인 필요, 요약 부정확 경고 상시 표시 |
 | 멀티 모델 보드 | `board.py`, `orchestrator.py`, `plan_board.py` | 공유 MD 문서로 여러 모델이 직렬/병렬 협업, 요청 한 줄로 보드 생성 |
 | 비용 안전장치 | `modelpolicy.py`, orchestrator 게이트 | 유료·구독 모델 기본 차단(`-free`, `:free`, 로컬만 허용), 클라우드는 명시적 동의 |
 | 일회용 worktree 코드 단계 | `worktree.py` | 코드 수정은 임시 worktree에서만, diff만 보고하고 커밋·병합 안 함 |

@@ -3,7 +3,7 @@
   var body = document.body, CSRF = body.dataset.csrf, TERM = body.dataset.terminal;
   var state = { providers: [], catalog: [], onboarded: false, chats: [], chat: null, model: "",
                 view: "chat", streaming: null, wiz: null, fallback: store("fallback") !== "0" };
-  var VIEWS = ["chat", "settings", "tasks", "boards", "usage", "terminal"];
+  var VIEWS = ["chat", "settings", "tasks", "boards", "usage", "digest", "terminal"];
   var SUGGESTIONS = ["이 프로젝트의 빠른 시작 가이드를 5줄로 요약해줘",
                      "파이썬으로 CSV 파일을 읽어서 열별 합계를 구하는 코드를 작성해줘",
                      "다음 문장을 자연스러운 영어로 번역해줘: 오늘 회의는 3시에 시작합니다.",
@@ -245,6 +245,7 @@
     $("modelbtn").parentNode.style.visibility = name === "chat" ? "visible" : "hidden";
     if (name === "terminal") startTerminal();
     if (name === "chat") { loadState(); loadUsage(); }
+    if (name === "digest") digestInit();
     if (window.innerWidth <= 760) setSide(false);
   }
   Array.prototype.forEach.call(document.querySelectorAll(".side-nav [data-view]"), function (b) { b.addEventListener("click", function () { showView(b.dataset.view); }); });
@@ -395,6 +396,70 @@
   $("messages").addEventListener("click", function (e) {
     var b = e.target.closest && e.target.closest("button[data-copy]");
     if (b) copyText(b.closest(".codebox").querySelector("pre").textContent);
+  });
+
+  /* ---------- digest view ---------- */
+  var digest = { running: null };
+  function digestTier(ref) {
+    var o = modelOptions().filter(function (x) { return x.ref === ref; })[0];
+    if (!o) return "other";
+    if (o.provider.data_policy === "local" || isFree(o.model)) return "free";
+    return "other";
+  }
+  function digestEstimate() {
+    var n = $("dg-text").value.length;
+    $("dg-est").textContent = n ? "약 " + Math.max(1, Math.ceil(n / 8000)) + "개 조각 · 요청 " + Math.max(1, Math.ceil(n / 8000)) + "회 이상" : "";
+    $("dg-cost-row").hidden = digestTier($("dg-model").value) !== "other";
+  }
+  function digestInit() {
+    var sel = $("dg-model"), prev = sel.value;
+    sel.textContent = "";
+    modelOptions().forEach(function (o) { sel.appendChild(h("option", { value: o.ref, text: o.ref + (o.provider.data_policy === "local" ? " (로컬)" : isFree(o.model) ? " (무료)" : "") })); });
+    if (prev) sel.value = prev; else if (state.model) sel.value = state.model;
+    digestEstimate();
+  }
+  async function digestRun() {
+    if (digest.running) { digest.running.abort(); return; }
+    var text = $("dg-text").value;
+    if (!text.trim()) { toast("압축할 글을 입력하세요"); return; }
+    if (!$("dg-model").value) { openWizard(); return; }
+    var ctrl = new AbortController(), failed = "", result = null;
+    digest.running = ctrl;
+    $("dg-run").textContent = "중단"; $("dg-result").hidden = true; $("dg-notices").textContent = ""; $("dg-status").textContent = "시작합니다…";
+    try {
+      var res = await fetch("/api/v1/digest", { method: "POST", signal: ctrl.signal,
+        headers: { "X-CSRF-Token": CSRF, "Content-Type": "application/json" },
+        body: JSON.stringify({ text: text, model: $("dg-model").value, focus: $("dg-focus").value, confirm_cost: $("dg-cost").checked, fallback: state.fallback }) });
+      if (!res.ok) { var j = {}; try { j = await res.json(); } catch (e) { /* ignore */ } throw new Error(j.error || ("HTTP " + res.status)); }
+      for await (var ev of sseEvents(res)) {
+        if (ev.event === "meta") $("dg-status").textContent = "조각 " + ev.data.chunks + "개 처리 중…";
+        else if (ev.event === "progress") $("dg-status").textContent = ev.data.done + "/" + ev.data.total + " 처리됨 (패스 " + ev.data.pass + ")";
+        else if (ev.event === "notice") $("dg-notices").appendChild(h("div", { class: "notice", text: "\u21AA " + ev.data.message }));
+        else if (ev.event === "done") result = ev.data;
+        else if (ev.event === "error") failed = ev.data.message;
+      }
+    } catch (e) { failed = e.name === "AbortError" ? "중단했습니다" : e.message; }
+    digest.running = null; $("dg-run").textContent = "압축하기";
+    $("dg-status").textContent = failed;
+    if (result) {
+      $("dg-out").textContent = result.digest; $("dg-result").hidden = false;
+      $("dg-stats").textContent = "원문 ~" + result.before_tokens + " → ~" + result.after_tokens + " 토큰 (" + result.reduction_pct + "% 감소, 추정) · 요청 " + result.requests + "회 · " + result.model +
+        (result.still_long ? " · 아직 깁니다. 한 번 더 압축해 보세요." : "");
+      $("dg-status").textContent = "";
+    }
+    loadUsage();
+  }
+  $("dg-run").addEventListener("click", digestRun);
+  $("dg-text").addEventListener("input", digestEstimate);
+  $("dg-model").addEventListener("change", digestEstimate);
+  $("dg-copy").addEventListener("click", function () { copyText($("dg-out").textContent); });
+  $("dg-file").addEventListener("change", function () {
+    var f = $("dg-file").files[0];
+    if (!f) return;
+    if (f.size > 300000) { toast("300KB 이하 파일만 불러올 수 있습니다"); $("dg-file").value = ""; return; }
+    var r = new FileReader();
+    r.onload = function () { $("dg-text").value = String(r.result); digestEstimate(); };
+    r.readAsText(f);
   });
 
   /* ---------- model picker ---------- */
