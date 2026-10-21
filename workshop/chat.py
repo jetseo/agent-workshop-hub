@@ -4,6 +4,8 @@ import os
 import urllib.error
 import urllib.request
 
+from . import ratelimit
+
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
     """urllib would re-send the Authorization header to wherever a redirect points. Never follow."""
@@ -52,6 +54,7 @@ def _chat_request(provider, model, messages, max_tokens, stream, include_usage=F
 
 
 def chat(provider, model, messages, *, timeout=120, max_tokens=2000):
+    ratelimit.acquire(provider)
     with _open(_chat_request(provider, model, messages, max_tokens, False), timeout) as response:
         data = json.load(response)
     try:
@@ -64,6 +67,7 @@ def chat_stream(provider, model, messages, *, timeout=120, max_tokens=2048, usag
     """Yield text deltas from an OpenAI-style server-sent-events stream.
 
     If `usage` (a dict) is given it is filled with prompt_tokens/completion_tokens when the service reports them."""
+    ratelimit.acquire(provider)
     response = None
     for include in (True, False):
         try:

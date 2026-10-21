@@ -490,6 +490,27 @@ class DigestApiTests(ApiBase):
         self.assertEqual(events[-1][0], "error")
 
 
+class RpmLimitTests(ApiBase):
+    def setUp(self):
+        super().setUp()
+        from workshop import ratelimit
+        ratelimit.reset()
+        self.addCleanup(ratelimit.reset)
+        self.onboard()
+        self.providers.add("mock", base_url=self.mock_url, data_policy="local", rpm=1)
+
+    def test_second_request_over_the_limit_is_stopped_before_reaching_the_service(self):
+        chat_id = self.new_chat("mock/demo-model")
+        status, events = self.sse(chat_id, {"content": "one", "fallback": False})
+        self.assertEqual(events[-1][0], "done")
+        posts = lambda: len([r for r in self.mock.requests if r[0] == "POST"])
+        before = posts()
+        status, events = self.sse(chat_id, {"content": "two", "fallback": False})
+        self.assertEqual(events[-1][0], "error")
+        self.assertIn("requests/minute", events[-1][1]["message"])
+        self.assertEqual(posts(), before)           # nothing was sent, so no 429 and no wasted quota
+
+
 class FallbackCandidateTests(unittest.TestCase):
     def test_candidates_never_include_paid_or_unconsented_models(self):
         from workshop.chat_api import fallback_candidates
