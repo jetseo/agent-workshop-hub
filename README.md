@@ -1,65 +1,43 @@
 # JetAI
 
-A local-first AI workspace that saves development tokens: it sends coding and text work to free, local or low-cost models, with explicit opt-in, approval and cost guards.
+**개발 토큰을 아끼는 로컬 AI 작업대.** 코딩·글쓰기 같은 일을 무료·로컬·저비용 모델로 먼저 보내고, 유료 모델은 명시적으로 허락했을 때만 씁니다. 채팅 앱처럼 쓰고, 여러 서비스를 연결하고, 여러 모델이 하나의 문서를 공유하며 함께 일하게 할 수 있습니다.
 
-## Goals
+> 상태: **실험 단계.** 기능은 모의 서버와 GitHub 러너에서 테스트했고, 실제 Windows PC와 실제 서비스에서의 검증은 아직입니다(`docs/verification.md`에 항목별로 구분해 기록). 쇼츠(영상) 제작은 별개 프로젝트(Jet Studio)이며 이 저장소에 포함되지 않습니다.
 
-- Run OpenCode as the primary coding agent, with optional Codex CLI and Claude Code integrations.
-- Connect local models via Ollama and cloud models via configurable providers.
-- Orchestrate tasks, approvals, retries, and checkpoints through LangGraph.
-- Use Git worktrees to isolate concurrent coding agents.
-- Provide a Windows + WSL2 bootstrap with non-destructive setup.
+## 할 수 있는 것
+| 기능 | 설명 |
+|---|---|
+| 채팅 + 온보딩 | 서비스 선택 → 토큰 입력 → 테스트 → 저장까지 한 화면. 스트리밍 답변, 대화 기록, 모델 선택, 라이트/다크 |
+| 토큰 절약 | 한도(429)가 차면 로컬·무료 모델로만 자동 전환, 사용량 기록(로컬·무료·유료 구분), 긴 글 압축, 결과 캐시 |
+| 여러 계정(키) | 한 서비스에 직접 발급받은 키를 여러 개 등록해 번갈아 사용, 분당 요청 한도 |
+| 멀티 모델 보드 | 공유 마크다운 문서로 여러 모델이 직렬·병렬 협업, 코드 작업은 일회용 worktree에서만 |
+| 작업 큐 | 승인 후 실행, 로컬·무료 모델만, 사용량 기록 |
+| 내장 터미널 | WSL 셸을 앱 안에서(선택) |
 
-> Image generation and ComfyUI features were removed from this repository (they belong to the separate Jet Studio project). See `docs/handoff/jet-studio-comfyui-prompt.md`.
-
-## Status
-
-**Experimental prototype.** A local dashboard, SQLite queue, opt-in OpenCode worker, a chat app with onboarding and a Windows launcher exist, but there is no installer yet. Testing on a real Windows PC is pending. Avoid putting API keys or private code in tracked configuration files.
-
-## Proposed architecture
-
-`Web dashboard -> LangGraph orchestration -> OpenCode / Codex / Claude Code -> Git worktrees + task state`
-
-Model selection is a separate concern: local Ollama, free-tier providers, and optional paid APIs.
-
-## Milestones
-
-1. WSL2 prerequisites and environment checks
-2. OpenCode + Ollama integration
-3. Durable job queue and approval checkpoints
-4. Parallel Git worktree agents and automated testing
-5. Dashboard, scheduling, recovery, and remote access
-
-## Safety defaults
-
-- No automatic paid-model calls without user-defined policy.
-- No automatic merge to the default branch.
-- Never overwrite existing Codex or Claude Code credentials.
-- Bind local service endpoints to loopback by default.
-- Keep secrets in untracked environment files or an OS credential store.
-
-## Run locally (after prerequisite installation)
-
-On WSL2 Ubuntu, from the repository root:
-
-```bash
-bash scripts/start.sh
-```
-
-Open http://127.0.0.1:8787. This defaults to dashboard-only mode and **does not execute AI tasks**.
-
-To explicitly enable worker execution:
-
-```bash
-bash scripts/start.sh --allow-opencode
-```
-
-On Windows PowerShell from the repository root:
-
+## 시작하기
+**Windows (WSL 없이, 가장 쉬움)** — 파이썬 3.10 이상 필요
 ```powershell
-.\start.ps1
-# After reviewing agent permissions and provider costs:
-.\start.ps1 -AllowOpenCode
+.\jetai.ps1            # 서버 시작 + 앱 창
 ```
+파이썬이 없으면 GitHub Actions의 `JetAI-portable.zip`(파이썬 포함)을 받아 풀고 `JetAI.cmd`를 실행하세요.
 
-**Limitations:** Existing Ubuntu-24.04 WSL distro and Python dependencies are required; no one-click installation of OpenCode or Ollama; no per-job execution approval, cost cap or sandbox. Do not expose the dashboard to the network.
+**Windows + WSL2** (터미널·OpenCode·코드 작업까지): `.\start.ps1 -Terminal`
+**Linux/WSL:** `bash scripts/start.sh`
+
+앱이 열리면 마법사가 서비스 연결을 안내합니다. 자세한 설치·문제 해결은 `docs/setup.md`.
+
+## 안전 기본값
+- 서버는 항상 `127.0.0.1`(이 PC)에서만 열립니다. 외부에 노출하지 마세요.
+- 자동 유료 호출, 키 덮어쓰기, 모델 자동 다운로드, 관리자 권한 요청, 자동 병합은 하지 않습니다.
+- AI 실행은 항상 명시적 허용(옵트인)이 필요하고, 코드 작업은 승인 후에만 실행됩니다.
+- 키는 저장소 밖 `~/.agent-workshop/secrets.json`에만 저장하며 화면·로그에 다시 나오지 않습니다. 이 폴더 이름은 옛 이름 그대로입니다(바꾸면 기존 키·대화가 사라진 것처럼 보임).
+
+## 문서
+`docs/README.md`에 목차가 있습니다. 먼저 볼 것: `docs/setup.md`(설치·실행), `docs/features.md`(기능), `docs/roadmap.md`(앞으로 할 일), `docs/verification.md`(무엇이 어디서 검증됐는지).
+
+## 개발
+```bash
+python -m unittest discover -s tests          # 전체 테스트
+python -m workshop.diagnostics --no-services  # 환경 진단(읽기 전용)
+```
+기여·작업 규칙은 `CLAUDE.md`(AI 코딩 도구용 인수 문서)에 있습니다.

@@ -1,0 +1,30 @@
+# JetAI 문서 목차
+
+## 사용자
+| 문서 | 내용 |
+|---|---|
+| [setup.md](setup.md) | 설치와 실행(Windows 단독, WSL, 휴대용 패키지), 서비스 연결, 사용량, 로그·백업·종료 |
+| [features.md](features.md) | 기능 목록과 위치, 제거된 기능 |
+| [multi-model.md](multi-model.md) | 멀티 모델 보드 사용법 |
+| [roadmap.md](roadmap.md) | 앞으로 할 일, 상태, 사용자가 정할 것 |
+
+## 상태·검증
+| 문서 | 내용 |
+|---|---|
+| [verification.md](verification.md) | 항목별로 "모의 테스트 / GitHub 러너 / 사용자 PC"를 구분한 검증 기록 |
+
+## 구성 요소(개발자)
+| 문서 | 내용 |
+|---|---|
+| [queue.md](queue.md) | 작업 큐: 상태, 승인, 의존성, 재시도 |
+| [worker.md](worker.md), [worker-service.md](worker-service.md) | 워커와 상시 실행 주의점 |
+| [dashboard.md](dashboard.md) | 작업 대시보드 |
+| [integrations.md](integrations.md) | OpenCode·Ollama 연동과 점검 |
+| [local-planner.md](local-planner.md) | 로컬 모델로 요청을 작업으로 쪼개기 |
+| [multi-model-plan.md](multi-model-plan.md) | 멀티 모델 보드 설계 기록 |
+
+## 브랜딩·인수
+| 문서 | 내용 |
+|---|---|
+| [branding/logo-prompt.md](branding/logo-prompt.md) | 로고 프롬프트와 확정된 SVG 로고 설명 |
+| [handoff/jet-studio-comfyui-prompt.md](handoff/jet-studio-comfyui-prompt.md) | Jet Studio로 넘긴 이미지·ComfyUI 기능(프롬프트 + 코드 전체) |
