@@ -363,3 +363,59 @@ class AutoRoutingTests(Fixture):
         board = self.board([{"id": "a", "model": "auto"}])
         summary = run_board(board, self.providers, text_fn=lambda *a: "x", stats=Broken(), auto_models=["loc/m:7b"])
         self.assertEqual(summary["done"], ["a"])
+
+
+class CacheTests(Fixture):
+    def setUp(self):
+        super().setUp()
+        from workshop.cache import ResultCache
+        self.cache = ResultCache(self.dir / "cache")
+
+    def run_once(self, text_fn, providers=None, **kw):
+        board = self.board([{"id": "a", "model": "loc/m", "prompt": "same question"}])
+        return run_board(board, providers or self.providers, text_fn=text_fn, cache=self.cache, **kw)
+
+    def test_identical_step_is_answered_from_cache_without_a_model_call(self):
+        calls = []
+        def fake(provider, model, messages):
+            calls.append(1); return "answer " * 50
+        self.assertEqual(self.run_once(fake)["done"], ["a"])
+        self.assertEqual(self.run_once(fake)["done"], ["a"])
+        self.assertEqual(len(calls), 1)
+        saved = self.cache.savings()
+        self.assertEqual(saved["hits"], 1)
+        self.assertGreater(saved["tokens_saved"], 0)
+
+    def test_different_model_or_prompt_misses(self):
+        self.cache.put("loc/m", "p", "r")
+        self.assertEqual(self.cache.get("loc/m", "p"), "r")
+        self.assertIsNone(self.cache.get("loc/other", "p"))
+        self.assertIsNone(self.cache.get("loc/m", "p2"))
+
+    def test_expired_and_empty_entries_are_ignored(self):
+        self.cache.put("loc/m", "p", "r", now=1000)
+        self.assertIsNone(self.cache.get("loc/m", "p", now=1000 + 8 * 86400))
+        self.cache.put("loc/m", "empty", "   ")
+        self.assertIsNone(self.cache.get("loc/m", "empty"))
+
+    def test_store_is_capped(self):
+        from workshop.cache import ResultCache
+        small = ResultCache(self.dir / "small", max_entries=3)
+        for i in range(6):
+            small.put("loc/m", "p%d" % i, "r")
+        self.assertLessEqual(len(list((self.dir / "small").glob("*.json")) ) - 0, 3)
+
+    def test_consent_gates_still_apply_to_a_cached_reply(self):
+        self.cache.put("free/m", self.board([{"id": "a", "model": "free/m", "prompt": "Q"}]).context_for("a"), "secret")
+        board = self.board([{"id": "a", "model": "free/m", "prompt": "Q"}])
+        summary = run_board(board, self.providers, text_fn=lambda *a: "x", cache=self.cache)
+        self.assertIn("--allow-cloud", summary["failed"]["a"])
+
+    def test_broken_cache_never_fails_a_step(self):
+        class Broken:
+            def get(self, *a): raise OSError("disk")
+            def put(self, *a): raise OSError("disk")
+        board = self.board([{"id": "a", "model": "loc/m", "prompt": "Q"}])
+        # get() raising is treated like any other step error only if unguarded; it must be guarded.
+        summary = run_board(board, self.providers, text_fn=lambda *a: "x", cache=Broken())
+        self.assertEqual(summary["done"], ["a"])

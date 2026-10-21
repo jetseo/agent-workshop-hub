@@ -14,6 +14,7 @@ from pathlib import Path
 
 from .adapters import run_opencode
 from .board import Board
+from .cache import ResultCache
 from .chat import chat
 from .modelpolicy import classify
 from . import worktree
@@ -187,11 +188,24 @@ def _run_step(board, sid, step, providers, flags, text_fn, code_fn):
         raise PermissionError("Cloud provider requires --allow-cloud (data leaves this PC)")
     if policy in ("cloud-may-train", "unknown") and not flags["allow_may_train"]:
         raise PermissionError("Provider may train on inputs; requires --allow-may-train")
+    cache = flags.get("cache")           # consent gates above always run first, even for a cached reply
+    if cache is not None:
+        try:
+            hit = cache.get(step["model"], prompt)
+        except OSError:
+            hit = None
+        if hit is not None:
+            return hit                    # no model call, nothing booked in the usage ledger
     last = None
     for _ in range(TEXT_ATTEMPTS):
         try:
             reply = text_fn(provider, model, [{"role": "user", "content": prompt}])
             _record(flags, step, tier_of(policy, model), prompt, reply)     # only the attempt that succeeded
+            if cache is not None:
+                try:
+                    cache.put(step["model"], prompt, reply)
+                except OSError:
+                    pass
             return reply
         except PermissionError:
             raise
@@ -258,8 +272,8 @@ def _resolve_auto(board, ready, auto_models, stats, errors, say, providers):
 def run_board(board, providers, *, allow_opencode=False, allow_cloud=False, allow_may_train=False,
               allow_paid=False, approve_text_agents=False, allow_main_checkout=False,
               worktree_base=None, approved_code=(), max_parallel=2, text_fn=chat, code_fn=run_opencode, progress=None, ledger=None,
-              auto_models=(), stats=None):
-    flags = {"ledger": ledger, "allow_opencode": allow_opencode, "allow_cloud": allow_cloud,
+              auto_models=(), stats=None, cache=None):
+    flags = {"ledger": ledger, "cache": cache, "allow_opencode": allow_opencode, "allow_cloud": allow_cloud,
              "allow_may_train": allow_may_train, "allow_paid": allow_paid, "approve_text_agents": approve_text_agents,
              "allow_main_checkout": allow_main_checkout,
              "worktree_base": worktree_base or worktree.default_base(),
@@ -318,6 +332,8 @@ def main(argv=None):
     parser.add_argument("--allow-paid-models", action="store_true",
                         help="Permit paid/subscription-backed OpenCode models (default: free and local only)")
     parser.add_argument("--max-parallel", type=int, default=2)
+    parser.add_argument("--cache", action="store_true",
+                        help="Reuse identical text replies from ~/.agent-workshop/cache (stored on disk, 7 days)")
     parser.add_argument("--auto-model", action="append", default=[], metavar="MODEL_ID",
                         help="Candidate for steps whose model is \"auto\" (repeatable; paid ids are never picked)")
     parser.add_argument("--dry-run", action="store_true", help="Create the board only; call no model")
@@ -341,7 +357,10 @@ def main(argv=None):
                         approve_text_agents=args.approve_text_agents,
                         allow_main_checkout=args.allow_main_checkout, approved_code=args.approve_code, max_parallel=args.max_parallel,
                         progress=lambda m: print(m, file=sys.stderr, flush=True), ledger=UsageLedger(),
-                        auto_models=args.auto_model, stats=RunStats())
+                        auto_models=args.auto_model, stats=RunStats(),
+                        cache=ResultCache() if args.cache else None)
+    if args.cache:
+        summary["cache"] = ResultCache().savings()
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     return 0 if not summary["failed"] and not summary["blocked"] else 1
 
