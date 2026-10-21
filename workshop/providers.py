@@ -21,7 +21,7 @@ def default_path():
 
 def validate(name, entry):
     if not NAME.fullmatch(name or ""):
-        raise ValueError("Provider name must be lowercase letters, digits, - or _")
+        raise ValueError("서비스 이름은 영문 소문자·숫자·-·_ 만 쓸 수 있습니다.")
     url = urlparse(entry.get("base_url", ""))
     loopback = url.hostname in ("127.0.0.1", "localhost")
     if url.username or url.password or not url.hostname:
@@ -32,7 +32,7 @@ def validate(name, entry):
     if policy not in POLICIES:
         raise ValueError("data_policy must be one of " + ", ".join(POLICIES))
     if policy == "local" and not loopback:
-        raise ValueError("A non-loopback provider cannot be marked local")
+        raise ValueError("이 PC(127.0.0.1)가 아닌 서비스는 로컬로 표시할 수 없습니다.")
     key_env = entry.get("key_env")
     if key_env is not None and not ENV.fullmatch(key_env):
         raise ValueError("key_env must be an environment variable NAME, not a key")
@@ -65,7 +65,7 @@ KEY_PATTERN = re.compile(r"[\x21-\x7e]{8,512}")  # printable ASCII, no whitespac
 def validate_key(key):
     key = (key or "").strip()
     if not KEY_PATTERN.fullmatch(key):
-        raise ValueError("Token must be 8-512 printable characters without spaces")
+        raise ValueError("토큰은 공백 없는 8~512자여야 합니다. 앞뒤 공백이나 줄바꿈이 섞이지 않았는지 확인하세요.")
     return key
 
 
@@ -105,7 +105,7 @@ class Providers:
         """Remember a model the user has verified for this provider (newest first, no duplicates)."""
         data = self.load()
         if name not in data:
-            raise ValueError("Unknown provider")
+            raise ValueError("등록되지 않은 서비스입니다.")
         models = [m for m in data[name].get("models", []) if m != model]
         data[name]["models"] = validate(name, {**data[name], "models": [model] + models[:MAX_MODELS - 1]})["models"]
         self._save(data)
@@ -113,7 +113,7 @@ class Providers:
     def set_consent(self, name, consented=True):
         data = self.load()
         if name not in data:
-            raise ValueError("Unknown provider")
+            raise ValueError("등록되지 않은 서비스입니다.")
         data[name]["consented"] = bool(consented)
         self._save(data)
 
@@ -121,7 +121,7 @@ class Providers:
         data = self.load()
         entry = data.pop(name, None)
         if entry is None:
-            raise ValueError("Unknown provider")
+            raise ValueError("등록되지 않은 서비스입니다.")
         self._save(data)
         self.clear_key(name)
         for account in entry.get("accounts", []):
@@ -131,14 +131,14 @@ class Providers:
     def add_account(self, name, label, key, rpm=0):
         data = self.load()
         if name not in data:
-            raise ValueError("Unknown provider")
+            raise ValueError("등록되지 않은 서비스입니다.")
         if not LABEL.fullmatch(label or ""):
-            raise ValueError("Account label: 1-20 letters, digits, Korean, - or _")
+            raise ValueError("계정 별칭은 1~20자의 영문·숫자·한글·-·_ 만 쓸 수 있습니다.")
         if label == PRIMARY_LABEL:
             raise ValueError("'" + PRIMARY_LABEL + "' is the first key's name; choose another label")
         accounts = [a for a in data[name].get("accounts", []) if a["label"] != label]
         if len(accounts) >= MAX_ACCOUNTS - 1:
-            raise ValueError("At most " + str(MAX_ACCOUNTS) + " accounts per service")
+            raise ValueError("서비스당 계정은 최대 " + str(MAX_ACCOUNTS) + "개까지 등록할 수 있습니다.")
         rpm = int(rpm or 0)
         if rpm < 0 or rpm > 100000:
             raise ValueError("rpm must be 0 (unlimited) to 100000")
@@ -153,7 +153,7 @@ class Providers:
         data = self.load()
         accounts = (data.get(name) or {}).get("accounts", [])
         if not any(a["label"] == label for a in accounts):
-            raise ValueError("Unknown account")
+            raise ValueError("등록되지 않은 계정입니다.")
         data[name]["accounts"] = [a for a in accounts if a["label"] != label]
         self._save(data)
         self.clear_key(name + "#" + label)
@@ -190,7 +190,7 @@ class Providers:
 
     def set_key(self, name, key):
         if not NAME.fullmatch(name or ""):
-            raise ValueError("Invalid provider name")
+            raise ValueError("서비스 이름이 올바르지 않습니다.")
         keys = self._load_keys()
         keys[name] = validate_key(key)
         self._save_keys(keys)

@@ -240,7 +240,7 @@ const ok = (cond, msg) => { if (!cond) throw new Error("CHECK FAILED: " + msg); 
 
   console.log("8. other views, theme");
   await $('.side-nav [data-view="settings"]').click();
-  await until(async () => (await page.frameLocator("#view-settings").locator("h1").first().textContent()).includes("Setup"), 6000, "settings iframe");
+  await until(async () => (await page.frameLocator("#view-settings").locator("h1").first().textContent()).includes("서비스 연결"), 6000, "settings iframe");
   ok(!(await $("#modelbtn").isVisible()), "model picker hides outside the chat view");
   await $('.side-nav [data-view="terminal"]').click();
   await until(async () => (await $("#term-status").textContent()).includes("연결됨"), 10000, "terminal");

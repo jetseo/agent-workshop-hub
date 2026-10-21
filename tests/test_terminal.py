@@ -272,7 +272,7 @@ class TerminalHttpTests(unittest.TestCase):
         for path, link in (("/setup", 'href="/boards"'), ("/", 'href="/setup"'), ("/boards", 'href="/"')):
             self.assertIn(link, self.get(path)[1], path)
             self.assertNotIn(link, self.get(path, framed)[1], path)
-        self.assertIn("시작하기", self.get("/setup", framed)[1])    # the content itself is still there
+        self.assertIn("서비스 연결", self.get("/setup", framed)[1])    # the content itself is still there
 
     def test_static_files_are_whitelisted(self):
         self.start()

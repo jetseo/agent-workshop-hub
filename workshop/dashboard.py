@@ -24,16 +24,16 @@ PAGE = """<!doctype html><html lang="ko"><head><meta charset="utf-8">
 <style>__CSS__
 .job{display:flex;justify-content:space-between;gap:14px;align-items:center;flex-wrap:wrap}.job>div:first-child{min-width:0;overflow-wrap:anywhere}.job form{max-width:100%}@media(max-width:600px){.job{display:block}}
 </style></head><body>
-<h1>작업 / Tasks</h1>
-<p>Local task dashboard · A separately enabled worker executes queued tasks.<br>로컬 작업 대시보드 · 작업은 별도로 허용한 워커만 실행합니다.</p>
-<section><h2>Add task / 작업 추가</h2><form method="post" action="/add">
+<h1>작업</h1>
+<p>로컬 작업 대시보드입니다. 작업은 별도로 허용(옵트인)한 워커만 실행하며, 코드 작업은 승인 후에만 실행됩니다.</p>
+<section><h2>작업 추가</h2><form method="post" action="/add">
 <input type="hidden" name="token" value="__TOKEN__">
-<select name="kind"><option>plan</option><option>code</option><option>qa</option></select>
-<input name="title" placeholder="Describe a task" required maxlength="500">
-<input name="resource" placeholder="Code: absolute worktree path" maxlength="2000">
-<input name="model" placeholder="Model (optional, e.g. opencode/big-pickle-free or ollama/qwen2.5-coder)" maxlength="200">
-<button>Add / 추가</button></form></section>
-<h2>Tasks / 작업 목록</h2><p><a href="/setup">Setup / 서비스 연결·테스트 →</a> · <a href="/boards">Boards / 멀티 모델 보드 →</a></p>__JOBS__
+<select name="kind" aria-label="작업 종류"><option value="plan">계획(plan)</option><option value="code">코드(code)</option><option value="qa">검수(qa)</option></select>
+<input name="title" placeholder="작업 내용을 적으세요" required maxlength="500">
+<input name="resource" placeholder="코드 작업: 작업 폴더(worktree)의 절대 경로" maxlength="2000">
+<input name="model" placeholder="모델(선택, 예: opencode/big-pickle-free, ollama/qwen2.5-coder · 로컬·무료만 가능)" maxlength="200">
+<button>추가</button></form></section>
+<h2>작업 목록</h2><p><a href="/setup">서비스 연결·테스트 →</a> · <a href="/boards">멀티 모델 보드 →</a></p>__JOBS__
 </body></html>"""
 
 STATE_KO = {"pending_approval": " (실행 승인 대기)", "queued": " (대기 중)",
@@ -241,7 +241,7 @@ def make_handler(queue, token, boards_root=None, providers=None, chat_fn=None, l
                     ids = sorted((d.name for d in root.glob("*") if (d / "board.md").is_file()), reverse=True) if root.is_dir() else []
                     items = "".join('<li><a href="/board?id=' + quote(i) + '">' + html.escape(i) + '</a></li>' for i in ids)
                     self._send(200, '<!doctype html><html lang="ko"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>' + pagestyle.CSS + '</style><body>'
-                               '<h1>Boards / 보드</h1>' + ("" if self._embedded() else '<a href="/">← Tasks</a>') + '<ul>' + (items or "<li>No boards yet. / 보드가 없습니다.</li>") + '</ul></body></html>')
+                               '<h1>보드</h1>' + ("" if self._embedded() else '<a href="/">← 작업</a>') + '<ul>' + (items or "<li>아직 보드가 없습니다.</li>") + '</ul></body></html>')
                     return
                 board_id = parse_qs(urlsplit(self.path).query).get("id", [""])[0]
                 target = root / board_id / "board.md"
@@ -249,7 +249,7 @@ def make_handler(queue, token, boards_root=None, providers=None, chat_fn=None, l
                     self._send(404, "Not found", "text/plain")
                     return
                 self._send(200, '<!doctype html><html lang="ko"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>' + pagestyle.CSS + '</style><body>'
-                           '<a href="/boards">← Boards</a><pre style="white-space:pre-wrap;overflow-wrap:anywhere">' +
+                           '<a href="/boards">← 보드</a><pre style="white-space:pre-wrap;overflow-wrap:anywhere">' +
                            html.escape(target.read_text(encoding="utf-8")[:200000]) + '</pre></body></html>')
                 return
             if route != "/":
@@ -266,17 +266,17 @@ def make_handler(queue, token, boards_root=None, providers=None, chat_fn=None, l
                     approve = ('<form method="post" action="/authorize">'
                                '<input type="hidden" name="token" value="' + token + '">'
                                '<input type="hidden" name="id" value="' + html.escape(job["id"]) + '">'
-                               '<button>Authorize execution / 실행 승인</button></form>')
+                               '<button>실행 승인</button></form>')
                 if job["state"] == "review":
                     approve = ('<form method="post" action="/approve">'
                                '<input type="hidden" name="token" value="' + token + '">'
                                '<input type="hidden" name="id" value="' + html.escape(job["id"]) + '">'
-                               '<button>Approve / 결과 승인</button></form>')
+                               '<button>결과 승인</button></form>')
                 detail = ""
                 cards.append('<div class="job"><div><strong>' + name + '</strong><br>'
                              '<small>' + kind + ' · <span class="tag">' + state + STATE_KO.get(job["state"], "") + '</span></small></div>'
                              + detail + approve + '</div>')
-            page = PAGE.replace("__CSS__", pagestyle.CSS).replace("__TOKEN__", token).replace("__JOBS__", "".join(cards) or "<p>No tasks yet. / 아직 작업이 없습니다.</p>")
+            page = PAGE.replace("__CSS__", pagestyle.CSS).replace("__TOKEN__", token).replace("__JOBS__", "".join(cards) or "<p>아직 작업이 없습니다.</p>")
             if self._embedded():
                 page = re.sub(r'<p><a href="/setup".*?</p>', "", page, count=1, flags=re.S)
             self._send(200, page)

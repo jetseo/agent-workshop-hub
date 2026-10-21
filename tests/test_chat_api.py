@@ -188,7 +188,7 @@ class AuthAndOnboardingTests(ApiBase):
         self.assertEqual(self.providers.load(), {})
         status, result = self.jcall("POST", "/onboard/test", dict(service="groq", key=SECRET, model="m", prompt="x"))
         self.assertFalse(result["ok"])
-        self.assertIn("consent", result["error"].lower())
+        self.assertIn("동의", result["error"])
 
     def test_remove_provider_clears_token(self):
         self.onboard()
