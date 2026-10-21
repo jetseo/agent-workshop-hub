@@ -36,3 +36,4 @@ BASE = (
 )
 
 CSS = TOKENS + BASE
+HEAD_ICON = '<link rel="icon" type="image/svg+xml" href="/static/jetai-icon.svg">'

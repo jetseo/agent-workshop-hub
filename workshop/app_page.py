@@ -6,6 +6,7 @@ STATIC_FILES = {
     "xterm.js": "text/javascript; charset=utf-8", "addon-fit.js": "text/javascript; charset=utf-8",
     "app.js": "text/javascript; charset=utf-8", "xterm.css": "text/css; charset=utf-8",
     "app.css": "text/css; charset=utf-8",
+    "jetai-icon.svg": "image/svg+xml", "jetai-mark.svg": "image/svg+xml", "jetai.ico": "image/x-icon",
 }
 
 
@@ -24,10 +25,11 @@ def render(terminal_state, term_token="", csrf=""):
     return ('<!doctype html><html lang="ko"><head><meta charset="utf-8">'
             '<meta name="viewport" content="width=device-width,initial-scale=1">'
             '<meta name="color-scheme" content="light dark"><title>JetAI</title>'
+            '<link rel="icon" type="image/svg+xml" href="/static/jetai-icon.svg"><link rel="alternate icon" href="/favicon.ico">'
             '<link rel="stylesheet" href="/static/xterm.css"><link rel="stylesheet" href="/static/app.css"></head>'
             '<body data-csrf="' + esc(csrf) + '" data-terminal="' + esc(terminal_state) + '" data-term-token="' + esc(term_token) + '">'
             '<div id="app">'
-            '<aside id="side"><div class="side-top"><span class="brand">JetAI</span>'
+            '<aside id="side"><div class="side-top"><span class="brand"><svg class="logo" viewBox="200 320 860 610" width="32" height="22" aria-hidden="true" fill="currentColor"><path d="M215 608C215 598 235 592 255 588L890 462C905 459 912 466 908 474L655 830C640 855 600 880 560 900C540 910 520 918 513 908L598 722C600 712 592 708 580 712L440 785C420 793 360 795 353 787C350 782 355 778 365 772L700 565C715 558 730 558 727 566C724 572 715 576 700 582L415 672C405 676 395 676 385 674L228 632C218 629 215 620 215 608Z"/><path d="M966 335Q974 406 1043 414Q974 421 966 497Q958 421 889 411Q958 404 966 335Z"/></svg>JetAI</span>'
             '<button id="side-close" class="icon" aria-label="사이드바 닫기" title="사이드바 닫기">&#x2715;</button></div>'
             '<button id="newchat" class="newchat"><i>+</i>새 채팅</button>'
             '<div id="chatlist" class="chat-list" role="list"></div>'

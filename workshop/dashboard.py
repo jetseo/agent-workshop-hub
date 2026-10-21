@@ -20,6 +20,7 @@ from . import applog, pagestyle
 PAGE = """<!doctype html><html lang="ko"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>JetAI</title>
+<link rel="icon" type="image/svg+xml" href="/static/jetai-icon.svg">
 <style>__CSS__
 .job{display:flex;justify-content:space-between;gap:14px;align-items:center;flex-wrap:wrap}.job>div:first-child{min-width:0;overflow-wrap:anywhere}.job form{max-width:100%}@media(max-width:600px){.job{display:block}}
 </style></head><body>
@@ -197,9 +198,8 @@ def make_handler(queue, token, boards_root=None, providers=None, chat_fn=None, l
                 self._send(200, usage_page(summary_with_savings(api.ledger)))
                 return
             if route == "/favicon.ico":
-                self.send_response(204)
-                self.send_header("Content-Length", "0")
-                self.end_headers()
+                self._send(200, (Path(__file__).parent / "static" / "jetai.ico").read_bytes(), "image/x-icon",
+                           csp="default-src 'none'")
                 return
             if route == "/terminal/ws":
                 # A shell as the current user: needs the feature on, loopback Host, a browser Origin from

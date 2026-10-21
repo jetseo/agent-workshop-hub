@@ -194,7 +194,7 @@ def render_page(providers, csrf, *, result=None, models=None, notice="", ollama_
                   + (_esc(", ".join(free[:40])) or "없음") + "</p><details><summary>전체</summary><pre>"
                   + _esc("\n".join(models)) + "</pre></details></section>")
     return ('<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
-            "<title>Setup</title><style>" + pagestyle.CSS + "</style></head><body>"
+            "<title>Setup</title>" + pagestyle.HEAD_ICON + "<style>" + pagestyle.CSS + "</style></head><body>"
             '<h1>시작하기 / Setup</h1>' + ("" if embedded else '<a href="/">← Tasks</a> · <a href="/boards">Boards</a>')
             + (("<p><b>" + _esc(notice) + "</b></p>") if notice else "")
             + _status_panel(ollama_models or [], opencode_path)
