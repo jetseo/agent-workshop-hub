@@ -106,6 +106,17 @@ class UsageLedger:
                 "estimated_share": round(estimated / every, 3) if every else 0.0}
 
 
+def summary_with_savings(ledger, days=30):
+    """Ledger summary plus the result-cache savings stored next to it (cache/hits.jsonl)."""
+    from .cache import ResultCache
+    summary = ledger.summary(days)
+    try:
+        summary["cache"] = ResultCache(ledger.path.parent / "cache").savings(days)
+    except OSError:
+        summary["cache"] = {"hits": 0, "tokens_saved": 0}
+    return summary
+
+
 def _n(value):
     return "{:,}".format(int(value))
 
@@ -125,6 +136,13 @@ def render_page(summary):
                                for t in TIERS if d[t]), _n(d["local"] + d["free"] + d["other"])) for d in summary["by_day"]) \
         or "<p>아직 기록이 없습니다.</p>"
     share = "%.0f%%" % (summary["free_share"] * 100)
+    cache = summary.get("cache") or {"hits": 0, "tokens_saved": 0}
+    saving = ("<h2>절감</h2><div class='cards'>"
+              "<div class='card'><div class='k'>무료·로컬이 처리한 토큰</div><div class='v' style='color:#19c3a4'>%s</div>"
+              "<div class='s'>유료 모델로 보냈다면 소모했을 양(추정)</div></div>"
+              "<div class='card'><div class='k'>캐시 재사용으로 아낀 토큰</div><div class='v' style='color:#5aa9ff'>%s</div>"
+              "<div class='s'>같은 요청 %s회를 다시 부르지 않음(추정)</div></div></div>"
+              % (_n(summary["free_or_local_tokens"]), _n(cache["tokens_saved"]), _n(cache["hits"])))
     labels = {"chat": "채팅", "board": "보드(멀티 모델 작업)", "digest": "긴 글 압축"}
     sources = " · ".join(esc(labels.get(k, k)) + " " + _n(v["tokens"]) for k, v in sorted(summary.get("by_source", {}).items())) or "기록 없음"
     note = ("일부 수치는 서비스가 사용량을 알려주지 않아 글자 수로 추정했습니다 (%.0f%%)." % (summary["estimated_share"] * 100)
@@ -142,6 +160,7 @@ def render_page(summary):
             "<h1>사용량</h1><p class='sub'>최근 " + str(int(summary["days"])) + "일 · 무료·로컬 모델이 처리한 비중 <b>" + share + "</b></p>"
             "<div class='cards'>" + cards + "</div>"
             + "<p class='sub'>출처별 토큰: " + sources + "</p>"
+            + saving
             + "<h2>하루별 토큰</h2>" + days
             + "<h2>모델별 (상위 10)</h2><table><tr><th>모델</th><th>구분</th><th>요청</th><th>토큰</th></tr>" + rows + "</table>"
             + "<p><small>" + esc(note) + " 금액으로 환산하지 않습니다(서비스별 단가가 다르고 자주 바뀜). "

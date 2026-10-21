@@ -429,7 +429,7 @@
     try {
       var res = await fetch("/api/v1/digest", { method: "POST", signal: ctrl.signal,
         headers: { "X-CSRF-Token": CSRF, "Content-Type": "application/json" },
-        body: JSON.stringify({ text: text, model: $("dg-model").value, focus: $("dg-focus").value, confirm_cost: $("dg-cost").checked, fallback: state.fallback }) });
+        body: JSON.stringify({ text: text, model: $("dg-model").value, focus: $("dg-focus").value, confirm_cost: $("dg-cost").checked, prefilter: $("dg-prefilter").checked, fallback: state.fallback }) });
       if (!res.ok) { var j = {}; try { j = await res.json(); } catch (e) { /* ignore */ } throw new Error(j.error || ("HTTP " + res.status)); }
       for await (var ev of sseEvents(res)) {
         if (ev.event === "meta") $("dg-status").textContent = "조각 " + ev.data.chunks + "개 처리 중…";
@@ -444,6 +444,7 @@
     if (result) {
       $("dg-out").textContent = result.digest; $("dg-result").hidden = false;
       $("dg-stats").textContent = "원문 ~" + result.before_tokens + " → ~" + result.after_tokens + " 토큰 (" + result.reduction_pct + "% 감소, 추정) · 요청 " + result.requests + "회 · " + result.model +
+        (result.prefilter ? " · 전처리로 ~" + result.prefilter.tokens_before + " → ~" + result.prefilter.tokens_after + " 토큰" : "") +
         (result.still_long ? " · 아직 깁니다. 한 번 더 압축해 보세요." : "");
       $("dg-status").textContent = "";
     }

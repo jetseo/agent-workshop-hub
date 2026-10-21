@@ -55,6 +55,7 @@ def render(terminal_state, term_token="", csrf=""):
             '<label>집중할 내용(선택) <input id="dg-focus" maxlength="200" placeholder="예: 실패한 테스트와 원인"></label>'
             '<label>파일 불러오기(최대 300KB) <input id="dg-file" type="file"></label>'
             '<textarea id="dg-text" rows="10" maxlength="300000" placeholder="여기에 긴 글을 붙여 넣으세요" aria-label="압축할 글"></textarea>'
+            '<label><input id="dg-prefilter" type="checkbox" checked> 로그 전처리(반복 줄 합치기·오류 줄 위주, 모델 호출 전 무료)</label>'
             '<label id="dg-cost-row" hidden><input id="dg-cost" type="checkbox"> 이 모델은 유료일 수 있음을 확인했고 비용을 감수합니다</label>'
             '<div class="row"><button id="dg-run" class="cta" type="button">압축하기</button><span id="dg-est"></span></div>'
             '<div id="dg-status" aria-live="polite"></div><div id="dg-notices"></div>'
