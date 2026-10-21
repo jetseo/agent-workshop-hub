@@ -1,7 +1,7 @@
-# Agent Workshop Hub - create a desktop shortcut that starts the app window with the built-in terminal.
+# JetAI Hub - create a desktop shortcut that starts the app window with the built-in terminal.
 [CmdletBinding()]
 param(
-    [ValidateNotNullOrEmpty()][string]$Name = "Agent Workshop",
+    [ValidateNotNullOrEmpty()][string]$Name = "JetAI Hub",
     [ValidateNotNullOrEmpty()][string]$Distro = "Ubuntu-24.04",
     [switch]$NoTerminal,
     [switch]$DryRun
@@ -28,6 +28,6 @@ $shortcut.TargetPath = (Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1
 $shortcut.Arguments = $arguments
 $shortcut.WorkingDirectory = $repo
 $shortcut.WindowStyle = 7   # minimized: the console hosts the server; closing it stops the Hub
-$shortcut.Description = "Start Agent Workshop Hub (local only)"
+$shortcut.Description = "Start JetAI Hub (local only)"
 $shortcut.Save()
 Write-Host "Created: $link"

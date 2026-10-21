@@ -29,7 +29,7 @@ def _opencode(args):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description="Agent Workshop provider onboarding")
+    parser = argparse.ArgumentParser(description="JetAI Hub provider onboarding")
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("list")
     sub.add_parser("check")

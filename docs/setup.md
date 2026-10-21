@@ -122,7 +122,7 @@ The validation workflow uploads unittest and runtime preflight logs for Windows 
 ## 프로그램처럼 쓰기: 앱 창 + 내장 터미널
 ```powershell
 .\scripts\create-shortcut.ps1 -DryRun     # 먼저 무엇을 만들지 확인
-.\scripts\create-shortcut.ps1             # 바탕화면에 "Agent Workshop" 바로가기 생성
+.\scripts\create-shortcut.ps1             # 바탕화면에 "JetAI Hub" 바로가기 생성
 ```
 바로가기를 실행하면 `start.ps1 -Terminal`이 WSL에서 허브를 시작하고, 서버가 뜨면 **Edge 앱 창**(주소창·탭 없는 별도 창)을 엽니다. Edge가 없으면 기본 브라우저가 열립니다. 직접 실행: `.\start.ps1 -Terminal`
 (창을 열지 않으려면 `-NoBrowser`). 창 안에는 탭 4개가 있습니다: **설정 · 작업 · 보드 · 터미널**.

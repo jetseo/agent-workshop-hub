@@ -1,4 +1,4 @@
-name: Validate Agent Workshop Hub
+name: Validate JetAI Hub
 on:
   push:
   pull_request:
@@ -61,7 +61,7 @@ jobs:
           ./start.ps1 -DryRun -Port 8787
           ./start.ps1 -DryRun -Port 8787 -Terminal
           ./scripts/create-shortcut.ps1 -DryRun
-          ./scripts/create-shortcut.ps1 -DryRun -NoTerminal -Name "Agent Workshop Test"
+          ./scripts/create-shortcut.ps1 -DryRun -NoTerminal -Name "JetAI Hub Test"
       - name: Compile modules
         run: python -m compileall -q workshop tests
       - name: Unit and local HTTP integration tests

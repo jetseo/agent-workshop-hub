@@ -1,4 +1,4 @@
-# Agent Workshop Hub - Windows preflight and opt-in Ubuntu prerequisite setup.
+# JetAI Hub - Windows preflight and opt-in Ubuntu prerequisite setup.
 [CmdletBinding()]
 param(
     [switch]$InstallWSL,
@@ -17,7 +17,7 @@ $ErrorActionPreference = "Stop"
 if ($PSVersionTable.PSEdition -eq "Core" -and -not $IsWindows) {
     throw "Windows required"
 }
-Write-Host "Agent Workshop Hub | Windows preflight"
+Write-Host "JetAI Hub | Windows preflight"
 if ($DryRun) {
     Write-Host "[dry-run] WSL distro: $Distro"
     if ($InstallOllama) { Write-Host "[dry-run] Would install Ollama on Windows using winget --id Ollama.Ollama --exact" }

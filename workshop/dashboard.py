@@ -16,7 +16,7 @@ from .queue import Queue
 
 PAGE = """<!doctype html><html lang="ko"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Agent Workshop Hub</title>
+<title>JetAI Hub</title>
 <style>
 :root{font-family:system-ui,sans-serif;color-scheme:dark}
 body{max-width:1000px;margin:32px auto;padding:0 18px;background:#111827;color:#e5e7eb}*{box-sizing:border-box}
@@ -27,7 +27,7 @@ input{width:min(440px,85%)}button{cursor:pointer;background:#2563eb;border:0}
 .job{display:flex;justify-content:space-between;gap:14px;align-items:center;flex-wrap:wrap}.job>div:first-child{min-width:0;overflow-wrap:anywhere}.gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px;width:100%;margin-top:12px}.gallery a{display:block;min-width:0}.gallery img{width:100%;height:auto;aspect-ratio:1;object-fit:contain;margin:0;background:#111827}.job form{max-width:100%}@media(max-width:600px){body{margin:12px auto;padding:0 12px}section,.job{padding:12px;margin:10px 0}input,select,button{max-width:100%;width:100%;min-height:44px;margin:4px 0}.job{display:block}.gallery{grid-template-columns:repeat(2,minmax(0,1fr))}}
 small{color:#9ca3af} .tag{color:#93c5fd}
 </style></head><body>
-<h1>Agent Workshop Hub</h1>
+<h1>JetAI Hub</h1>
 <p>Local task dashboard · A separately enabled worker executes queued tasks.<br>로컬 작업 대시보드 · 작업은 별도로 허용한 워커만 실행합니다.</p>
 <section><h2>Add task / 작업 추가</h2><form method="post" action="/add">
 <input type="hidden" name="token" value="__TOKEN__">
@@ -448,7 +448,7 @@ def make_handler(queue, token, boards_root=None, providers=None, chat_fn=None, l
     return Handler
 
 def main():
-    parser = argparse.ArgumentParser(description="Local-only Agent Workshop dashboard")
+    parser = argparse.ArgumentParser(description="Local-only JetAI Hub dashboard")
     parser.add_argument("--db", default=str(Path.home() / ".agent-workshop" / "jobs.sqlite3"))
     parser.add_argument("--port", type=int, default=8787)
     parser.add_argument("--enable-terminal", action="store_true",

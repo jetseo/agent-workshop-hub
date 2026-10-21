@@ -1,4 +1,4 @@
-# Agent Workshop Hub
+# JetAI Hub
 
 A unified local-first AI development workspace for coding agents, image generation, and repeatable automated workflows.
 

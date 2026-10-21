@@ -1,1 +1,1 @@
-"""Agent Workshop Hub core."""
+"""JetAI Hub core."""
