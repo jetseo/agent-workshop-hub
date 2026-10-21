@@ -141,3 +141,9 @@
 |---|---|---|---|
 | 제거 후 전체 테스트(238개: 제거된 기능의 테스트 20개 삭제, `image` 거부 테스트 추가), 대시보드·워커·큐·진단·CLI·실행기·CI 설정에서 참조 정리 | 클라우드(Linux) | 통과 | 위 검증 기록의 ComfyUI 관련 줄은 제거 이전의 역사 기록임 |
 | 제거된 코드 전체와 Jet Studio용 설명 | - | 기록함 | `docs/handoff/jet-studio-comfyui-prompt.md`, 제거 직전 커밋 이력 |
+
+## 휴대용 패키지 (2026-10-21)
+| 항목 | 환경 | 결과 | 비고 |
+|---|---|---|---|
+| 빌드(`build-package.ps1`) → 압축 해제 → 번들 파이썬으로 서버 시작 → `/app` 응답, 서버 실행 파일이 패키지 안의 `python.exe`임을 확인 | GitHub Windows 러너, Py3.12 job | **통과** (커밋 `db80290`) | Windows **실기기 아님**. 산출물 `JetAI-Hub-portable`이 Actions에 업로드됨 |
+| SmartScreen 경고, Edge 앱 창, 실제 사용 | 사용자 PC | **미검증** | 코드 서명 없음 |
