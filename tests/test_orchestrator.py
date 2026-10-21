@@ -303,3 +303,63 @@ class BoardUsageTests(Fixture):
         page = render_page(self.ledger.summary())
         self.assertIn("보드(멀티 모델 작업)", page)
         self.assertIn("채팅", page)
+
+
+class AutoRoutingTests(Fixture):
+    def setUp(self):
+        super().setUp()
+        from workshop.runstats import RunStats
+        self.stats = RunStats(self.dir / "runstats.jsonl")
+
+    def test_auto_step_runs_on_the_routed_local_model_and_records_it(self):
+        board = self.board([{"id": "a", "model": "auto", "prompt": "Q", "role": "reporter"}])
+        seen = []
+        def fake(provider, model, messages):
+            seen.append(model); return "ok"
+        summary = run_board(board, self.providers, text_fn=fake, stats=self.stats,
+                            auto_models=["loc/small:3b", "loc/big:32b", "openai/gpt-5"])
+        self.assertEqual(summary["done"], ["a"])
+        self.assertEqual(seen, ["small:3b"])                      # easy work -> smallest local
+        self.assertEqual(board.steps()["a"]["model"], "loc/small:3b")
+        self.assertEqual(self.stats.load()["loc/small:3b"], {"runs": 1, "failures": 0, "seconds": self.stats.load()["loc/small:3b"]["seconds"]})
+
+    def test_auto_step_never_picks_paid_and_fails_before_any_call(self):
+        board = self.board([{"id": "a", "model": "auto"}, {"id": "b", "model": "loc/m", "depends_on": ["a"]}])
+        called = []
+        summary = run_board(board, self.providers, text_fn=lambda *a: called.append(1),
+                            auto_models=["openai/gpt-5"], stats=self.stats)
+        self.assertEqual(called, [])
+        self.assertIn("RoutingError", summary["failed"]["a"])
+        self.assertEqual(summary["blocked"], ["b"])
+
+    def test_failures_feed_back_so_a_flaky_model_is_skipped_next_time(self):
+        def boom(provider, model, messages):
+            raise RuntimeError("down")
+        for _ in range(2):                                         # 2 attempts per text step -> 1 recorded failure each
+            board = self.board([{"id": "a", "model": "auto"}])
+            run_board(board, self.providers, text_fn=boom, stats=self.stats, auto_models=["loc/small:3b", "loc/big:32b"])
+        board = self.board([{"id": "a", "model": "auto"}])
+        run_board(board, self.providers, text_fn=boom, stats=self.stats, auto_models=["loc/small:3b", "loc/big:32b"])
+        self.assertEqual(self.stats.load()["loc/small:3b"]["failures"], 3)
+        board = self.board([{"id": "a", "model": "auto"}])
+        seen = []
+        run_board(board, self.providers, text_fn=lambda p, m, msgs: seen.append(m) or "ok", stats=self.stats,
+                  auto_models=["loc/small:3b", "loc/big:32b"])
+        self.assertEqual(seen, ["big:32b"])
+
+    def test_refusals_are_not_counted_as_model_failures(self):
+        board = self.board([{"id": "a", "model": "free/m"}])         # cloud not allowed -> PermissionError
+        run_board(board, self.providers, text_fn=lambda *a: "x", stats=self.stats)
+        self.assertEqual(self.stats.load(), {})
+
+    def test_unknown_role_is_rejected_when_the_board_is_created(self):
+        with self.assertRaises(ValueError):
+            self.board([{"id": "a", "model": "auto", "role": "boss"}])
+
+    def test_stats_failure_does_not_fail_the_step(self):
+        class Broken:
+            def load(self): raise OSError("disk")
+            def record(self, *a, **k): raise OSError("disk")
+        board = self.board([{"id": "a", "model": "auto"}])
+        summary = run_board(board, self.providers, text_fn=lambda *a: "x", stats=Broken(), auto_models=["loc/m:7b"])
+        self.assertEqual(summary["done"], ["a"])

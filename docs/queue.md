@@ -34,4 +34,13 @@ difficulty and reason. Local first, then free; paid is never picked automaticall
 and only when `allow_paid`). Easy work gets the smallest adequate model, hard work the largest; code prefers
 `*coder*` names; models with a failure rate above 50% over at least 3 runs are skipped.
 `python -m workshop.router "prompt" --kind code --role coder [--model id ...]`.
-Not yet wired into the board/chat flows; failure stats must be supplied by the caller.
+
+### Board wiring and run statistics
+A board step may use `"model": "auto"` (optional `"role"`: planner/router/coder/reviewer/tester/reporter).
+`python -m workshop.orchestrator spec.json --auto-model ollama/qwen2.5-coder:7b --auto-model ...` routes each
+auto step just before it runs, among the given candidates only; a registered provider's tier comes from its data
+policy. Paid models are never picked: with no local/free candidate the step fails (`RoutingError`) before any call.
+The chosen model is written back to the board. Every executed step's outcome (success/failure, seconds) is appended to
+`~/.agent-workshop/runstats.jsonl` (`workshop/runstats.py`, no prompts or outputs); permission refusals are not counted,
+and a model with more than 50% failures over >= 3 runs in the last 30 days is skipped next time.
+Not yet wired into chat or the queue worker; the cost side is still the usage ledger (`/usage`).

@@ -59,7 +59,8 @@ class Board:
         _atomic_write(self.state_path, json.dumps(state, ensure_ascii=False, indent=2))
         _atomic_write(self.folder / "board.md", self._render(state))
 
-    def add_step(self, step_id, model, depends_on=(), prompt="", kind="text", workspace=None, repo=None):
+    def add_step(self, step_id, model, depends_on=(), prompt="", kind="text", workspace=None, repo=None,
+                 role=None):
         state = self._load()
         if not STEP_ID.fullmatch(step_id or ""):
             raise ValueError("Invalid step id")
@@ -72,7 +73,7 @@ class Board:
                 raise ValueError("Unknown dependency: " + dep)
         state["steps"][step_id] = {"model": model, "depends_on": list(depends_on),
                                    "prompt": prompt, "status": "pending", "merged": False,
-                                   "kind": kind, "workspace": workspace, "repo": repo}
+                                   "kind": kind, "workspace": workspace, "repo": repo, "role": role}
         self._save(state)
 
     def set_status(self, step_id, status):
@@ -80,6 +81,14 @@ class Board:
             raise ValueError("Invalid status")
         state = self._load()
         state["steps"][step_id]["status"] = status
+        self._save(state)
+
+    def set_model(self, step_id, model):
+        """Record the model the router picked for an 'auto' step, so the board shows what really ran."""
+        state = self._load()
+        if step_id not in state["steps"]:
+            raise ValueError("Unknown step")
+        state["steps"][step_id]["model"] = model
         self._save(state)
 
     def steps(self):

@@ -57,13 +57,15 @@ def _healthy(model, stats):
     return entry.get("failures", 0) / entry["runs"] <= MAX_FAILURE_RATE
 
 
-def route(prompt, models, *, kind="text", role="coder", files=0, stats=None, allow_paid=False):
+def route(prompt, models, *, kind="text", role="coder", files=0, stats=None, allow_paid=False, tier_fn=None):
     """Return {model, tier, difficulty, needs_approval, reason}.
 
     models: candidate model ids. stats: optional {model: {"runs": n, "failures": m}} so a model that
     keeps failing is skipped. allow_paid only means paid models may be *suggested*; they still come
-    back with needs_approval=True.
+    back with needs_approval=True. tier_fn maps a model id to "local"/"free"/"paid" (default: by name,
+    see modelpolicy.classify); the orchestrator passes one that also knows registered providers.
     """
+    classify_model = tier_fn or classify
     if role not in ROLES:
         raise ValueError("Unknown role: " + str(role))
     if kind not in ("text", "code"):
@@ -73,7 +75,7 @@ def route(prompt, models, *, kind="text", role="coder", files=0, stats=None, all
     healthy = [m for m in unique if _healthy(m, stats)]
     skipped = [m for m in unique if m not in healthy]
     for tier in ("local", "free"):
-        pool = [m for m in healthy if classify(m) == tier]
+        pool = [m for m in healthy if classify_model(m) == tier]
         if pool:
             pick = min(pool, key=lambda m: _rank(m, kind=kind, difficulty=difficulty))
             reason = difficulty + " task -> cheapest adequate " + tier + " model"
@@ -81,7 +83,7 @@ def route(prompt, models, *, kind="text", role="coder", files=0, stats=None, all
                 reason += " (skipped for high failure rate: " + ", ".join(skipped) + ")"
             return {"model": pick, "tier": tier, "difficulty": difficulty,
                     "needs_approval": False, "reason": reason}
-    paid = [m for m in healthy if classify(m) == "paid"]
+    paid = [m for m in healthy if classify_model(m) == "paid"]
     if paid and allow_paid:
         pick = min(paid, key=lambda m: _rank(m, kind=kind, difficulty="easy"))
         return {"model": pick, "tier": "paid", "difficulty": difficulty, "needs_approval": True,
