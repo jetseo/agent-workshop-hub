@@ -152,6 +152,15 @@
   $("side-open").addEventListener("click", function () { setSide(true); });
   $("scrim").addEventListener("click", function () { setSide(false); });
 
+  /* External links (token pages) open in the user's default browser. The app window is an Edge --app window,
+     which would keep them inside Edge; the local server opens them instead (known service pages only). */
+  document.addEventListener("click", function (e) {
+    var a = e.target.closest && e.target.closest('a[target="_blank"]');
+    if (!a || !/^https:\/\//.test(a.href) || e.defaultPrevented) return;
+    e.preventDefault();
+    api("POST", "/open-url", { url: a.href }).catch(function () { window.open(a.href, "_blank", "noopener"); });
+  });
+
   /* ---------- state ---------- */
   function modelOptions() {
     var o = [];

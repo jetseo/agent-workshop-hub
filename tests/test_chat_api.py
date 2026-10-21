@@ -762,3 +762,30 @@ class AutoModelTests(ApiBase):
         status, body = self.jcall("POST", "/chats", {"model": "auto"})
         self.assertEqual(status, 400)
         self.assertIn("로컬·무료", body["error"])
+
+
+class OpenUrlTests(ApiBase):
+    def setUp(self):
+        super().setUp()
+        self.opened = []
+        self.ctx.open_url_fn = self.opened.append
+
+    def test_catalog_pages_open_in_the_default_browser(self):
+        status, body = self.jcall("POST", "/open-url", {"url": "https://console.groq.com/keys"})
+        self.assertEqual((status, body), (200, {"ok": True}))
+        self.assertEqual(self.opened, ["https://console.groq.com/keys"])
+
+    def test_anything_else_is_refused(self):
+        for bad in ("http://console.groq.com/keys", "https://evil.example.com/", "https://console.groq.com@evil.example.com/",
+                    "file:///C:/Windows/System32/calc.exe", "javascript:alert(1)", "ms-msdt:/x", "", None, 5,
+                    "https://console.groq.com/" + "a" * 600):
+            status, body = self.jcall("POST", "/open-url", {"url": bad})
+            self.assertEqual(status, 400, bad)
+        self.assertEqual(self.opened, [])
+
+    def test_every_catalog_token_page_is_allowed(self):
+        from workshop import chat_api, setup_page
+        hosts = chat_api.allowed_link_hosts()
+        for entry in setup_page.CATALOG:
+            if entry["key_url"]:
+                self.assertIn(entry["key_url"].split("/")[2], hosts, entry["id"])
