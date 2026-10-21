@@ -1,0 +1,25 @@
+# 기능 목록 (기록용)
+
+Agent Workshop Hub의 목적은 **개발 토큰 절약**입니다(`CLAUDE.md`의 프로젝트 범위 참조). Jet Studio(쇼츠 제작)는 별개의 프로젝트입니다.
+이 문서는 "무엇이 있는가"를 기록합니다. 삭제나 이동을 뜻하지 않습니다. 검증 상태는 `docs/verification.md`가 기준입니다.
+
+## 토큰 절약 방향 (핵심, 계속 개발)
+| 기능 | 위치 | 설명 |
+|---|---|---|
+| 채팅 창 + 온보딩 마법사 | `workshop/app_page.py`, `static/app.js`, `chat_api.py`, `setup_page.py` | ChatGPT/Claude 형태의 대화 화면에서 무료·로컬·저비용 서비스를 연결하고 대화 |
+| 서비스 등록과 토큰 보관 | `providers.py` | 키는 저장소 밖(`secrets.json`, 600), 데이터 정책 태그, 클라우드 동의 기록 |
+| 멀티 모델 보드 | `board.py`, `orchestrator.py`, `plan_board.py` | 공유 MD 문서로 여러 모델이 직렬/병렬 협업, 요청 한 줄로 보드 생성 |
+| 비용 안전장치 | `modelpolicy.py`, orchestrator 게이트 | 유료·구독 모델 기본 차단(`-free`, `:free`, 로컬만 허용), 클라우드는 명시적 동의 |
+| 일회용 worktree 코드 단계 | `worktree.py` | 코드 수정은 임시 worktree에서만, diff만 보고하고 커밋·병합 안 함 |
+| OpenCode 연동 | `adapters.py` | WSL 네이티브 OpenCode로 무료 모델 실행(Windows 쪽 바이너리는 거부) |
+| 로컬 계획 | `planner.py`, `plan_cli.py` | 로컬 Ollama로 요청을 작업 1~4개로 분해(읽기 전용) |
+
+## 인프라 (보존)
+작업 큐(`queue.py`: 승인·하트비트 복구), 워커(`worker.py`), 대시보드(`dashboard.py`), 진단(`diagnostics.py`, `preflight.py`, `doctor.py`),
+내장 터미널(`terminal.py`, `websocket.py`, xterm.js), Windows 런처와 설치 스크립트(`start.ps1`, `install.ps1`, `scripts/`), CI(`.github/workflows/validate.yml`).
+
+## 이전에 만든 이미지·ComfyUI 기능 (보존, 확장하지 않음)
+쇼츠 제작 쪽에 가까운 기능입니다. **삭제하지 않고 그대로 두며, 영상·쇼츠 방향으로 확장하지 않습니다.** 어느 프로젝트에 둘지는 사용자가 정합니다.
+- 이미지 작업 종류(`image`)와 워커 경로(`worker.py`), ComfyUI 제출·상태 확인(`comfyui.py`, `comfyui_status.py`), 결과 갤러리(`dashboard.py`)
+- 설치·실행 스크립트(`scripts/*comfyui*`, `install-comfyui*.ps1`, `download-comfyui-model.ps1`), 문서(`docs/comfyui*.md`)
+- 하드웨어(GPU) 실검증은 한 번도 하지 않았습니다.
