@@ -34,6 +34,7 @@ small{color:#9ca3af} .tag{color:#93c5fd}
 <select name="kind"><option>plan</option><option>code</option><option>qa</option></select>
 <input name="title" placeholder="Describe a task" required maxlength="500">
 <input name="resource" placeholder="Code: absolute worktree path" maxlength="2000">
+<input name="model" placeholder="Model (optional, e.g. opencode/big-pickle-free or ollama/qwen2.5-coder)" maxlength="200">
 <button>Add / 추가</button></form></section>
 <h2>Tasks / 작업 목록</h2><p><a href="/setup" style="color:#93c5fd">Setup / 서비스 연결·테스트 →</a> · <a href="/boards" style="color:#93c5fd">Boards / 멀티 모델 보드 →</a></p>__JOBS__
 </body></html>"""
@@ -333,6 +334,9 @@ def make_handler(queue, token, boards_root=None, providers=None, chat_fn=None, l
                     if kind == "code" and not resource:
                         raise ValueError("Code tasks require a workspace path")
                     payload = {"workspace": resource} if kind == "code" else {}
+                    model = form.get("model", [""])[0].strip()
+                    if model and kind == "code":
+                        payload["model"] = model
                     queue.add(kind, title, payload, require_approval=kind == "code")
                 elif path == "/authorize":
                     queue.authorize(form.get("id", [""])[0])

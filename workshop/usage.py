@@ -143,7 +143,7 @@ def render_page(summary):
               "<div class='card'><div class='k'>캐시 재사용으로 아낀 토큰</div><div class='v' style='color:#5aa9ff'>%s</div>"
               "<div class='s'>같은 요청 %s회를 다시 부르지 않음(추정)</div></div></div>"
               % (_n(summary["free_or_local_tokens"]), _n(cache["tokens_saved"]), _n(cache["hits"])))
-    labels = {"chat": "채팅", "board": "보드(멀티 모델 작업)", "digest": "긴 글 압축"}
+    labels = {"chat": "채팅", "board": "보드(멀티 모델 작업)", "digest": "긴 글 압축", "queue": "작업 큐(OpenCode)"}
     sources = " · ".join(esc(labels.get(k, k)) + " " + _n(v["tokens"]) for k, v in sorted(summary.get("by_source", {}).items())) or "기록 없음"
     note = ("일부 수치는 서비스가 사용량을 알려주지 않아 글자 수로 추정했습니다 (%.0f%%)." % (summary["estimated_share"] * 100)
             if summary["estimated_share"] else "모든 수치는 서비스가 보고한 사용량입니다.")

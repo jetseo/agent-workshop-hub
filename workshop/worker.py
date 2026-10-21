@@ -7,6 +7,8 @@ import time
 from pathlib import Path
 from .queue import Queue
 from .adapters import run_opencode
+from .modelpolicy import classify
+from .usage import UsageLedger, estimate_tokens
 
 def _defer(queue, job):
     # A disabled executor must not consume or fail a queued task.
@@ -23,7 +25,7 @@ def _beat(queue, job_id, stop):
         except Exception:
             pass
 
-def process_one(queue, *, allow_opencode=False, max_running=None):
+def process_one(queue, *, allow_opencode=False, max_running=None, ledger=None):
     if not allow_opencode:
         raise PermissionError("Worker requires an explicit executor opt-in")
     # Claim only jobs with an enabled executor.
@@ -36,11 +38,37 @@ def process_one(queue, *, allow_opencode=False, max_running=None):
     stop_beat = threading.Event()
     try:
         threading.Thread(target=_beat, args=(queue, job["id"], stop_beat), daemon=True).start()
-        return _execute(queue, job, allow_opencode)
+        return _execute(queue, job, allow_opencode, ledger)
     finally:
         stop_beat.set()
 
-def _execute(queue, job, allow_opencode):
+def _model_of(payload):
+    """Optional payload.model ('provider/name' as in `opencode models`). Paid models are never run from the queue."""
+    model = payload.get("model")
+    if model is None:
+        return None, None
+    if not isinstance(model, str) or not model:
+        raise ValueError("payload.model must be a 'provider/name' string")
+    tier = classify(model)
+    if tier == "paid":
+        raise PermissionError("Model '" + model + "' may cost money; the queue only runs local or '-free' models "
+                              "(use the board with an explicit cost confirmation for paid models)")
+    return model, ("local" if tier == "local" else "free")
+
+
+def _book(ledger, model, tier, prompt, result):
+    """Book a finished run as an estimate. Only runs with a known model are booked; a full disk never fails the job."""
+    if ledger is None or model is None:
+        return
+    provider, _, name = model.partition("/")
+    try:
+        ledger.record(provider=provider, model=name, tier=tier, prompt_tokens=estimate_tokens(prompt),
+                      completion_tokens=estimate_tokens(result.get("stdout") or ""), estimated=True, source="queue")
+    except OSError:
+        pass
+
+
+def _execute(queue, job, allow_opencode, ledger=None):
     try:
         payload = json.loads(job["payload"])
         if job["kind"] == "code":
@@ -49,7 +77,10 @@ def _execute(queue, job, allow_opencode):
             workspace = payload.get("workspace")
             if not isinstance(workspace, str) or not workspace:
                 raise ValueError("Code job requires payload.workspace")
-            result = run_opencode(job["title"], workspace, enabled=True)
+            model, tier = _model_of(payload)
+            result = run_opencode(job["title"], workspace, enabled=True, model=model)
+            if result.get("exit_code", 0) == 0:
+                _book(ledger, model, tier, job["title"], result)
         else:
             raise ValueError("Unsupported executor kind: " + job["kind"])
         if result.get("exit_code", 0) != 0:
@@ -98,7 +129,7 @@ def main():
     signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))
     try:
         while True:
-            outcome = process_one(queue, allow_opencode=args.allow_opencode,
+            outcome = process_one(queue, allow_opencode=args.allow_opencode, ledger=UsageLedger(),
                                   max_running=args.max_running)
             if outcome is not None:
                 print(json.dumps(outcome, ensure_ascii=False), flush=True)
