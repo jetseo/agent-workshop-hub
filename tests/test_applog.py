@@ -21,6 +21,7 @@ class AppLogTests(unittest.TestCase):
     def test_lines_are_written_and_the_file_is_private(self):
         path = Path(self.tmp.name) / "logs" / "hub.log"
         logger = applog.setup(path)
+        self.addCleanup(applog.close, logger)
         applog.write("hello", logger)
         for handler in logger.handlers:
             handler.flush()
@@ -31,6 +32,7 @@ class AppLogTests(unittest.TestCase):
     def test_rotation_keeps_the_log_bounded(self):
         path = Path(self.tmp.name) / "hub.log"
         logger = applog.setup(path)
+        self.addCleanup(applog.close, logger)
         for handler in logger.handlers:
             handler.maxBytes = 2000
         for i in range(400):

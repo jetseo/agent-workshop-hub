@@ -39,6 +39,16 @@ def setup(path=None):
     return logger
 
 
+def close(logger=None):
+    """Release the file handle (needed before the file can be deleted on Windows)."""
+    logger = logger or _logger
+    if logger is None:
+        return
+    for handler in list(logger.handlers):
+        logger.removeHandler(handler)
+        handler.close()
+
+
 def write(line, logger=None):
     logger = logger or _logger
     if logger is None:

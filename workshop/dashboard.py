@@ -371,7 +371,8 @@ def main():
         server = ThreadingHTTPServer(("127.0.0.1", args.port), make_handler(
             Queue(args.db), token, terminal_key=terminal_key, terminal_cwd=str(Path(__file__).resolve().parent.parent)))
     except OSError as error:
-        if error.errno in (98, 10048, 48) or "Address already in use" in str(error):
+        if error.errno in (98, 10048, 10013, 48) or getattr(error, "winerror", None) in (10048, 10013) \
+                or "Address already in use" in str(error):
             print("포트 %d를 이미 다른 프로그램이 쓰고 있습니다. JetAI가 이미 실행 중일 수 있습니다: "
                   "http://127.0.0.1:%d/app 을 열어 보세요. 아니라면 --port 로 다른 포트를 지정하세요." % (args.port, args.port),
                   file=sys.stderr, flush=True)
