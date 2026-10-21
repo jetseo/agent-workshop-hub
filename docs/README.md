@@ -5,6 +5,7 @@
 |---|---|
 | [setup.md](setup.md) | 설치와 실행(Windows 단독, WSL, 휴대용 패키지), 서비스 연결, 사용량, 로그·백업·종료 |
 | [features.md](features.md) | 기능 목록과 위치, 제거된 기능 |
+| [free-services.md](free-services.md) | 무료로 쓸 수 있는 AI 서비스 목록, 조사 방법, 갱신 방법 |
 | [multi-model.md](multi-model.md) | 멀티 모델 보드 사용법 |
 | [roadmap.md](roadmap.md) | 앞으로 할 일, 상태, 사용자가 정할 것 |
 

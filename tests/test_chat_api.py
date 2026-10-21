@@ -680,3 +680,70 @@ class ModelManagementTests(ApiBase):
             self.assertEqual(self.jcall("POST", "/providers/models", bad)[0], 400, bad)
         self.assertEqual(self.jcall("POST", "/onboard/models", {"service": "not-registered"})[0], 400)
         self.assertFalse(any(SECRET in text for text in self.transcript))
+
+
+class AutoModelTests(ApiBase):
+    def setUp(self):
+        super().setUp()
+        from workshop.runstats import RunStats
+        self.onboard()
+        for model in ("small-3b", "large-32b"):
+            self.providers.add_model("mock", model)
+        self.stats = RunStats(Path(self.tmp.name) / "runstats.jsonl")
+        for _ in range(4):                                             # park the onboarding model so sizes decide
+            self.stats.record("mock/demo-model", ok=False, seconds=1, kind="chat")
+
+    def test_auto_picks_the_cheapest_adequate_model_and_keeps_auto_selected(self):
+        chat_id = self.new_chat("auto")
+        status, events = self.sse(chat_id, {"content": "hello", "model": "auto"})
+        self.assertEqual(events[-1][0], "done")
+        served = events[-1][1]["model"]
+        self.assertEqual(served, "mock/small-3b")
+        self.assertTrue(events[0][1]["auto"])
+        chat = self.jcall("GET", "/chats/" + chat_id)[1]
+        self.assertEqual(chat["model"], "auto")                       # the picker keeps showing 'auto'
+        self.assertEqual(chat["messages"][-1]["model"], served)       # but the answer says who really answered
+        self.assertEqual([m["model"] for m in self.jcall("GET", "/usage")[1]["by_model"]], ["mock/small-3b"])
+
+    def test_hard_questions_go_to_the_larger_model(self):
+        question = "refactor the architecture of this module " + "details " * 500
+        status, events = self.sse(self.new_chat("auto"), {"content": question, "model": "auto"})
+        self.assertEqual(events[-1][1]["model"], "mock/large-32b")
+
+    def test_models_that_may_cost_money_are_never_candidates(self):
+        from workshop import chat_api
+        self.providers.add("cloudy", base_url="https://api.example.com/v1", data_policy="cloud-may-train",
+                           models=["gpt-9", "tiny-1b-free"])
+        self.assertFalse([r for r in chat_api.auto_candidates(self.ctx) if r.startswith("cloudy/")])  # not consented
+        self.providers.set_consent("cloudy")
+        refs = chat_api.auto_candidates(self.ctx)
+        self.assertIn("cloudy/tiny-1b-free", refs)
+        self.assertNotIn("cloudy/gpt-9", refs)
+
+    def test_auto_skips_a_model_that_keeps_failing(self):
+        for _ in range(4):
+            self.stats.record("mock/small-3b", ok=False, seconds=1, kind="chat")
+        status, events = self.sse(self.new_chat("auto"), {"content": "hello", "model": "auto"})
+        self.assertEqual(events[-1][1]["model"], "mock/large-32b")
+
+    def test_runs_are_recorded_for_later_routing(self):
+        self.sse(self.new_chat("auto"), {"content": "hello", "model": "auto"})
+        stats = self.stats.load()
+        self.assertEqual(stats["mock/small-3b"]["runs"], 1)
+        self.assertEqual(stats["mock/small-3b"]["failures"], 0)
+
+    def test_regenerate_with_auto_uses_the_last_question(self):
+        chat_id = self.new_chat("auto")
+        self.sse(chat_id, {"content": "first", "model": "auto"})
+        status, events = self.sse(chat_id, {"regenerate": True, "model": "auto"})
+        self.assertEqual(events[-1][0], "done")
+
+    def test_auto_without_any_local_or_free_model_is_refused(self):
+        from workshop import chat_api
+        self.providers.add("only", base_url="https://api.example.com/v1", data_policy="cloud-may-train", models=["gpt-9"])
+        saved = chat_api.auto_candidates
+        chat_api.auto_candidates = lambda ctx: []
+        self.addCleanup(lambda: setattr(chat_api, "auto_candidates", saved))
+        status, body = self.jcall("POST", "/chats", {"model": "auto"})
+        self.assertEqual(status, 400)
+        self.assertIn("로컬·무료", body["error"])
