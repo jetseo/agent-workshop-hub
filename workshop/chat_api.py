@@ -17,6 +17,7 @@ from . import arbiter, router
 from .engine import Engine, EngineError
 from .modelinfo import ModelInfo
 from .modelwatch import ModelWatch
+from .servicefeed import ServiceFeed
 from .router import route_task
 from .runstats import RunStats
 from .usage import UsageLedger
@@ -57,9 +58,17 @@ class Context:
         # that adds new free/local models. Both keep their files next to providers.json.
         self.info = ModelInfo(providers.path.parent / "modelinfo.json")
         self.watch = ModelWatch(providers, list_fn, info=self.info)
+        self.feed = ServiceFeed(providers.path.parent / "service-feed.json", builtin=setup_page.CATALOG)
+        setup_page.set_extra(self.feed.catalog_entries())             # services found earlier by the daily list
         self.engine = Engine(providers.path.parent / "engine", providers)      # built-in local engine (llama.cpp), off until installed
         self.active = set()
         self._active_lock = threading.Lock()
+
+    def refresh_catalog(self, force=False):
+        """Look for newly listed free services (at most every few hours unless forced) and show them in the wizard."""
+        result = self.feed.refresh(force=force)
+        setup_page.set_extra(self.feed.catalog_entries())
+        return result
 
     def claim(self, chat_id):
         with self._active_lock:
@@ -131,7 +140,7 @@ def _form(body):
 
 
 def _provider_view(ctx, name, entry):
-    label = setup_page.BY_ID.get(name, {}).get("label", name)
+    label = (setup_page.find_service(name) or {}).get("label", name)
     return {"name": name, "label": label, "base_url": entry["base_url"], "policy": entry["data_policy"],
             "models": entry.get("models", []), "free_all": bool(entry.get("free_all")),
             "free_match": entry.get("free_match", []), "token": ctx.providers.key_status(name),
@@ -143,7 +152,8 @@ def _state(ctx):
     providers = [_provider_view(ctx, n, e) for n, e in ctx.providers.load().items()]
     return {"providers": providers, "catalog": setup_page.public_catalog(),
             "onboarded": any(p["models"] for p in providers),
-            "news": ctx.watch.news(), "settings": ctx.watch.settings()}
+            "news": ctx.watch.news(), "settings": ctx.watch.settings(),
+            "feed": {"fetched_at": ctx.feed.data.get("fetched_at", 0), "count": len(ctx.feed.data["entries"])}}
 
 
 def _history(chat_obj):
@@ -414,6 +424,9 @@ def dispatch(ctx, method, path, body):
             return Json(200, {"settings": ctx.watch.set_setting(keys[0], body[keys[0]])})
         if parts and parts[0] == "engine":
             return Json(200, _engine_api(ctx, method, parts[1:], body))
+        if parts == ["catalog", "refresh"] and method == "POST":
+            result = ctx.refresh_catalog(force=body.get("force") is True)
+            return Json(200, {**result, "catalog": setup_page.public_catalog()})
         if parts == ["models", "check"] and method == "POST":
             ctx.info.refresh()                                   # the public catalog, at most once a day
             return Json(200, ctx.watch.check(force=True))

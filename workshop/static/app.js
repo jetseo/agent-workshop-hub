@@ -255,6 +255,12 @@
     var s = await api("GET", "/state");
     state.providers = s.providers; state.catalog = s.catalog; state.onboarded = s.onboarded;
     state.settings = s.settings || { auto_add_models: true };
+    if (!state.feedTried) {                        // a (re)load looks for newly listed free services; the server throttles it
+      state.feedTried = true;
+      api("POST", "/catalog/refresh", {}).then(function (r) {
+        if (r.added && r.added.length) { state.catalog = r.catalog; toastLong("새 무료 서비스 " + r.added.length + "개를 찾았습니다 (서비스 연결 화면의 '새로 발견된 서비스'): " + r.added.slice(0, 3).join(", ")); }
+      }).catch(function () { /* offline: nothing to say */ });
+    }
     pickDefaultModel(); renderModelBtn(); renderWelcome();
     if ((s.news || []).length) {                       // new free/local models were added at start-up: say so once
       var lines = [];
@@ -690,9 +696,11 @@
         var btn = $("set-check"), msg = $("set-check-msg"); btn.disabled = true; msg.textContent = "확인하는 중…";
         try {
           var r = await api("POST", "/models/check", {});
+          var feed = await api("POST", "/catalog/refresh", { force: true }).catch(function () { return null; });
+          if (feed && feed.catalog) state.catalog = feed.catalog;
           var added = []; Object.keys(r.added || {}).forEach(function (k) { r.added[k].forEach(function (m) { added.push(k + "/" + m); }); });
           var fresh = 0; Object.keys(r.new || {}).forEach(function (k) { fresh += r.new[k]; });
-          msg.textContent = r.skipped ? "방금 확인했습니다." : (added.length ? "추가: " + added.join(", ") : (fresh ? "새 모델 " + fresh + "개가 있지만 무료·채팅용이 아니거나 이미 있어 추가하지 않았습니다." : "새 모델이 없습니다.")) + " (서비스 " + r.checked + "곳 확인)";
+          msg.textContent = r.skipped ? "방금 확인했습니다." : (added.length ? "추가: " + added.join(", ") : (fresh ? "새 모델 " + fresh + "개가 있지만 무료·채팅용이 아니거나 이미 있어 추가하지 않았습니다." : "새 모델이 없습니다.")) + " (서비스 " + r.checked + "곳 확인)" + (feed && feed.added && feed.added.length ? " · 새 무료 서비스 " + feed.added.length + "개 발견" : "");
           if (added.length) { await loadState(); renderSettings(); }
         } catch (e) { msg.textContent = e.message; }
         btn.disabled = false;
@@ -827,6 +835,7 @@
     if (w.service === "custom") { p.custom_name = w.customName.trim(); p.custom_url = w.customUrl.trim(); }
     if (w.key) p.key = w.key.trim();
     if (w.consent) p.consent = "on";
+    if (w.freeConfirmed) p.free_confirmed = "on";
     return Object.assign(p, extra || {});
   }
   function renderWizard() {
@@ -842,11 +851,12 @@
     root.appendChild(h("div", { class: "card-wrap", style: "display:contents" }, card));
   }
   async function loadEnv() { try { return await api("GET", "/env"); } catch (e) { return null; } }
-  var GROUPS = [["local", "내 PC에서 (토큰 불필요)"], ["top", "무료 한도가 넉넉하고 잘 알려진 서비스"], ["more", "그 밖의 무료 서비스·게이트웨이 (한도가 작거나 자주 바뀜)"]];
+  var GROUPS = [["local", "내 PC에서 (토큰 불필요)"], ["top", "무료 한도가 넉넉하고 잘 알려진 서비스"], ["more", "그 밖의 무료 서비스·게이트웨이 (한도가 작거나 자주 바뀜)"], ["new", "새로 발견된 서비스 (공개 목록에서 자동 수집 · 미검증)"]];
   function svcButton(c, w) {
     return h("button", { class: "svc", type: "button", "data-service": c.id, "data-search": (c.label + " " + c.id + " " + (c.limits || "") + " " + (c.note || "")).toLowerCase(),
       onclick: function () { w.service = c.id; w.step = 2; w.error = ""; renderWizard(); } },
       h("b", { text: c.label }), h("span", { text: c.policy === "local" ? "토큰 불필요 · 내 PC에서 실행" : "클라우드 · 토큰 필요" }),
+      c.is_new ? h("span", { class: "tag free", text: "NEW" }) : null,
       c.limits ? h("span", { class: "lim", text: "무료 한도: " + c.limits }) : null);
   }
   function wizStep1(card, w) {
@@ -864,7 +874,16 @@
       Array.prototype.forEach.call(document.querySelectorAll("#wizard .svc"), function (b) { b.hidden = !!q && b.dataset.search.indexOf(q) < 0; });
       Array.prototype.forEach.call(document.querySelectorAll("#wizard .svc-group"), function (g) { g.hidden = !g.querySelector(".svc:not([hidden])"); });
     } });
-    card.appendChild(search);
+    card.appendChild(h("div", { class: "row", style: "align-items:center;gap:8px" }, search,
+      h("button", { type: "button", class: "btn mini", id: "w-refresh", text: "목록 새로 고침", title: "공개 목록에서 새로 생긴 무료 서비스를 찾아 목록에 더합니다", onclick: async function () {
+        var b = this; b.disabled = true; b.textContent = "찾는 중…";
+        try {
+          var r = await api("POST", "/catalog/refresh", { force: true });
+          state.catalog = r.catalog;
+          toast(r.skipped === "offline" ? "인터넷에 연결되지 않아 목록을 갱신하지 못했습니다." : (r.added.length ? "새 무료 서비스 " + r.added.length + "개를 찾았습니다: " + r.added.slice(0, 3).join(", ") : "새로 생긴 서비스는 없습니다 (발견된 서비스 " + r.total + "개)"));
+          renderWizard();
+        } catch (e) { toast(e.message); b.disabled = false; b.textContent = "목록 새로 고침"; }
+      } })));
     var envBox = h("p", { class: "note", id: "w-env", text: "이 PC를 확인하는 중…" });
     card.appendChild(envBox);
     loadEnv().then(function (env) {
@@ -886,6 +905,11 @@
     var meta = svc();
     var cloud = meta.policy !== "local";
     card.appendChild(h("p", { class: "note", text: meta.label + " — " + meta.note }));
+    if (meta.discovered) {
+      card.appendChild(h("label", { class: "check", id: "w-free-row" },
+        h("input", { type: "checkbox", id: "w-free", checked: w.freeConfirmed ? "checked" : false, onchange: function (e) { w.freeConfirmed = e.target.checked; } }),
+        h("span", { text: "이 서비스의 키에는 결제 수단(카드)을 연결하지 않았습니다. 무료 한도 안에서만 쓰는 것으로 취급합니다. (체크하지 않으면 이름이 -free/:free인 모델만 무료로 봅니다)" })));
+    }
     if (w.service === "custom") {
       card.appendChild(h("label", { class: "field" }, h("span", { text: "이름 (영문 소문자·숫자·-·_)" }),
         h("input", { type: "text", maxlength: "32", value: w.customName, placeholder: "예: myservice", id: "w-name", oninput: function (e) { w.customName = e.target.value; } })));
