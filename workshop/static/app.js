@@ -176,6 +176,12 @@
       ["대화가 아주 길어지면", "오래된 부분은 보내지 못합니다. 대신 '처음 요청'과 생략된 요청 목록을 메모로 붙여 목표를 잃지 않게 합니다. 이전 답변을 요약해 주지는 않습니다."],
       ["다른 대화와는 공유되지 않습니다", "새 대화를 열면 이전 대화를 기억하지 않습니다. 이어서 할 작업은 같은 대화에서 계속하세요. 여러 모델이 한 문서를 같이 쓰는 '보드'는 문서(.md)를 통해 정보를 공유합니다."],
       ["참고", "내용은 선택된 서비스로 전송됩니다. 클라우드 서비스는 연결할 때 동의한 곳만 쓰입니다."]] },
+    engine: { title: "내장 로컬 엔진이 뭔가요?", body: [
+      ["무엇", "Ollama 같은 별도 프로그램 없이, JetAI가 직접 AI 모델 파일을 받아 이 PC에서 돌립니다. 인터넷 서비스가 아니므로 한도·요금이 없고 내용이 PC 밖으로 나가지 않습니다."],
+      ["무엇을 받나요", "① 실행 엔진 llama.cpp(약 25~40MB, 그래픽 카드가 있으면 Vulkan 빌드) ② 모델 파일 1개(0.4~9GB). 출처는 GitHub(ggml-org/llama.cpp)와 Hugging Face뿐이고, 받기 전에 정확한 크기를 보여 드리며 확인을 눌러야만 시작합니다."],
+      ["안전", "받은 파일은 공개된 SHA-256 값과 맞는지 검사합니다. 압축은 JetAI 폴더 안으로만 풀립니다. 엔진은 127.0.0.1에서만 열리고 관리자 권한을 쓰지 않으며, JetAI를 끄면 같이 꺼집니다. 설정에서 언제든 지울 수 있습니다."],
+      ["성능", "그래픽 메모리가 모델 크기보다 크면 빠르게, 아니면 CPU로 느리게 돌아갑니다. 이 PC에 맞는 모델이 '추천'으로 표시됩니다. 한 번에 모델 하나만 실행하며 자동 선택은 실행 중인 모델을 로컬 모델로 취급합니다."],
+      ["한계", "작은 모델은 클라우드의 큰 모델보다 답이 약합니다. 어려운 조사·긴 문서는 자동 선택이 클라우드 무료 모델로 보냅니다."]] },
     newmodels: { title: "새 모델은 어떻게 추가되나요?", body: [
       ["언제", "JetAI를 실행할 때마다(10분에 한 번까지) 연결한 서비스의 모델 목록을 다시 가져와 지난번과 비교합니다. 설정에서 '지금 확인'으로 바로 해 볼 수도 있습니다."],
       ["무엇을 추가하나요", "새로 생긴 모델 중 무료·로컬이고 채팅이 되는 모델만, 서비스마다 최대 2개(서로 다른 종류 우선)를 등록합니다. 요금이 날 수 있는 모델, 음성·이미지·임베딩·미리보기 모델은 추가하지 않습니다. 처음 확인할 때는 목록만 기억하고 추가하지 않습니다."],
@@ -584,9 +590,95 @@
     menu.appendChild(h("button", { type: "button", class: "foot", text: "+ 서비스 연결 · 서비스 추가", onclick: function () { closeMenu(); openWizard(); } }));
     menu.appendChild(h("button", { type: "button", class: "foot", id: "open-accounts", text: "계정(키) 여러 개 관리", onclick: function () { closeMenu(); openAccounts(); } }));
   }
+
+  /* ---------- built-in local engine (settings) ---------- */
+  var engineTimer = null;
+  function fmtBytes(n) { return n >= 1e9 ? (n / 1e9).toFixed(2) + " GB" : (n / 1e6).toFixed(0) + " MB"; }
+  async function renderEngine() {
+    var box = $("eng-list"); if (!box) return;
+    var s; try { s = await api("GET", "/engine"); } catch (e) { box.textContent = e.message; return; }
+    var hw = s.hardware;
+    $("eng-hw").textContent = "이 PC: 메모리 " + hw.ram_gb + "GB" + (hw.gpu ? " · 그래픽 " + hw.gpu + " " + hw.vram_gb + "GB" : " · 그래픽 카드 없음(CPU로 실행)") +
+      (s.binary ? " · 엔진 설치됨(" + s.binary.tag + ", " + s.binary.variant + ")" : " · 엔진 미설치") +
+      (s.running ? (s.ready ? " · 실행 중(포트 " + s.port + ")" : " · 시작하는 중…") : "");
+    box.textContent = "";
+    if (!s.supported) { box.textContent = "이 운영체제에서는 쓸 수 없습니다(Windows·Linux)."; return; }
+    s.models.forEach(function (m) {
+      var row = h("div", { class: "eng-row" }, h("b", { text: m.label }),
+        h("span", { class: "sub", text: " " + m.fit_note + (m.recommended ? " · 추천" : "") + " · " + m.license }));
+      if (!m.installed) row.appendChild(h("button", { type: "button", class: "btn mini", text: "설치…", disabled: m.fit === "no" ? "disabled" : false, onclick: function () { engineAsk(m.id); } }));
+      else {
+        var on = s.active === m.id && s.running;
+        row.appendChild(h("button", { type: "button", class: "btn mini" + (on ? " on" : ""), text: on ? (s.ready ? "사용 중" : "시작 중…") : "이 모델로 시작", disabled: on ? "disabled" : false,
+          onclick: async function () { try { await api("POST", "/engine/start", { model: m.id }); toast("시작합니다. 잠시 걸릴 수 있습니다."); setTimeout(renderEngine, 1500); engineWatchReady(); } catch (e) { toast(e.message); } } }));
+        row.appendChild(h("button", { type: "button", class: "btn mini", text: "삭제", onclick: async function () {
+          if (!confirm(m.label + " 파일을 지울까요? (" + fmtBytes(m.bytes || 0) + ")")) return;
+          try { await api("POST", "/engine/remove", { what: m.id }); await loadState(); renderEngine(); } catch (e) { toast(e.message); } } }));
+      }
+      box.appendChild(row);
+    });
+    $("eng-stop").hidden = !s.running; $("eng-clear").hidden = !s.binary && !s.models.some(function (m) { return m.installed; });
+    $("eng-stop").onclick = async function () { try { await api("POST", "/engine/stop", {}); await loadState(); renderEngine(); } catch (e) { toast(e.message); } };
+    $("eng-clear").onclick = async function () {
+      if (!confirm("내장 엔진과 내려받은 모든 모델을 지울까요?")) return;
+      try { await api("POST", "/engine/remove", { what: "all" }); await loadState(); renderEngine(); } catch (e) { toast(e.message); } };
+    var auto = $("eng-auto"); auto.checked = !state.settings || state.settings.engine_autostart !== false;
+    auto.onchange = async function () { try { state.settings = (await api("POST", "/settings", { engine_autostart: auto.checked })).settings; } catch (e) { toast(e.message); auto.checked = !auto.checked; } };
+    paintEngineJob(s.job);
+    if (s.job && s.job.running && !engineTimer) engineTimer = setInterval(engineTick, 1000);
+  }
+  function paintEngineJob(job) {
+    var box = $("eng-job"); if (!box) return;
+    if (!job || (!job.running && !job.finished) || (job.finished && !job.error && !job.running && !box.dataset.show)) { box.hidden = true; return; }
+    box.hidden = false; box.textContent = "";
+    var pct = job.total ? Math.min(100, Math.round(100 * job.done / job.total)) : 0;
+    box.appendChild(h("div", {}, h("b", { text: job.error ? "실패: " + job.error : job.finished ? "설치 완료" : job.step }),
+      h("span", { class: "sub", text: job.error || job.finished ? "" : "  " + fmtBytes(job.done) + " / " + fmtBytes(job.total) + " (" + pct + "%)" })));
+    if (!job.finished) {
+      box.appendChild(h("div", { class: "bar eng-bar" }, h("i", { style: "width:" + pct + "%" })));
+      box.appendChild(h("button", { type: "button", class: "btn mini", text: "취소", onclick: function () { api("POST", "/engine/cancel", {}); } }));
+    }
+  }
+  async function engineTick() {
+    try {
+      var s = await api("GET", "/engine"); paintEngineJob(s.job);
+      if (!s.job.running) {
+        clearInterval(engineTimer); engineTimer = null; $("eng-job").dataset.show = "1"; paintEngineJob(s.job);
+        if (!s.job.error) toast("설치가 끝났습니다. '이 모델로 시작'을 눌러 주세요.");
+        renderEngine();
+      }
+    } catch (e) { clearInterval(engineTimer); engineTimer = null; }
+  }
+  function engineWatchReady() {
+    var n = 0, t = setInterval(async function () {
+      n += 1;
+      try { var s = await api("GET", "/engine"); if (s.ready || !s.running || n > 120) { clearInterval(t); await loadState(); renderEngine(); if (s.ready) toast("엔진이 준비되었습니다. 이제 자동 선택이 이 모델도 씁니다."); } } catch (e) { clearInterval(t); }
+    }, 1500);
+  }
+  async function engineAsk(modelId) {
+    var plan; try { plan = await api("POST", "/engine/plan", { model: modelId }); } catch (e) { toast(e.message); return; }
+    if (plan.already_installed) { toast("이미 설치되어 있습니다."); return; }
+    var box = $("helpbox"); box.textContent = ""; box.hidden = false;
+    var card = h("div", { class: "card help-card", role: "dialog", "aria-modal": "true", "aria-label": "내려받기 확인" },
+      h("header", {}, h("h2", { text: "인터넷에서 파일을 내려받습니다" }), h("button", { class: "icon", "aria-label": "닫기", text: "\u2715", onclick: closeHelp })));
+    plan.items.forEach(function (it) {
+      card.appendChild(h("div", { class: "help-row" }, h("b", { text: (it.kind === "binary" ? "실행 엔진(llama.cpp) " : "모델 파일 ") + fmtBytes(it.bytes) }),
+        h("p", { text: it.name + " — 출처: " + it.source + (it.kind === "model" ? " · 라이선스 " + plan.license : "") })));
+    });
+    card.appendChild(h("div", { class: "help-row" }, h("b", { text: "합계 " + fmtBytes(plan.total_bytes) }),
+      h("p", { text: "디스크 여유 " + fmtBytes(plan.disk_free_bytes) + (plan.enough_disk ? "" : " — 공간이 부족해 받을 수 없습니다") + ". 받은 파일은 SHA-256으로 검증하고, 이 PC의 JetAI 폴더(~/.agent-workshop/engine)에만 저장합니다. 엔진은 이 PC 안(127.0.0.1)에서만 실행됩니다." })));
+    var go = h("button", { type: "button", class: "btn primary", text: "받고 설치 (" + fmtBytes(plan.total_bytes) + ")", disabled: plan.enough_disk ? false : "disabled", onclick: async function () {
+      go.disabled = true;
+      try { await api("POST", "/engine/install", { model: modelId, confirm_bytes: plan.total_bytes }); closeHelp(); renderEngine(); if (!engineTimer) engineTimer = setInterval(engineTick, 1000); }
+      catch (e) { toast(e.message); go.disabled = false; } } });
+    card.appendChild(h("div", { class: "foot" }, h("button", { type: "button", class: "btn", text: "취소", onclick: closeHelp }), go));
+    box.appendChild(card);
+  }
+
   /* ---------- settings view (native; replaces the old framed setup page) ---------- */
   async function renderSettings() {
     var list = $("set-list");
+    renderEngine();
     var auto = $("set-auto");
     if (auto) {
       auto.checked = !state.settings || state.settings.auto_add_models !== false;
