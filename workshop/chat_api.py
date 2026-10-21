@@ -5,11 +5,14 @@ Sending to a cloud service additionally requires the consent recorded when it wa
 """
 import re
 import threading
+import time
 
 from . import digest, envcheck, setup_page, usage
 from .explain import explain
 from .chat import chat, chat_stream, list_models
 from .chat_store import DEFAULT_TITLE, CHAT_ID, ChatStore
+from .router import route
+from .runstats import RunStats
 from .usage import UsageLedger
 
 MAX_CONTENT = 20_000
@@ -95,6 +98,57 @@ def _resolve_model(ctx, model_ref):
     return provider, model
 
 
+AUTO = "auto"
+
+
+def auto_candidates(ctx):
+    """Every connected model the router may pick: local or free only, and never an unconsented cloud service."""
+    refs = []
+    for name, entry in ctx.providers.load().items():
+        if entry["data_policy"] != "local" and not entry.get("consented"):
+            continue
+        for model in entry.get("models", []):
+            if usage.tier_of(entry["data_policy"], model) in ("local", "free"):
+                refs.append(name + "/" + model)
+    return refs
+
+
+def _tier_fn(ctx):
+    def tier(ref):
+        name, _, model = ref.partition("/")
+        entry = ctx.providers.get(name)
+        return {"local": "local", "free": "free"}.get(usage.tier_of(entry["data_policy"], model) if entry else "", "paid")
+    return tier
+
+
+def _stats(ctx):
+    return RunStats(ctx.ledger.path.parent / "runstats.jsonl")
+
+
+def pick_auto(ctx, text):
+    """Router choice for the 'auto' model: cheapest adequate local/free model, skipping ones that keep failing."""
+    candidates = auto_candidates(ctx)
+    if not candidates:
+        raise ApiError(400, "자동으로 고를 로컬·무료 모델이 없습니다. 서비스를 연결하거나 모델을 직접 고르세요.")
+    try:
+        history = _stats(ctx).load()
+    except OSError:
+        history = {}
+    decision = route(text, candidates, kind="text", role="coder", stats=history, tier_fn=_tier_fn(ctx))
+    if decision["model"] is None:
+        raise ApiError(400, "자동으로 고를 수 있는 모델이 없습니다.")
+    return decision["model"]
+
+
+def _validate_choice(ctx, model_ref):
+    """A concrete connected model, or 'auto' while at least one local/free model is connected."""
+    if model_ref == AUTO:
+        if not auto_candidates(ctx):
+            raise ApiError(400, "자동으로 고를 로컬·무료 모델이 없습니다. 서비스를 연결하거나 모델을 직접 고르세요.")
+        return None
+    return _resolve_model(ctx, model_ref)
+
+
 def fallback_candidates(ctx, primary_ref, enabled=True):
     """[primary] + up to MAX_FALLBACKS other models, local first, then free. Never a model that may cost money,
     and never a cloud service the user has not consented to."""
@@ -120,6 +174,13 @@ def _clean(error, provider):
     return explain(text)[:600]
 
 
+def _note_run(ctx, ref, ok, seconds):
+    try:
+        _stats(ctx).record(ref, ok=ok, seconds=seconds, kind="chat")
+    except OSError:
+        pass                                   # statistics must never break the chat
+
+
 def _record_usage(ctx, ref, provider, history, text, reported):
     name, _, model = ref.partition("/")
     prompt, completion = reported.get("prompt_tokens"), reported.get("completion_tokens")
@@ -138,7 +199,8 @@ def _send(ctx, chat_id, body):
     chat_obj = ctx.store.get(chat_id)
     regenerate = bool(body.get("regenerate"))
     model_ref = body.get("model") or chat_obj.get("model")
-    _resolve_model(ctx, model_ref)                       # validates the chosen model up front
+    selected = model_ref                                 # what the picker shows ('auto' stays 'auto')
+    _validate_choice(ctx, model_ref)                     # validates the chosen model up front
     allow_fallback = body.get("fallback", True) is not False
     content = None
     if regenerate:
@@ -152,6 +214,10 @@ def _send(ctx, chat_id, body):
         if not isinstance(content, str) or not content.strip() or len(content) > MAX_CONTENT:
             raise ApiError(400, "메시지는 1~" + str(MAX_CONTENT) + "자여야 합니다.")
         content = content.strip()
+    if model_ref == AUTO:
+        asked = content if content is not None else next(
+            (m["content"] for m in reversed(chat_obj["messages"]) if m["role"] == "user"), "")
+        model_ref = pick_auto(ctx, asked)
 
     def events():
         if not ctx.claim(chat_id):
@@ -164,12 +230,13 @@ def _send(ctx, chat_id, body):
                 ctx.store.pop_last_assistant(chat_id)
             else:
                 ctx.store.append(chat_id, "user", content)
-            ctx.store.update(chat_id, model=model_ref)
+            ctx.store.update(chat_id, model=selected)
             history = _history(ctx.store.get(chat_id))
-            yield "meta", {"model": model_ref}
+            yield "meta", {"model": model_ref, "auto": selected == AUTO}
             refs, attempts, outcome, partial_error = fallback_candidates(ctx, model_ref, allow_fallback), [], None, ""
             for index, ref in enumerate(refs):
                 current.update(ref=ref, provider=None, reported={})
+                attempt_started = time.time()
                 try:
                     provider, model = _resolve_model(ctx, ref)
                     current["provider"] = provider
@@ -179,9 +246,11 @@ def _send(ctx, chat_id, body):
                     if not "".join(collected).strip():
                         raise RuntimeError("모델이 빈 응답을 돌려주었습니다.")
                     outcome = "ok"
+                    _note_run(ctx, ref, True, time.time() - attempt_started)
                     break
                 except Exception as error:
                     message = _clean(getattr(error, "message", error), current["provider"])
+                    _note_run(ctx, ref, False, time.time() - attempt_started)
                     if "".join(collected).strip():       # never splice two models into one answer
                         outcome, partial_error = "partial", message
                         break
@@ -240,7 +309,7 @@ def dispatch(ctx, method, path, body):
             if method == "POST":
                 model = body.get("model") or ""
                 if model:
-                    _resolve_model(ctx, model)
+                    _validate_choice(ctx, model)
                 return Json(201, ctx.store.create(model))
         if len(parts) >= 2 and parts[0] == "chats":
             chat_id = parts[1]
@@ -251,7 +320,7 @@ def dispatch(ctx, method, path, body):
                     return Json(200, ctx.store.get(chat_id))
                 if method == "PATCH":
                     if body.get("model"):
-                        _resolve_model(ctx, body["model"])
+                        _validate_choice(ctx, body["model"])
                     return Json(200, ctx.store.update(chat_id, title=body.get("title"), model=body.get("model")))
                 if method == "DELETE":
                     ctx.store.delete(chat_id)

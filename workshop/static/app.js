@@ -159,15 +159,21 @@
     return o;
   }
   function isFree(m) { return /(-free|:free)$/.test(m); }
+  var AUTO = "auto";
+  function hasAutoModel() {   // 'auto' routes among connected local/free models only (the server enforces it)
+    return modelOptions().some(function (o) { return o.provider.policy === "local" || (o.provider.consented && isFree(o.model)); });
+  }
   function modelLabel(ref) {
+    if (ref === AUTO) return hasAutoModel() ? "자동 (로컬·무료 우선)" : "";
     var o = modelOptions().filter(function (x) { return x.ref === ref; })[0];
     return o ? o.provider.label + " · " + o.model : "";
   }
   function pickDefaultModel() {
     var opts = modelOptions();
+    if (state.model === AUTO && hasAutoModel()) return;
     if (state.model && opts.some(function (o) { return o.ref === state.model; })) return;
     var ref = state.chats[0] && state.chats[0].model;
-    state.model = (ref && opts.some(function (o) { return o.ref === ref; })) ? ref : (opts[0] ? opts[0].ref : "");
+    state.model = (ref === AUTO && hasAutoModel()) || (ref && opts.some(function (o) { return o.ref === ref; })) ? ref : (opts[0] ? opts[0].ref : "");
   }
   async function loadState() {
     var s = await api("GET", "/state");
@@ -308,7 +314,7 @@
   async function openChat(id) {
     if (state.streaming) { toast("응답을 만드는 중입니다. 중지하거나 끝날 때까지 기다려 주세요."); return; }
     try { state.chat = await api("GET", "/chats/" + id); } catch (e) { toast(e.message); return; }
-    if (state.chat.model && modelOptions().some(function (o) { return o.ref === state.chat.model; })) state.model = state.chat.model;
+    if (state.chat.model && ((state.chat.model === AUTO && hasAutoModel()) || modelOptions().some(function (o) { return o.ref === state.chat.model; }))) state.model = state.chat.model;
     renderModelBtn(); renderMessages(); renderChats(); showView("chat");
   }
   function updateSend() {
@@ -409,14 +415,15 @@
   }
   function digestEstimate() {
     var n = $("dg-text").value.length;
-    $("dg-est").textContent = n ? "약 " + Math.max(1, Math.ceil(n / 8000)) + "개 조각 · 요청 " + Math.max(1, Math.ceil(n / 8000)) + "회 이상" : "";
+    $("dg-est").textContent = n ? "약 " + Math.max(1, Math.ceil(n / 8000)) + "개 조각 · 요청 " + Math.max(1, Math.ceil(n / 8000)) + "회 이상" + ($("dg-prefilter") && $("dg-prefilter").checked ? " (전처리로 더 줄 수 있음)" : "") : "";
     $("dg-cost-row").hidden = digestTier($("dg-model").value) !== "other";
   }
   function digestInit() {
     var sel = $("dg-model"), prev = sel.value;
     sel.textContent = "";
     modelOptions().forEach(function (o) { sel.appendChild(h("option", { value: o.ref, text: o.ref + (o.provider.data_policy === "local" ? " (로컬)" : isFree(o.model) ? " (무료)" : "") })); });
-    if (prev) sel.value = prev; else if (state.model) sel.value = state.model;
+    if (prev) sel.value = prev; else if (state.model && state.model !== AUTO) sel.value = state.model;
+    if (!sel.value && sel.options.length) sel.selectedIndex = 0;   // never leave the select empty (e.g. chat model is "auto")
     digestEstimate();
   }
   async function digestRun() {
@@ -473,6 +480,10 @@
   function renderMenu() {
     var menu = $("modelmenu");
     menu.textContent = "";
+    if (hasAutoModel()) {
+      menu.appendChild(h("button", { type: "button", role: "option", class: state.model === AUTO ? "sel" : "", "data-ref": AUTO, onclick: function () { chooseModel(AUTO); } },
+        h("span", { text: "자동 (로컬·무료 우선)" }), h("span", { class: "tag free", text: "추천" })));
+    }
     state.providers.forEach(function (p) {
       if (!p.models.length) return;
       menu.appendChild(h("div", { class: "mh" }, p.label, h("span", { class: "tag", text: p.policy === "local" ? "내 PC" : "클라우드" })));
