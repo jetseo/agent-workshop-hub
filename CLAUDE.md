@@ -3,6 +3,11 @@
 ## Project objective
 Build a reliable, local-first AI agent orchestration platform for a Windows + WSL2 environment. Connect OpenCode, local Ollama models, optional cloud providers, and ComfyUI. The user has explicitly postponed service naming, logo, and branding. Focus exclusively on technical reliability and verification.
 
+## Project scope: two separate projects
+- **Agent Workshop Hub (this repository)** exists to **save development tokens**: route coding and text work to free, local or low-cost models instead of spending paid tokens, with explicit opt-in, approval and cost guards. Judge new features by whether they serve that goal.
+- **Jet Studio is a different project** for **producing Shorts (short-form videos)**. It is not part of this repository. Do not mix the two: do not add shorts-production features, assets or naming here, and do not treat Jet Studio requirements as Hub requirements.
+- If a request is ambiguous about which project it belongs to, ask before changing anything. Existing image/ComfyUI features in the Hub were built earlier; do not delete them, but do not extend them toward video or shorts production.
+
 ## Current repository state
 - Existing prototype: Python local-only dashboard (`workshop/dashboard.py`), SQLite queue (`workshop/queue.py`), opt-in worker (`workshop/worker.py`), OpenCode/ComfyUI adapters, PowerShell + WSL launcher, installer scripts, GitHub Actions tests.
 - ComfyUI prompt IDs are now validated immediately after submission, before polling/downloading. Tests added in `tests/test_worker.py`.
