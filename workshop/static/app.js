@@ -172,8 +172,8 @@
     var opts = modelOptions();
     if (state.model === AUTO && hasAutoModel()) return;
     if (state.model && opts.some(function (o) { return o.ref === state.model; })) return;
-    var ref = state.chats[0] && state.chats[0].model;
-    state.model = (ref === AUTO && hasAutoModel()) || (ref && opts.some(function (o) { return o.ref === ref; })) ? ref : (opts[0] ? opts[0].ref : "");
+    // The default is 'auto': the user connects services and just chats; the router picks the model.
+    state.model = hasAutoModel() ? AUTO : (opts[0] ? opts[0].ref : "");
   }
   async function loadState() {
     var s = await api("GET", "/state");
@@ -274,7 +274,7 @@
         h("button", { class: "cta", text: "서비스 연결하기", onclick: function () { openWizard(); } }));
       return;
     }
-    w.append(h("h1", { text: "무엇을 도와드릴까요?" }), h("p", { text: modelLabel(state.model) ? modelLabel(state.model) + " 모델로 대화합니다." : "" }),
+    w.append(h("h1", { text: "무엇을 도와드릴까요?" }), h("p", { text: state.model === AUTO ? "알맞은 AI를 자동으로 골라 답합니다. 한도가 차거나 오류가 나면 다른 무료·로컬 모델로 알아서 넘어갑니다." : (modelLabel(state.model) ? modelLabel(state.model) + " 모델로 대화합니다." : "") }),
       h("div", { class: "chips" }, SUGGESTIONS.map(function (s) {
         return h("button", { class: "chip", type: "button", text: s, onclick: function () { $("input").value = s; autosize(); updateSend(); $("input").focus(); } });
       })));
@@ -408,9 +408,10 @@
   /* ---------- digest view ---------- */
   var digest = { running: null };
   function digestTier(ref) {
+    if (ref === AUTO) return "free";                // auto only ever picks local/free models
     var o = modelOptions().filter(function (x) { return x.ref === ref; })[0];
     if (!o) return "other";
-    if (o.provider.data_policy === "local" || isFree(o.model)) return "free";
+    if (o.provider.policy === "local" || isFree(o.model)) return "free";
     return "other";
   }
   function digestEstimate() {
@@ -421,8 +422,9 @@
   function digestInit() {
     var sel = $("dg-model"), prev = sel.value;
     sel.textContent = "";
-    modelOptions().forEach(function (o) { sel.appendChild(h("option", { value: o.ref, text: o.ref + (o.provider.data_policy === "local" ? " (로컬)" : isFree(o.model) ? " (무료)" : "") })); });
-    if (prev) sel.value = prev; else if (state.model && state.model !== AUTO) sel.value = state.model;
+    if (hasAutoModel()) sel.appendChild(h("option", { value: AUTO, text: "자동 (로컬·무료 우선)" }));
+    modelOptions().forEach(function (o) { sel.appendChild(h("option", { value: o.ref, text: o.ref + (o.provider.policy === "local" ? " (로컬)" : isFree(o.model) ? " (무료)" : "") })); });
+    if (prev) sel.value = prev; else if (state.model) sel.value = state.model;
     if (!sel.value && sel.options.length) sel.selectedIndex = 0;   // never leave the select empty (e.g. chat model is "auto")
     digestEstimate();
   }
@@ -729,7 +731,11 @@
       card.appendChild(h("div", { class: "reply", text: w.result.reply }));
       card.appendChild(h("div", { class: "foot" }, h("span"), h("button", { class: "btn primary", type: "button", id: "w-start", text: "대화 시작", onclick: async function () {
         var ref = w.result.provider + "/" + w.result.model;
-        await loadState(); state.model = ref; renderModelBtn();   // update first, then close: no flash of the "connect a service" screen
+        await loadState();
+        var prov = state.providers.filter(function (p) { return p.name === w.result.provider; })[0];
+        var cheap = prov && (prov.policy === "local" || isFree(w.result.model));
+        state.model = (cheap && hasAutoModel()) ? AUTO : ref;     // free/local connections just work through 'auto'
+        renderModelBtn();   // update first, then close: no flash of the "connect a service" screen
         closeWizard(); newChat();
       } })));
       return;

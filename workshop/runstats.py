@@ -51,14 +51,17 @@ class RunStats:
         return out
 
     def load(self, days=RECENT_WINDOW_DAYS, now=None):
-        """{model: {"runs", "failures", "seconds"}} for the recent window; shape matches router.route(stats=)."""
+        """{model: {"runs", "failures", "seconds", "streak_fail", "last_ts"}} for the recent window; matches
+        router.route(stats=). streak_fail counts the failures at the very end of the history (0 after a success)."""
         cutoff = (time.time() if now is None else now) - days * 86400
         stats = {}
-        for r in self._records():
+        for r in sorted(self._records(), key=lambda rec: rec["ts"]):
             if r["ts"] < cutoff:
                 continue
-            entry = stats.setdefault(r["model"], {"runs": 0, "failures": 0, "seconds": 0.0})
+            entry = stats.setdefault(r["model"], {"runs": 0, "failures": 0, "seconds": 0.0, "streak_fail": 0, "last_ts": 0.0})
             entry["runs"] += 1
             entry["failures"] += 0 if r.get("ok") else 1
+            entry["streak_fail"] = 0 if r.get("ok") else entry["streak_fail"] + 1
+            entry["last_ts"] = r["ts"]
             entry["seconds"] = round(entry["seconds"] + float(r.get("seconds", 0)), 2)
         return stats

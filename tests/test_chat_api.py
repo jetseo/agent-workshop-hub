@@ -458,6 +458,21 @@ class DigestApiTests(ApiBase):
             events.append((lines["event"], json.loads(lines["data"])))
         return status, events
 
+    def test_digest_accepts_the_auto_model(self):
+        self.providers.add_model("mock", "tiny-3b")
+        status, events = self.digest({"model": "auto", "text": "긴 글 " * 50})
+        self.assertEqual(status, 200)
+        self.assertEqual(events[-1][0], "done")
+        self.assertTrue(events[-1][1]["model"].startswith("mock/"))
+
+    def test_digest_auto_without_candidates_is_refused(self):
+        from workshop import chat_api
+        saved = chat_api.auto_candidates
+        chat_api.auto_candidates = lambda ctx: []
+        self.addCleanup(lambda: setattr(chat_api, "auto_candidates", saved))
+        status, body = self.digest({"model": "auto", "text": "abc " * 30})
+        self.assertEqual(status, 400)
+
     def test_digest_streams_progress_and_books_usage_as_digest(self):
         status, events = self.digest({"model": "mock/demo-model", "text": "긴 글 " * 50})
         self.assertEqual(status, 200)
