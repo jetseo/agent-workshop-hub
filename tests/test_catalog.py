@@ -33,7 +33,18 @@ class CatalogTests(unittest.TestCase):
         rows = public_catalog()
         self.assertEqual(len(rows), len(CATALOG))
         self.assertTrue(all("group" in r and "limits" in r for r in rows))
-        self.assertEqual(set(rows[0]), {"id", "label", "base_url", "policy", "key_url", "model", "needs_key", "note", "group", "limits"})
+        self.assertEqual(set(rows[0]), {"id", "label", "base_url", "policy", "key_url", "model", "needs_key", "note", "group", "limits",
+                                        "free", "free_match"})
+
+    def test_free_tier_markers_are_consistent(self):
+        by_id = {c["id"]: c for c in CATALOG}
+        for sid in ("gemini", "groq", "cerebras"):
+            self.assertEqual(by_id[sid]["free"], "all")                       # whole service is free-tier
+            self.assertIn("결제", by_id[sid]["note"])                           # and the billing warning is shown
+        for sid in ("openrouter", "opencode-zen", "unorouter", "huggingface"):
+            self.assertEqual(by_id[sid]["free"], "suffix")                    # only -free / :free names
+        self.assertEqual(by_id["zhipu"]["free_match"], ["flash"])
+        self.assertTrue(all(c["free"] in ("all", "suffix", "match") for c in CATALOG))
 
     def test_every_catalog_id_resolves(self):
         for c in CATALOG:

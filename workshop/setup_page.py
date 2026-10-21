@@ -6,6 +6,7 @@ saved to the 0600 secrets file; they are never rendered back, logged, or put in 
 """
 import html
 import os
+import re
 import time
 from urllib.parse import urlparse
 
@@ -25,26 +26,26 @@ CATALOG = [
     {"id": "ollama", "label": "Ollama (이 PC, 토큰 불필요)", "base_url": "http://127.0.0.1:11434/v1",
      "policy": "local", "key_url": "", "model": "", "needs_key": False, "group": "local", "limits": "내 PC 자원만 사용, 한도 없음",
      "note": "먼저 `ollama pull <모델>`로 모델을 받아 두세요 (자동 다운로드는 하지 않습니다)."},
-    {"id": "gemini", "label": "Google Gemini (AI Studio)", "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
+    {"id": "gemini", "free": "all", "label": "Google Gemini (AI Studio)", "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
      "policy": "cloud-may-train", "key_url": "https://aistudio.google.com/apikey", "model": "", "needs_key": True, "group": "top",
      "limits": "Flash 계열 분당 15회·하루 1,500회 안팎, Pro는 훨씬 적음",
      "note": "무료 티어 입력은 학습에 쓰일 수 있습니다. EU·영국·스위스에서는 무료 티어를 못 쓸 수 있습니다."},
-    {"id": "groq", "label": "Groq (매우 빠름)", "base_url": "https://api.groq.com/openai/v1",
+    {"id": "groq", "free": "all", "label": "Groq (매우 빠름)", "base_url": "https://api.groq.com/openai/v1",
      "policy": "cloud-may-train", "key_url": "https://console.groq.com/keys", "model": "", "needs_key": True, "group": "top",
      "limits": "분당 30회·하루 14,400회 안팎(모델마다 다름)", "note": "무료 한도는 모델마다 다릅니다."},
-    {"id": "cerebras", "label": "Cerebras (매우 빠름)", "base_url": "https://api.cerebras.ai/v1",
+    {"id": "cerebras", "free": "all", "label": "Cerebras (매우 빠름)", "base_url": "https://api.cerebras.ai/v1",
      "policy": "cloud-may-train", "key_url": "https://cloud.cerebras.ai", "model": "", "needs_key": True, "group": "top",
      "limits": "분당 30회·하루 14,400회·분당 6만 토큰 안팎", "note": "무료 한도는 모델마다 다릅니다."},
-    {"id": "mistral", "label": "Mistral (La Plateforme)", "base_url": "https://api.mistral.ai/v1",
+    {"id": "mistral", "free": "all", "label": "Mistral (La Plateforme)", "base_url": "https://api.mistral.ai/v1",
      "policy": "cloud-may-train", "key_url": "https://console.mistral.ai/api-keys", "model": "", "needs_key": True, "group": "top",
      "limits": "초당 1회·월 10억 토큰 안팎(무료 실험 요금제)", "note": "무료 요금제는 입력이 학습에 쓰일 수 있고 전화번호 인증이 필요할 수 있습니다."},
     {"id": "openrouter", "label": "OpenRouter (무료 모델 모음)", "base_url": "https://openrouter.ai/api/v1",
      "policy": "cloud-may-train", "key_url": "https://openrouter.ai/keys", "model": "", "needs_key": True, "group": "top",
      "limits": "분당 20회·하루 200회 안팎(`:free` 모델)", "note": "모델 이름이 `:free`로 끝나는 것만 무료입니다. 하루 요청 수 제한이 작습니다."},
-    {"id": "github-models", "label": "GitHub Models (GitHub 토큰)", "base_url": "https://models.github.ai/inference",
+    {"id": "github-models", "free": "all", "label": "GitHub Models (GitHub 토큰)", "base_url": "https://models.github.ai/inference",
      "policy": "cloud-may-train", "key_url": "https://github.com/settings/tokens", "model": "", "needs_key": True, "group": "top",
      "limits": "모델 등급별로 하루 수십~백여 회", "note": "`models:read` 권한이 있는 토큰이 필요합니다. 요청 수가 적어 시험용에 적합합니다."},
-    {"id": "nvidia-nim", "label": "NVIDIA NIM (build.nvidia.com)", "base_url": "https://integrate.api.nvidia.com/v1",
+    {"id": "nvidia-nim", "free": "all", "label": "NVIDIA NIM (build.nvidia.com)", "base_url": "https://integrate.api.nvidia.com/v1",
      "policy": "cloud-may-train", "key_url": "https://build.nvidia.com/settings/api-keys", "model": "", "needs_key": True, "group": "top",
      "limits": "분당 40회 안팎(크레딧 방식)", "note": "개발자 계정 가입이 필요하고, 무료 크레딧이 소진되면 막힐 수 있습니다."},
     {"id": "opencode-zen", "label": "OpenCode Zen (OpenCode API 키)", "base_url": "https://opencode.ai/zen/v1",
@@ -53,10 +54,10 @@ CATALOG = [
     {"id": "huggingface", "label": "Hugging Face (추론 라우터)", "base_url": "https://router.huggingface.co/v1",
      "policy": "cloud-may-train", "key_url": "https://huggingface.co/settings/tokens", "model": "", "needs_key": True, "group": "more",
      "limits": "매달 소액 무료 크레딧(자동 갱신)", "note": "크레딧을 넘으면 요금이 나올 수 있으니 한도 알림을 확인하세요. 토큰에 Inference 권한이 필요합니다."},
-    {"id": "anyapi", "label": "AnyAPI (무료 모델 게이트웨이)", "base_url": "https://api.anyapi.ai/v1",
+    {"id": "anyapi", "free": "all", "label": "AnyAPI (무료 모델 게이트웨이)", "base_url": "https://api.anyapi.ai/v1",
      "policy": "cloud-may-train", "key_url": "https://anyapi.ai", "model": "", "needs_key": True, "group": "more",
      "limits": "분당 20회·하루 200회 안팎", "note": "신용카드 없이 키를 받을 수 있다고 알려져 있습니다(미확인)."},
-    {"id": "llm7", "label": "LLM7.io", "base_url": "https://api.llm7.io/v1",
+    {"id": "llm7", "free": "all", "label": "LLM7.io", "base_url": "https://api.llm7.io/v1",
      "policy": "cloud-may-train", "key_url": "https://token.llm7.io", "model": "", "needs_key": True, "group": "more",
      "limits": "분당 15회(무료 토큰 시 30회)", "note": "토큰 없이는 거절됩니다(확인함). 무료 토큰을 먼저 받으세요."},
     {"id": "unorouter", "label": "UnoRouter", "base_url": "https://api.unorouter.com/v1",
@@ -65,19 +66,26 @@ CATALOG = [
     {"id": "requesty", "label": "Requesty (무료 모델)", "base_url": "https://router.requesty.ai/v1",
      "policy": "cloud-may-train", "key_url": "https://app.requesty.ai/api-keys", "model": "", "needs_key": True, "group": "more",
      "limits": "무료 모델 합쳐 하루 200회 안팎", "note": "무료로 표시된 모델만 쓰세요. 그 밖의 모델은 요금이 부과됩니다."},
-    {"id": "pollinations", "label": "Pollinations", "base_url": "https://gen.pollinations.ai/v1",
+    {"id": "pollinations", "free": "all", "label": "Pollinations", "base_url": "https://gen.pollinations.ai/v1",
      "policy": "cloud-may-train", "key_url": "https://enter.pollinations.ai/keys", "model": "", "needs_key": True, "group": "more",
      "limits": "IP별 시간당 제한(정확한 수치 비공개)", "note": "키가 필요합니다(확인함). 무료 키 한도는 비공개라 갑자기 막힐 수 있습니다."},
-    {"id": "airforce", "label": "Api.Airforce", "base_url": "https://api.airforce/v1",
+    {"id": "airforce", "free": "all", "label": "Api.Airforce", "base_url": "https://api.airforce/v1",
      "policy": "cloud-may-train", "key_url": "https://api.airforce", "model": "", "needs_key": True, "group": "more",
      "limits": "가벼운 사용만 허용", "note": "비공식 게이트웨이입니다. 민감한 내용은 보내지 마세요."},
-    {"id": "cohere", "label": "Cohere (체험 키)", "base_url": "https://api.cohere.ai/compatibility/v1",
+    {"id": "cohere", "free": "all", "label": "Cohere (체험 키)", "base_url": "https://api.cohere.ai/compatibility/v1",
      "policy": "cloud-may-train", "key_url": "https://dashboard.cohere.com/api-keys", "model": "", "needs_key": True, "group": "more",
      "limits": "분당 20회·월 1,000회 안팎(체험 키, 상업 사용 불가)", "note": "OpenAI 호환 모드를 씁니다. 체험 키는 상업적 사용이 금지됩니다."},
-    {"id": "zhipu", "label": "Zhipu AI (GLM Flash, 중국 서비스)", "base_url": "https://open.bigmodel.cn/api/paas/v4",
+    {"id": "zhipu", "free": "match", "free_match": ["flash"], "label": "Zhipu AI (GLM Flash, 중국 서비스)", "base_url": "https://open.bigmodel.cn/api/paas/v4",
      "policy": "cloud-may-train", "key_url": "https://open.bigmodel.cn/usercenter/apikeys", "model": "", "needs_key": True, "group": "more",
      "limits": "Flash 모델은 한도 비공개", "note": "중국 서비스라 가입에 중국 휴대전화 번호가 필요할 수 있고, 데이터가 중국 서버로 전송됩니다."},
 ]
+for _c in CATALOG:
+    _c.setdefault("free", "suffix")
+    _c.setdefault("free_match", [])
+NO_BILLING = " 결제 수단(카드)을 연결한 키는 한도를 넘으면 요금이 나올 수 있으니, 결제를 연결하지 않은 무료 키만 쓰세요."
+for _c in CATALOG:
+    if _c.get("free") in ("all", "match"):
+        _c["note"] += NO_BILLING
 BY_ID = {c["id"]: c for c in CATALOG}
 MAX_PROMPT = 2000
 DEFAULT_PROMPT = "한 문장으로 간단히 자기소개를 해줘."
@@ -97,7 +105,8 @@ def resolve_service(form, providers=None):
     if service in BY_ID:
         c = BY_ID[service]
         return c["id"], {"base_url": c["base_url"], "data_policy": c["policy"], "needs_key": c["needs_key"],
-                         "default_model": c["model"]}
+                         "default_model": c["model"], "free_all": c.get("free") == "all",
+                         "free_match": c.get("free_match", [])}
     if service != "custom":
         stored = providers.get(service) if providers is not None and NAME.fullmatch(service) else None
         if not stored:
@@ -112,6 +121,20 @@ def resolve_service(form, providers=None):
              "needs_key": not loopback, "default_model": ""}
     validate(name, {"base_url": url, "data_policy": entry["data_policy"]})
     return name, entry
+
+
+MODEL_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,199}")
+MAX_EXTRA_MODELS = 6
+
+
+def _extra_models(form, tested):
+    """Comma-separated model names the wizard offers to save together with the tested one (recommended set)."""
+    names = []
+    for raw in _field(form, "extra_models").split(","):
+        raw = raw.strip()
+        if raw and raw != tested and raw not in names and MODEL_NAME.fullmatch(raw):
+            names.append(raw)
+    return names[:MAX_EXTRA_MODELS]
 
 
 def run_test(providers, form, chat_fn=chat):
@@ -145,9 +168,13 @@ def run_test(providers, form, chat_fn=chat):
         result["ok"] = True
         if _field(form, "save") == "on":
             providers.add(name, base_url=entry["base_url"], key_env=stored.get("key_env"),
-                          data_policy=entry["data_policy"], rpm=stored.get("rpm", 0))
+                          data_policy=entry["data_policy"], rpm=stored.get("rpm", 0),
+                          free_all=entry.get("free_all") or stored.get("free_all"),
+                          free_match=entry.get("free_match") or stored.get("free_match"))
             if key:
                 providers.set_key(name, key)
+            for extra in reversed(_extra_models(form, model)):    # recommended models, saved so 'auto' has a choice
+                providers.add_model(name, extra)
             providers.add_model(name, model)
             if entry["data_policy"] != "local":
                 providers.set_consent(name, True)     # the user ticked the consent box for this service
@@ -160,7 +187,7 @@ def run_test(providers, form, chat_fn=chat):
 
 
 def public_catalog():
-    return [{k: c[k] for k in ("id", "label", "base_url", "policy", "key_url", "model", "needs_key", "note", "group", "limits")}
+    return [{k: c[k] for k in ("id", "label", "base_url", "policy", "key_url", "model", "needs_key", "note", "group", "limits", "free", "free_match")}
             for c in CATALOG]
 
 

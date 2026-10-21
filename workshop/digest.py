@@ -11,7 +11,7 @@ from pathlib import Path
 
 from .chat import chat
 from .logsum import reduce_log
-from .usage import UsageLedger, estimate_tokens, tier_of
+from .usage import UsageLedger, estimate_tokens, tier_for
 
 MAX_INPUT = 300_000
 CHUNK_CHARS = 8_000
@@ -75,7 +75,7 @@ def stream(*, resolve, candidates, chat_fn, ledger, body, claim=None, release=No
     chunks = split_chunks(text)
     if len(chunks) > MAX_CHUNKS:
         raise ValueError("조각이 너무 많습니다.")
-    if tier_of(provider["data_policy"], model) == "other" and body.get("confirm_cost") is not True:
+    if tier_for(provider, model) == "other" and body.get("confirm_cost") is not True:
         raise PermissionError("요금이 나올 수 있는 모델입니다. 확인 체크를 한 뒤에만 실행됩니다.")
     allow_fallback = body.get("fallback", True) is not False
 
@@ -110,7 +110,7 @@ def stream(*, resolve, candidates, chat_fn, ledger, body, claim=None, release=No
                     used["spent"] += tokens_in + tokens_out
                     if ledger is not None:
                         try:
-                            ledger.record(provider=ref.partition("/")[0], model=mod, tier=tier_of(prov["data_policy"], mod),
+                            ledger.record(provider=ref.partition("/")[0], model=mod, tier=tier_for(prov, mod),
                                           prompt_tokens=tokens_in, completion_tokens=tokens_out, estimated=True, source="digest")
                         except OSError:
                             pass

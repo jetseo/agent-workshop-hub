@@ -42,7 +42,8 @@ def render(terminal_state, term_token="", csrf=""):
             '<div id="scrim" hidden></div>'
             '<section id="stage"><header class="topbar"><button id="side-open" class="icon" aria-label="사이드바 열기" title="사이드바">&#9776;</button>'
             '<div class="model-wrap"><button id="modelbtn" aria-haspopup="listbox" aria-expanded="false">모델 선택<i>&#9662;</i></button>'
-            '<div id="modelmenu" class="menu" role="listbox" hidden></div></div><span class="spacer"></span>'
+            '<div id="modelmenu" class="menu" role="listbox" hidden></div></div>'
+            '<button type="button" class="help" data-help="auto" aria-label="자동 선택 설명" title="자동 선택은 어떻게 동작하나요?">?</button><span class="spacer"></span>'
             '<button id="theme" class="icon" aria-label="테마 전환" title="테마 전환">&#9680;</button></header>'
             '<main>'
             '<div id="view-chat" class="view"><div id="scroller"><div id="welcome"></div><div id="messages" aria-live="polite"></div></div>'
@@ -65,6 +66,9 @@ def render(terminal_state, term_token="", csrf=""):
             '<pre id="dg-out"></pre><p id="dg-stats"></p></div></div></div>'
             '<div id="view-settings" class="view" hidden><div class="settings"><h2>설정</h2>'
             '<section id="set-env"><h3>이 PC</h3><p id="set-env-text" class="sub">확인하는 중…</p></section>'
+            '<section id="set-watch"><h3>새 모델 자동 추가 <button type="button" class="help" data-help="newmodels" aria-label="설명">?</button></h3>'
+            '<label class="check"><input id="set-auto" type="checkbox"> 실행할 때마다 새 무료·로컬 모델을 확인해 자동으로 추가</label> '
+            '<button id="set-check" class="btn" type="button">지금 확인</button> <span id="set-check-msg" class="sub"></span></section>'
             '<section id="set-services"><div class="row"><h3>연결된 서비스</h3>'
             '<button id="set-add" class="btn" type="button">+ 서비스 추가</button></div><div id="set-list"></div></section>'
             '<section><h3>내 데이터</h3><p class="sub">키·대화·사용량은 이 PC의 <code>.agent-workshop</code> 폴더에만 저장됩니다. '
@@ -74,6 +78,6 @@ def render(terminal_state, term_token="", csrf=""):
             '<iframe id="view-boards" class="view" src="about:blank" data-src="/boards" title="보드" hidden></iframe>'
             '<iframe id="view-usage" class="view" src="about:blank" data-src="/usage" title="사용량" hidden></iframe>'
             + terminal_pane +
-            '</main></section><div id="wizard" hidden></div><div id="toast" role="status" hidden></div></div>'
+            '</main></section><div id="wizard" hidden></div><div id="helpbox" hidden></div><div id="toast" role="status" hidden></div></div>'
             '<script src="/static/xterm.js"></script><script src="/static/addon-fit.js"></script>'
             '<script src="/static/app.js"></script></body></html>')

@@ -367,9 +367,16 @@ def main():
             handle.write(terminal_key)
         os.chmod(key_file, 0o600)
     applog.setup()
+    from . import modelinfo, setup_page
+    from .chat_api import Context
+    from .chat_store import ChatStore
+    from .providers import Providers
+    registry = Providers()
+    api_ctx = Context(registry, ChatStore(None), chat_fn=setup_page.chat, list_fn=setup_page.list_models)
     try:
         server = ThreadingHTTPServer(("127.0.0.1", args.port), make_handler(
-            Queue(args.db), token, terminal_key=terminal_key, terminal_cwd=str(Path(__file__).resolve().parent.parent)))
+            Queue(args.db), token, providers=registry, api_ctx=api_ctx, terminal_key=terminal_key,
+            terminal_cwd=str(Path(__file__).resolve().parent.parent)))
     except OSError as error:
         if error.errno in (98, 10048, 10013, 48) or getattr(error, "winerror", None) in (10048, 10013) \
                 or "Address already in use" in str(error):
@@ -379,6 +386,11 @@ def main():
             raise SystemExit(2)
         raise
     applog.write("start port=%d terminal=%s" % (args.port, "on" if terminal_key else "off"))
+    # Everything that runs before the "Dashboard:" line below must finish first: a stop request can arrive the moment
+    # that line is printed, and it is only handled cleanly once serve_forever() is inside its try block.
+    modelinfo.install(api_ctx.info)                  # routing may use the public catalog's benchmark data from now on
+    if not os.environ.get("JETAI_NO_BACKGROUND_CHECK"):      # tests and offline setups can opt out
+        api_ctx.watch.start_in_background()          # refresh that catalog and look for new free/local models, off the main thread
     # A termination request (closing the window, `kill`) should stop the server cleanly like Ctrl+C does.
     def _stop(*_):
         raise KeyboardInterrupt

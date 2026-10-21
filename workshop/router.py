@@ -11,6 +11,7 @@ import re
 import sys
 import time
 
+from .modelpick import capability
 from .modelpolicy import classify
 
 ROLES = ("planner", "router", "coder", "reviewer", "tester", "reporter")
@@ -103,6 +104,49 @@ def route(prompt, models, *, kind="text", role="coder", files=0, stats=None, all
                 "reason": "no local/free model available; paid model suggested, explicit approval required"}
     return {"model": None, "tier": None, "difficulty": difficulty, "needs_approval": bool(paid),
             "reason": "no usable local/free model" + ("; paid models exist but were not allowed" if paid else "")}
+
+
+def _fit(model, task):
+    """Lower is better. Missing capability costs three times more than spare capability; a coder model is a
+    bonus for code and a handicap for everyday chat; a reasoning model is a bonus for research."""
+    cap = capability(model)
+    need = task["level"]
+    gap = cap["level"] - need
+    cost = (-gap * 3.0) if gap < 0 else gap * 1.0
+    if task["type"] == "code":
+        cost -= 1.5 if cap["coder"] else 0.0
+    elif task["type"] == "research":
+        cost -= 1.0 if cap["reasoning"] else 0.0
+        cost += 0.5 if cap["coder"] else 0.0
+    else:
+        cost += 0.5 if cap["coder"] else 0.0
+    return cost
+
+
+def route_task(task, models, *, stats=None, tier_fn=None, now=None):
+    """Pick the model whose strength best matches what the arbiter decided (`task`: type + level).
+
+    Unlike route(), free and local models compete in one pool, so a hard research question goes to a strong free
+    cloud model instead of a tiny local one; when two fit equally, local wins (private, no limits), then the
+    less used one. Paid models are never chosen. Returns {model, tier, type, level, reason}.
+    """
+    classify_model = tier_fn or classify
+    unique = sorted({m for m in models if isinstance(m, str) and "/" in m})
+    healthy = [m for m in unique if _healthy(m, stats, now)]
+    skipped = [m for m in unique if m not in healthy]
+    pool = [m for m in healthy if classify_model(m) in ("local", "free")]
+    if not pool:
+        return {"model": None, "tier": None, "type": task["type"], "level": task["level"],
+                "reason": "no usable local/free model" + (" (cooling down: " + ", ".join(skipped) + ")" if skipped else "")}
+    used = lambda m: (stats or {}).get(m, {}).get("runs", 0)
+    pick = min(pool, key=lambda m: (_fit(m, task), 0 if classify_model(m) == "local" else 1, used(m), m))
+    cap = capability(pick)
+    reason = "need level %d, model level %d%s" % (task["level"], cap["level"], ", coder" if cap["coder"] else "")
+    if cap["level"] < task["level"]:
+        reason += " (strongest available; stronger free models are cooling down or not connected)"
+    if skipped:
+        reason += " (skipped, failing or cooling down: " + ", ".join(skipped) + ")"
+    return {"model": pick, "tier": classify_model(pick), "type": task["type"], "level": task["level"], "reason": reason}
 
 
 def main(argv=None):

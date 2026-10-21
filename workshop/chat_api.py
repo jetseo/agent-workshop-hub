@@ -9,16 +9,21 @@ import time
 import webbrowser
 from urllib.parse import urlparse
 
-from . import digest, envcheck, setup_page, usage
+from . import digest, envcheck, modelpick, setup_page, usage
 from .explain import explain
 from .chat import chat, chat_stream, list_models
 from .chat_store import DEFAULT_TITLE, CHAT_ID, ChatStore
-from .router import route
+from . import arbiter, router
+from .modelinfo import ModelInfo
+from .modelwatch import ModelWatch
+from .router import route_task
 from .runstats import RunStats
 from .usage import UsageLedger
 
 MAX_CONTENT = 20_000
 HISTORY_CHARS = 24_000
+NOTE_REQUESTS = 10
+NOTE_MAX_CHARS = 1800
 MAX_FALLBACKS = 3
 MODEL_REF = re.compile(r"[a-z0-9][a-z0-9_-]{0,31}/\S{1,200}")
 
@@ -47,6 +52,10 @@ class Context:
         self.chat_fn, self.stream_fn, self.list_fn = chat_fn, stream_fn, list_fn
         self.env_fn = env_fn
         self.open_url_fn = open_url_fn
+        # Public model catalog (read from a local cache; downloaded in the background by the app) and the watcher
+        # that adds new free/local models. Both keep their files next to providers.json.
+        self.info = ModelInfo(providers.path.parent / "modelinfo.json")
+        self.watch = ModelWatch(providers, list_fn, info=self.info)
         self.active = set()
         self._active_lock = threading.Lock()
 
@@ -89,7 +98,8 @@ def _form(body):
 def _provider_view(ctx, name, entry):
     label = setup_page.BY_ID.get(name, {}).get("label", name)
     return {"name": name, "label": label, "base_url": entry["base_url"], "policy": entry["data_policy"],
-            "models": entry.get("models", []), "token": ctx.providers.key_status(name),
+            "models": entry.get("models", []), "free_all": bool(entry.get("free_all")),
+            "free_match": entry.get("free_match", []), "token": ctx.providers.key_status(name),
             "accounts": ctx.providers.list_accounts(name),
             "consented": entry["data_policy"] == "local" or bool(entry.get("consented"))}
 
@@ -97,7 +107,8 @@ def _provider_view(ctx, name, entry):
 def _state(ctx):
     providers = [_provider_view(ctx, n, e) for n, e in ctx.providers.load().items()]
     return {"providers": providers, "catalog": setup_page.public_catalog(),
-            "onboarded": any(p["models"] for p in providers)}
+            "onboarded": any(p["models"] for p in providers),
+            "news": ctx.watch.news(), "settings": ctx.watch.settings()}
 
 
 def _history(chat_obj):
@@ -107,7 +118,24 @@ def _history(chat_obj):
         if kept and total > HISTORY_CHARS:
             break
         kept.append({"role": message["role"], "content": message["content"]})
-    return list(reversed(kept))
+    kept.reverse()
+    dropped = chat_obj["messages"][:len(chat_obj["messages"]) - len(kept)]
+    note = _earlier_note(dropped)
+    return ([{"role": "system", "content": note}] if note else []) + kept
+
+
+def _earlier_note(dropped):
+    """Whatever model answers next is told what the conversation was originally about and what was asked before
+    the part that no longer fits, so switching models (or a long chat) does not lose the thread. Built from the
+    user's own earlier requests (no model call); the earlier answers themselves are not summarised."""
+    asked = [m["content"].strip() for m in dropped if m["role"] == "user" and m["content"].strip()]
+    if not asked:
+        return ""
+    lines = ["[앞선 대화 메모] 이 대화는 길어져서 앞부분은 생략되었습니다. 처음 요청: " + asked[0][:400].replace("\n", " ")]
+    middle = asked[1:][-NOTE_REQUESTS:]
+    if middle:
+        lines.append("그 뒤 생략된 요청들: " + " / ".join(a[:100].replace("\n", " ") for a in middle))
+    return "\n".join(lines)[:NOTE_MAX_CHARS]
 
 
 def _resolve_model(ctx, model_ref):
@@ -132,7 +160,7 @@ def auto_candidates(ctx):
         if entry["data_policy"] != "local" and not entry.get("consented"):
             continue
         for model in entry.get("models", []):
-            if usage.tier_of(entry["data_policy"], model) in ("local", "free"):
+            if usage.tier_for(entry, model) in ("local", "free"):
                 refs.append(name + "/" + model)
     return refs
 
@@ -141,7 +169,7 @@ def _tier_fn(ctx):
     def tier(ref):
         name, _, model = ref.partition("/")
         entry = ctx.providers.get(name)
-        return {"local": "local", "free": "free"}.get(usage.tier_of(entry["data_policy"], model) if entry else "", "paid")
+        return {"local": "local", "free": "free"}.get(usage.tier_for(entry, model) if entry else "", "paid")
     return tier
 
 
@@ -149,8 +177,10 @@ def _stats(ctx):
     return RunStats(ctx.ledger.path.parent / "runstats.jsonl")
 
 
-def pick_auto(ctx, text):
-    """Router choice for the 'auto' model: cheapest adequate local/free model, skipping ones that keep failing."""
+def pick_auto(ctx, text, *, previous_type=None, task=None):
+    """The arbiter decides what kind of work the question is (code / everyday / deep research) and how demanding;
+    the router then picks the local/free model whose strength fits, skipping ones that keep failing.
+    Returns (model_ref, task, decision)."""
     candidates = auto_candidates(ctx)
     if not candidates:
         raise ApiError(400, "자동으로 고를 로컬·무료 모델이 없습니다. 서비스를 연결하거나 모델을 직접 고르세요.")
@@ -158,10 +188,21 @@ def pick_auto(ctx, text):
         history = _stats(ctx).load()
     except OSError:
         history = {}
-    decision = route(text, candidates, kind="text", role="coder", stats=history, tier_fn=_tier_fn(ctx))
+    task = task or arbiter.classify(text, previous_type)
+    decision = route_task(task, candidates, stats=history, tier_fn=_tier_fn(ctx))
     if decision["model"] is None:
-        raise ApiError(400, "자동으로 고를 수 있는 모델이 없습니다.")
-    return decision["model"]
+        raise ApiError(400, "자동으로 고를 수 있는 모델이 없습니다. " + decision["reason"])
+    return decision["model"], task, decision
+
+
+def _conversation_type(chat_obj):
+    """Kind of work the conversation has been about so far, so a short follow-up keeps its context."""
+    previous = None
+    for message in [m for m in chat_obj["messages"] if m["role"] == "user"][-4:]:
+        found = arbiter.classify(message["content"], previous)
+        if found["confidence"] >= 0.6 or previous is None:
+            previous = found["type"]
+    return previous
 
 
 def _validate_choice(ctx, model_ref):
@@ -173,7 +214,7 @@ def _validate_choice(ctx, model_ref):
     return _resolve_model(ctx, model_ref)
 
 
-def fallback_candidates(ctx, primary_ref, enabled=True):
+def fallback_candidates(ctx, primary_ref, enabled=True, task=None):
     """[primary] + up to MAX_FALLBACKS other models, local first, then free. Never a model that may cost money,
     and never a cloud service the user has not consented to."""
     refs = [primary_ref]
@@ -185,10 +226,13 @@ def fallback_candidates(ctx, primary_ref, enabled=True):
             continue
         for model in entry.get("models", []):
             ref = name + "/" + model
-            tier = usage.tier_of(entry["data_policy"], model)
+            tier = usage.tier_for(entry, model)
             if ref != primary_ref and tier in ("local", "free"):
                 (local if tier == "local" else free).append(ref)
-    return refs + (local + free)[:MAX_FALLBACKS]
+    others = local + free
+    if task:        # auto mode: the next best FIT answers next, not merely the next local one
+        others = sorted(others, key=lambda r: (router._fit(r.partition("/")[2], task), 0 if r in local else 1))
+    return refs + others[:MAX_FALLBACKS]
 
 
 def _clean(error, provider):
@@ -213,7 +257,7 @@ def _record_usage(ctx, ref, provider, history, text, reported):
         prompt = usage.estimate_tokens(" ".join(m["content"] for m in history))
         completion = usage.estimate_tokens(text)
     try:
-        ctx.ledger.record(provider=name, model=model, tier=usage.tier_of(provider["data_policy"], model),
+        ctx.ledger.record(provider=name, model=model, tier=usage.tier_for(provider, model),
                           prompt_tokens=prompt, completion_tokens=completion, estimated=estimated)
     except OSError:
         pass                                   # a full disk must never break the chat itself
@@ -238,10 +282,11 @@ def _send(ctx, chat_id, body):
         if not isinstance(content, str) or not content.strip() or len(content) > MAX_CONTENT:
             raise ApiError(400, "메시지는 1~" + str(MAX_CONTENT) + "자여야 합니다.")
         content = content.strip()
+    task = None
     if model_ref == AUTO:
         asked = content if content is not None else next(
             (m["content"] for m in reversed(chat_obj["messages"]) if m["role"] == "user"), "")
-        model_ref = pick_auto(ctx, asked)
+        model_ref, task, _decision = pick_auto(ctx, asked, previous_type=_conversation_type(chat_obj))
 
     def events():
         if not ctx.claim(chat_id):
@@ -256,8 +301,11 @@ def _send(ctx, chat_id, body):
                 ctx.store.append(chat_id, "user", content)
             ctx.store.update(chat_id, model=selected)
             history = _history(ctx.store.get(chat_id))
-            yield "meta", {"model": model_ref, "auto": selected == AUTO}
-            refs, attempts, outcome, partial_error = fallback_candidates(ctx, model_ref, allow_fallback), [], None, ""
+            meta = {"model": model_ref, "auto": selected == AUTO}
+            if task:
+                meta.update(task=task["type"], level=task["level"], why=arbiter.explain(task, model_ref))
+            yield "meta", meta
+            refs, attempts, outcome, partial_error = fallback_candidates(ctx, model_ref, allow_fallback, task), [], None, ""
             for index, ref in enumerate(refs):
                 current.update(ref=ref, provider=None, reported={})
                 attempt_started = time.time()
@@ -317,12 +365,23 @@ def dispatch(ctx, method, path, body):
     try:
         if parts == ["digest"] and method == "POST":
             if body.get("model") == AUTO and isinstance(body.get("text"), str):
-                body = dict(body, model=pick_auto(ctx, body["text"][:3000]))      # 'auto' works for compression too
+                # compression is light work: a small model is enough, and the arbiter's verdict on the text is not needed
+                body = dict(body, model=pick_auto(ctx, body["text"][:3000], task={"type": "chat", "level": 1})[0])
             return Stream(digest.stream(
                 resolve=lambda ref: _resolve_model(ctx, ref),
                 candidates=lambda ref, enabled: fallback_candidates(ctx, ref, enabled),
                 chat_fn=ctx.chat_fn, ledger=ctx.ledger, body=body,
                 claim=lambda: ctx.claim("digest"), release=lambda: ctx.release("digest")))
+        if parts == ["settings"] and method == "POST":
+            if not isinstance(body.get("auto_add_models"), bool):
+                raise ApiError(400, "잘못된 설정입니다.")
+            return Json(200, {"settings": ctx.watch.set_setting("auto_add_models", body["auto_add_models"])})
+        if parts == ["models", "check"] and method == "POST":
+            ctx.info.refresh()                                   # the public catalog, at most once a day
+            return Json(200, ctx.watch.check(force=True))
+        if parts == ["news", "ack"] and method == "POST":
+            ctx.watch.ack()
+            return Json(200, {"ok": True})
         if parts == ["open-url"] and method == "POST":
             return Json(200, open_external(ctx, body.get("url")))
         if parts == ["usage"] and method == "GET":
@@ -356,7 +415,10 @@ def dispatch(ctx, method, path, body):
             if parts[2:] == ["send"] and method == "POST":
                 return _send(ctx, chat_id, body)
         if parts == ["onboard", "models"] and method == "POST":
-            return Json(200, {"models": setup_page.models_for_form(ctx.providers, _form(body), ctx.list_fn)})
+            listing = modelpick.curate(setup_page.models_for_form(ctx.providers, _form(body), ctx.list_fn))
+            # what each recommended model is and what it is good at, from the public catalog (when it knows the model)
+            listing["info"] = {m: d for m in listing["recommended"] for d in [ctx.info.describe(m)] if d}
+            return Json(200, listing)
         if parts == ["onboard", "test"] and method == "POST":
             return Json(200, setup_page.run_test(ctx.providers, _form(body), ctx.chat_fn))
         if parts == ["providers", "models"] and method == "POST":

@@ -46,6 +46,14 @@ def validate(name, entry):
         result["models"] = models
     if entry.get("consented") is not None:
         result["consented"] = bool(entry["consented"])
+    if entry.get("free_all"):
+        result["free_all"] = True            # every chat model of this service is free within its free-tier limits
+    match = entry.get("free_match")
+    if match:
+        if (not isinstance(match, list) or len(match) > 5
+                or any(not isinstance(m, str) or not 1 <= len(m) <= 40 for m in match)):
+            raise ValueError("free_match must be a short list of name fragments")
+        result["free_match"] = [m.lower() for m in match]
     accounts = entry.get("accounts")
     if accounts:
         if (not isinstance(accounts, list) or len(accounts) >= MAX_ACCOUNTS
@@ -95,7 +103,7 @@ class Providers:
     def add(self, name, **entry):
         data = self.load()
         previous = data.get(name, {})
-        for keep in ("models", "consented", "accounts"):        # re-registering must not forget these
+        for keep in ("models", "consented", "accounts", "free_all", "free_match"):        # re-registering must not forget these
             if keep not in entry and keep in previous:
                 entry[keep] = previous[keep]
         data[name] = validate(name, entry)
