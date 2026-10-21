@@ -11,6 +11,7 @@ JetAI Hub의 목적은 **개발 토큰 절약**입니다(`CLAUDE.md`의 프로�
 | 사용량 기록·자동 전환 | `usage.py`, `chat_api.py` | 등급(로컬/무료/유료)별 토큰 기록(추정 vs 서비스 보고), 429 시 로컬·무료 모델로만 자동 전환 |
 | 긴 글 압축(digest) | `digest.py`, 압축 탭, `python -m workshop.digest` | 긴 로그·문서를 무료/로컬 모델로 조각별 요약 후 합쳐 유료 모델에 넘길 토큰 절약. 유료 모델은 비용 확인 필요, 요약 부정확 경고 상시 표시 |
 | 서비스별 분당 요청 제한(rpm) | `ratelimit.py`, `onboard --rpm` | rpm을 넘기면 15초 이내는 기다리고, 더 길면 보내기 전에 막아 429와 쿼터 낭비를 피함(막힌 요청은 자동 전환 대상). 0이면 무제한 |
+| 첫 실행 환경 점검 | `envcheck.py`, `/api/v1/env`, 마법사 1단계 | Ollama 실행 여부·모델 수, WSL 유무(Windows), 파이썬 버전을 읽기 전용으로 확인해 안내(설치·시작·다운로드 없음). Ollama가 있으면 해당 카드를 추천 표시 |
 | 멀티 모델 보드 | `board.py`, `orchestrator.py`, `plan_board.py` | 공유 MD 문서로 여러 모델이 직렬/병렬 협업, 요청 한 줄로 보드 생성 |
 | 비용 안전장치 | `modelpolicy.py`, orchestrator 게이트 | 유료·구독 모델 기본 차단(`-free`, `:free`, 로컬만 허용), 클라우드는 명시적 동의 |
 | 일회용 worktree 코드 단계 | `worktree.py` | 코드 수정은 임시 worktree에서만, diff만 보고하고 커밋·병합 안 함 |

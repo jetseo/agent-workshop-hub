@@ -121,3 +121,10 @@
 | 드라이런, 바로가기 `-Native` 드라이런 | GitHub Windows 러너(PowerShell) | **통과** (커밋 `a2ac9c3`) | Windows **실기기 아님** |
 | `jetai.ps1`로 서버 시작 → `/app` 응답에 앱 화면 포함 → 종료 | GitHub Windows 러너, WSL 없음, Py3.11/3.12 | **통과** (커밋 `a2ac9c3`) | Windows **실기기 아님** |
 | Edge 앱 창 열기, 실제 서비스 연결, 한글 입력, 바로가기 실행 | 사용자 PC | **미검증** | |
+
+## 첫 실행 환경 점검 (2026-10-21)
+| 항목 | 환경 | 결과 | 비고 |
+|---|---|---|---|
+| `/api/v1/env`가 아무것도 바꾸지 않음, Ollama·WSL·OpenCode가 모두 없어도 오류 없이 보고 | 클라우드(Linux) | 통과 | 단위·HTTP 테스트 총 252개 |
+| 마법사 1단계 안내 문구(브라우저, 실제 CSP) | 클라우드(Linux, Chromium) | 통과 | e2e 53개 체크, 콘솔 오류 없음. Ollama 없음 상태만 확인 |
+| 실제 Ollama가 있는 PC에서 추천 표시, Windows에서 WSL 유무 감지 | 사용자 PC | **미검증** | |

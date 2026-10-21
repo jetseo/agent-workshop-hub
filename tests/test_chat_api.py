@@ -511,6 +511,26 @@ class RpmLimitTests(ApiBase):
         self.assertEqual(posts(), before)           # nothing was sent, so no 429 and no wasted quota
 
 
+class EnvApiTests(ApiBase):
+    def test_env_reports_what_is_found_without_changing_anything(self):
+        self.ctx.env_fn = lambda: {"os": "Windows", "ollama": {"running": False, "models": []}}
+        status, body = self.jcall("GET", "/env")
+        self.assertEqual((status, body["os"]), (200, "Windows"))
+        self.assertEqual(self.providers.load(), {})
+
+    def test_real_inspection_survives_everything_being_absent(self):
+        from workshop import envcheck
+        def boom(timeout=1):
+            raise OSError("no ollama")
+        result = envcheck.inspect(ollama_fn=boom, which=lambda name: None)
+        self.assertEqual(result["ollama"], {"running": False, "models": []})
+        self.assertFalse(result["wsl"]["available"])
+        self.assertFalse(result["opencode"])
+        found = envcheck.inspect(ollama_fn=lambda timeout=1: ["llama3.2:3b"], which=lambda name: "/x/" + name)
+        self.assertEqual(found["ollama"]["models"], ["llama3.2:3b"])
+        self.assertTrue(found["opencode"])
+
+
 class FallbackCandidateTests(unittest.TestCase):
     def test_candidates_never_include_paid_or_unconsented_models(self):
         from workshop.chat_api import fallback_candidates

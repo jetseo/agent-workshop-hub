@@ -554,6 +554,7 @@
     if (w.step === 1) wizStep1(card, w); else if (w.step === 2) wizStep2(card, w); else wizStep3(card, w);
     root.appendChild(h("div", { class: "card-wrap", style: "display:contents" }, card));
   }
+  async function loadEnv() { try { return await api("GET", "/env"); } catch (e) { return null; } }
   function wizStep1(card, w) {
     var items = state.catalog.map(function (c) {
       return h("button", { class: "svc", type: "button", "data-service": c.id, onclick: function () { w.service = c.id; w.step = 2; w.error = ""; renderWizard(); } },
@@ -561,6 +562,19 @@
     });
     items.push(h("button", { class: "svc", type: "button", "data-service": "custom", onclick: function () { w.service = "custom"; w.step = 2; w.error = ""; renderWizard(); } },
       h("b", { text: "직접 입력" }), h("span", { text: "OpenAI 호환 주소를 직접 지정" })));
+    var envBox = h("p", { class: "note", id: "w-env", text: "이 PC를 확인하는 중…" });
+    card.appendChild(envBox);
+    loadEnv().then(function (env) {
+      var node = $("w-env");
+      if (!node) return;
+      if (!env) { node.textContent = ""; return; }
+      var parts = [];
+      parts.push(env.ollama.running ? "Ollama 실행 중 (모델 " + env.ollama.models.length + "개) — 아래에서 Ollama를 고르면 토큰 없이 바로 쓸 수 있습니다."
+                                    : "Ollama는 감지되지 않았습니다(선택 사항). 클라우드 무료 서비스로 먼저 시작해도 됩니다.");
+      if (env.wsl.applicable) parts.push(env.wsl.available ? "WSL 사용 가능(터미널·코드 작업에 필요)." : "WSL 없음 — 채팅·압축·사용량은 WSL 없이 쓸 수 있습니다.");
+      node.textContent = parts.join(" ");
+      if (env.ollama.running) Array.prototype.forEach.call(document.querySelectorAll('.svc[data-service="ollama"]'), function (b) { b.classList.add("rec"); });
+    });
     card.appendChild(h("div", { class: "grid" }, items));
     card.appendChild(h("p", { class: "note", text: "처음이라면 무료 티어가 있는 서비스나 Ollama(내 PC)를 추천합니다. 무료 서비스는 입력이 학습에 쓰일 수 있고 한도가 자주 바뀝니다." }));
   }

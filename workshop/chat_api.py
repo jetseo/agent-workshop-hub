@@ -6,7 +6,7 @@ Sending to a cloud service additionally requires the consent recorded when it wa
 import re
 import threading
 
-from . import digest, setup_page, usage
+from . import digest, envcheck, setup_page, usage
 from .chat import chat, chat_stream, list_models
 from .chat_store import DEFAULT_TITLE, CHAT_ID, ChatStore
 from .usage import UsageLedger
@@ -34,10 +34,11 @@ class Stream:
 
 
 class Context:
-    def __init__(self, providers, store=None, chat_fn=chat, stream_fn=chat_stream, list_fn=list_models, ledger=None):
+    def __init__(self, providers, store=None, chat_fn=chat, stream_fn=chat_stream, list_fn=list_models, ledger=None, env_fn=envcheck.inspect):
         self.providers, self.store = providers, store or ChatStore()
         self.ledger = ledger or UsageLedger()
         self.chat_fn, self.stream_fn, self.list_fn = chat_fn, stream_fn, list_fn
+        self.env_fn = env_fn
         self.active = set()
         self._active_lock = threading.Lock()
 
@@ -227,6 +228,8 @@ def dispatch(ctx, method, path, body):
                 claim=lambda: ctx.claim("digest"), release=lambda: ctx.release("digest")))
         if parts == ["usage"] and method == "GET":
             return Json(200, usage.summary_with_savings(ctx.ledger))
+        if parts == ["env"] and method == "GET":
+            return Json(200, ctx.env_fn())
         if parts == ["state"] and method == "GET":
             return Json(200, _state(ctx))
         if parts == ["chats"]:
