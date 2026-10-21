@@ -31,12 +31,13 @@ if (-not (Get-Command wsl.exe -ErrorAction SilentlyContinue)) {
 $distros = @(& wsl.exe --list --quiet 2>&1)
 if ($LASTEXITCODE -ne 0) { throw "Unable to query WSL distributions (wsl.exe exit code $LASTEXITCODE). Run 'wsl --status' to check that WSL2 is enabled." }
 # wsl.exe output may contain NUL characters in Windows PowerShell.
-$names = @($distros | ForEach-Object { ($_ -replace [char]0, "").Trim() })
+$names = @($distros | ForEach-Object { ($_ -replace [char]0, "").Trim() } | Where-Object { $_ })
 if ($Distro -notin $names) {
     throw "WSL distro '$Distro' not found. Installed: $($names -join ', '). Re-run with -Distro <name> or install it with 'wsl --install -d $Distro'."
 }
 $path = (Resolve-Path -LiteralPath $launcher).Path
-$wslPath = (& wsl.exe -d $Distro -- wslpath -a $path).Trim()
+# wsl.exe hands the command to a Linux shell, which eats backslashes; wslpath accepts forward slashes.
+$wslPath = (& wsl.exe -d $Distro -- wslpath -a ($path.Replace('\', '/'))).Trim()
 if ($LASTEXITCODE -ne 0 -or -not $wslPath) {
     throw "Could not convert '$path' to a WSL path in distro '$Distro'. Check that the distro starts ('wsl -d $Distro -- echo ok')."
 }
