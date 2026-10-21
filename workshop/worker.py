@@ -27,7 +27,7 @@ def _beat(queue, job_id, stop):
         except Exception:
             pass
 
-def process_one(queue, *, allow_opencode=False, allow_comfyui=False):
+def process_one(queue, *, allow_opencode=False, allow_comfyui=False, max_running=None):
     if not (allow_opencode or allow_comfyui):
         raise PermissionError("Worker requires an explicit executor opt-in")
     # Claim only jobs with an enabled executor.
@@ -36,7 +36,7 @@ def process_one(queue, *, allow_opencode=False, allow_comfyui=False):
         enabled_kinds.append("code")
     if allow_comfyui:
         enabled_kinds.append("image")
-    job = queue.claim(kinds=enabled_kinds)
+    job = queue.claim(kinds=enabled_kinds, max_running=max_running)
     if job is None:
         return None
     stop_beat = threading.Event()
@@ -120,6 +120,7 @@ def main():
     parser.add_argument("--watch", action="store_true", help="Keep polling for new tasks")
     parser.add_argument("--recover-stale", action="store_true", help="Mark running jobs failed if their worker stopped heartbeating (>120s); live workers are untouched")
     parser.add_argument("--interval", type=float, default=3.0)
+    parser.add_argument("--max-running", type=int, default=None, help="Cap on jobs running at once across all workers sharing the database")
     args = parser.parse_args()
     if not (args.allow_opencode or args.allow_comfyui):
         parser.error("Pass --allow-opencode or --allow-comfyui after reviewing permissions")
@@ -135,7 +136,7 @@ def main():
     try:
         while True:
             outcome = process_one(queue, allow_opencode=args.allow_opencode,
-                                  allow_comfyui=args.allow_comfyui)
+                                  allow_comfyui=args.allow_comfyui, max_running=args.max_running)
             if outcome is not None:
                 print(json.dumps(outcome, ensure_ascii=False), flush=True)
             if not args.watch:
