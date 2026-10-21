@@ -162,3 +162,15 @@ GitHub Actions의 `JetAI-Hub-portable` 산출물(또는 `.\scripts\build-package
 - 키·대화는 `C:\Users\<이름>\.agent-workshop`에 저장되며 패키지 폴더를 지워도 남습니다.
 - 서명되지 않은 프로그램이라 Windows SmartScreen 경고가 나올 수 있습니다. 코드 서명은 아직 없습니다.
 - 검증 상태: CI에서 빌드 → 압축 해제 → 번들 파이썬으로 서버가 뜨는지만 확인합니다. 실제 PC는 **미검증**.
+
+## 안정성: 로그, 백업, 종료
+- **로그:** `~/.agent-workshop/logs/hub.log`(1MB씩 3개까지 순환). 요청 줄과 시작·종료만 기록하며 토큰·대화 내용·시작 키는 남기지 않습니다. 문제가 생기면 이 파일을 보여 주세요.
+- **백업/복원:**
+  ```bash
+  python -m workshop.backup export                    # jetai-backup-<날짜>.zip (서비스 목록, 대화, 사용량, 보드)
+  python -m workshop.backup export --include-secrets  # 저장한 키까지 포함(파일을 공유·동기화 폴더에 두지 마세요)
+  python -m workshop.backup import 백업.zip            # 이미 있는 파일은 덮어쓰지 않음(--force로 덮어쓰기)
+  ```
+  기본 백업에는 키(`secrets.json`)와 시작 키, 로그, 임시 worktree가 들어가지 않습니다. 복원할 때 키는 `--include-secrets`를 줘야 풀립니다. 백업 파일 안에 `..`나 절대 경로가 있으면 아무것도 쓰지 않고 거부합니다.
+- **중복 실행:** 같은 포트가 이미 쓰이면 "이미 실행 중일 수 있습니다" 안내를 보이고 종료 코드 2로 끝납니다(`jetai.ps1`은 시작 전에 먼저 확인).
+- **종료:** Ctrl+C, 창 닫기(`SIGBREAK`), `kill`(SIGTERM) 모두 서버를 정상 종료하고 로그에 `stop`을 남깁니다.

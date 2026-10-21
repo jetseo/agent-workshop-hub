@@ -5,6 +5,8 @@ import json
 import os
 import re
 import secrets
+import signal
+import sys
 import hashlib
 import hmac
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -13,6 +15,7 @@ from pathlib import Path
 from .adapters import find_opencode
 from urllib.parse import parse_qs, urlsplit, quote
 from .queue import Queue
+from . import applog
 
 PAGE = """<!doctype html><html lang="ko"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -81,7 +84,9 @@ def make_handler(queue, token, boards_root=None, providers=None, chat_fn=None, l
         def log_message(self, format, *args):
             # The one-time terminal entry key must not be echoed into logs.
             line = re.sub(r"(key=)[^&\s]+", r"\1***", format % args)
-            print("%s - - [%s] %s" % (self.address_string(), self.log_date_time_string(), line), flush=True)
+            line = "%s - - [%s] %s" % (self.address_string(), self.log_date_time_string(), line)
+            print(line, flush=True)
+            applog.write(line)
 
         def _json(self, status, payload):
             self._send(status, json.dumps(payload, ensure_ascii=False), "application/json; charset=utf-8",
@@ -368,8 +373,27 @@ def main():
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             handle.write(terminal_key)
         os.chmod(key_file, 0o600)
-    server = ThreadingHTTPServer(("127.0.0.1", args.port), make_handler(
-        Queue(args.db), token, terminal_key=terminal_key, terminal_cwd=str(Path(__file__).resolve().parent.parent)))
+    applog.setup()
+    try:
+        server = ThreadingHTTPServer(("127.0.0.1", args.port), make_handler(
+            Queue(args.db), token, terminal_key=terminal_key, terminal_cwd=str(Path(__file__).resolve().parent.parent)))
+    except OSError as error:
+        if error.errno in (98, 10048, 48) or "Address already in use" in str(error):
+            print("포트 %d를 이미 다른 프로그램이 쓰고 있습니다. JetAI Hub가 이미 실행 중일 수 있습니다: "
+                  "http://127.0.0.1:%d/app 을 열어 보세요. 아니라면 --port 로 다른 포트를 지정하세요." % (args.port, args.port),
+                  file=sys.stderr, flush=True)
+            raise SystemExit(2)
+        raise
+    applog.write("start port=%d terminal=%s" % (args.port, "on" if terminal_key else "off"))
+    # A termination request (closing the window, `kill`) should stop the server cleanly like Ctrl+C does.
+    def _stop(*_):
+        raise KeyboardInterrupt
+    for name in ("SIGTERM", "SIGBREAK"):
+        if hasattr(signal, name):
+            try:
+                signal.signal(getattr(signal, name), _stop)
+            except (ValueError, OSError):
+                pass
     print(f"Dashboard: http://127.0.0.1:{args.port}/", flush=True)
     print(f"Setup (connect a service and test a prompt): http://127.0.0.1:{args.port}/setup", flush=True)
     print(f"App window (tabs): http://127.0.0.1:{args.port}/app", flush=True)
@@ -384,6 +408,7 @@ def main():
         pass
     finally:
         server.server_close()
+        applog.write("stop")
 
 if __name__ == "__main__":
     main()
