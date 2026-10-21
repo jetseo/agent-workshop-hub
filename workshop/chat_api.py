@@ -17,6 +17,7 @@ from . import arbiter, router
 from .engine import Engine, EngineError
 from .modelinfo import ModelInfo
 from .modelwatch import ModelWatch
+from .remote import RemoteControl, TelegramError
 from .servicefeed import ServiceFeed
 from .router import route_task
 from .runstats import RunStats
@@ -60,6 +61,7 @@ class Context:
         self.watch = ModelWatch(providers, list_fn, info=self.info)
         self.feed = ServiceFeed(providers.path.parent / "service-feed.json", builtin=setup_page.CATALOG)
         setup_page.set_extra(self.feed.catalog_entries())             # services found earlier by the daily list
+        self.remote = RemoteControl(self)                            # phone control; the server attaches the job queue and starts it
         self.engine = Engine(providers.path.parent / "engine", providers)      # built-in local engine (llama.cpp), off until installed
         self.active = set()
         self._active_lock = threading.Lock()
@@ -100,6 +102,27 @@ def open_external(ctx, url):
         raise ApiError(400, "열 수 없는 주소입니다.")
     ctx.open_url_fn(url)
     return {"ok": True}
+
+
+def _remote_api(ctx, method, rest, body):
+    """Phone control through Telegram. The token is only ever stored in its own private file, never returned."""
+    remote = ctx.remote
+    try:
+        if not rest and method == "GET":
+            return remote.status()
+        if method == "POST" and rest == ["telegram"]:
+            token = body.get("token")
+            if not isinstance(token, str):
+                raise ApiError(400, "봇 토큰을 붙여 넣으세요.")
+            return remote.setup_telegram(token)
+        if method == "POST" and rest == ["repair"]:
+            return remote.repair()
+        if method == "POST" and rest == ["disconnect"]:
+            remote.disconnect()
+            return {"ok": True}
+    except TelegramError as error:
+        raise ApiError(400, str(error))
+    raise LookupError("Unknown remote route")
 
 
 def _engine_api(ctx, method, rest, body):
@@ -422,6 +445,8 @@ def dispatch(ctx, method, path, body):
             if len(keys) != 1 or not isinstance(body[keys[0]], bool):
                 raise ApiError(400, "잘못된 설정입니다.")
             return Json(200, {"settings": ctx.watch.set_setting(keys[0], body[keys[0]])})
+        if parts and parts[0] == "remote":
+            return Json(200, _remote_api(ctx, method, parts[1:], body))
         if parts and parts[0] == "engine":
             return Json(200, _engine_api(ctx, method, parts[1:], body))
         if parts == ["catalog", "refresh"] and method == "POST":
