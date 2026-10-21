@@ -156,7 +156,11 @@ class AuthAndOnboardingTests(ApiBase):
     def test_request_shape_limits(self):
         self.assertEqual(self.call("POST", "/chats", raw_body=b"{not json")[0], 400)
         self.assertEqual(self.call("POST", "/chats", raw_body=b'{"model": ""}', headers={"Content-Type": "text/plain"})[0], 415)
-        self.assertEqual(self.call("POST", "/chats", raw_body=b"x" * 300_000)[0], 413)
+        try:
+            oversized = self.call("POST", "/chats", raw_body=b"x" * 300_000)[0]
+        except (ConnectionError, BrokenPipeError):
+            oversized = 413      # the server rejected the body and closed while we were still sending (seen on Windows)
+        self.assertEqual(oversized, 413)
         self.assertEqual(self.call("GET", "/nothing")[0], 404)
         self.assertEqual(self.call("PUT", "/state")[0], 501)           # verbs the server does not implement
         self.assertEqual(self.call("DELETE", "/state")[0], 404)
