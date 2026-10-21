@@ -57,3 +57,87 @@ class TestStaleRecovery(unittest.TestCase):
             db.commit(); db.close()
             q = Queue(path)
             self.assertEqual(q.recover(stale_after=120), 1)
+
+
+class TestConcurrencyAndSafety(unittest.TestCase):
+    def make(self, d):
+        return Queue(Path(d) / "tasks.db")
+
+    def test_concurrent_claims_never_double_run_a_job(self):
+        import threading
+        with tempfile.TemporaryDirectory() as d:
+            q = self.make(d)
+            ids = {q.add("code", "job %d" % i) for i in range(12)}
+            claimed, errors, lock = [], [], threading.Lock()
+
+            def worker():
+                try:
+                    while True:
+                        job = Queue(q.path).claim()
+                        if job is None:
+                            return
+                        with lock:
+                            claimed.append(job["id"])
+                except Exception as error:  # surfaced below
+                    errors.append(error)
+
+            threads = [threading.Thread(target=worker) for _ in range(6)]
+            for t in threads: t.start()
+            for t in threads: t.join(60)
+            self.assertEqual(errors, [])
+            self.assertEqual(sorted(claimed), sorted(ids))  # each exactly once
+            self.assertTrue(all(j["attempts"] == 1 and j["state"] == "running" for j in q.list()))
+
+    def test_pending_approval_is_never_claimed_until_authorized(self):
+        with tempfile.TemporaryDirectory() as d:
+            q = self.make(d)
+            task = q.add("code", "needs approval", require_approval=True)
+            self.assertIsNone(q.claim())
+            q.authorize(task)
+            self.assertEqual(q.claim()["id"], task)
+
+    def test_late_finish_cannot_resurrect_a_recovered_job(self):
+        with tempfile.TemporaryDirectory() as d:
+            q = self.make(d)
+            task = q.add("code", "slow")
+            q.claim()
+            self.assertEqual(q.recover(), 1)
+            with self.assertRaises(ValueError):
+                q.finish(task, {"ok": True})
+            q.heartbeat(task)  # must not flip a failed job back to running
+            job = q.list()[0]
+            self.assertEqual(job["state"], "failed")
+            self.assertIn("Stale", job["result"])
+            self.assertIsNone(q.claim())  # recovered jobs are never replayed automatically
+
+    def test_recovery_only_touches_running_jobs(self):
+        with tempfile.TemporaryDirectory() as d:
+            q = self.make(d)
+            queued = q.add("code", "queued")
+            waiting = q.add("code", "waiting", require_approval=True)
+            reviewed = q.add("qa", "reviewed")
+            q.claim(kinds=["qa"])
+            q.finish(reviewed, {"ok": True})
+            self.assertEqual(q.recover(), 0)
+            self.assertEqual(q.recover(stale_after=0), 0)
+            states = {j["id"]: j["state"] for j in q.list()}
+            self.assertEqual(states, {queued: "queued", waiting: "pending_approval", reviewed: "review"})
+
+    def test_job_without_heartbeat_is_stale(self):
+        with tempfile.TemporaryDirectory() as d:
+            q = self.make(d)
+            task = q.add("code", "legacy row")
+            q.claim()
+            with q._db() as db:
+                db.execute("UPDATE jobs SET heartbeat=NULL WHERE id=?", (task,))
+            self.assertEqual(q.recover(stale_after=120), 1)
+
+    def test_defer_does_not_consume_an_attempt(self):
+        with tempfile.TemporaryDirectory() as d:
+            q = self.make(d)
+            task = q.add("code", "deferred")
+            q.claim()
+            q.defer(task)
+            self.assertEqual((q.list()[0]["state"], q.list()[0]["attempts"]), ("queued", 0))
+            with self.assertRaises(ValueError):
+                q.defer(task)  # no longer running

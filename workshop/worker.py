@@ -40,8 +40,8 @@ def process_one(queue, *, allow_opencode=False, allow_comfyui=False):
     if job is None:
         return None
     stop_beat = threading.Event()
-    threading.Thread(target=_beat, args=(queue, job["id"], stop_beat), daemon=True).start()
     try:
+        threading.Thread(target=_beat, args=(queue, job["id"], stop_beat), daemon=True).start()
         return _execute(queue, job, allow_opencode, allow_comfyui)
     finally:
         stop_beat.set()
