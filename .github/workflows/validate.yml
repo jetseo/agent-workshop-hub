@@ -81,6 +81,38 @@ jobs:
             Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match "workshop.dashboard" } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
             Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
           }
+      - name: Portable package build and run (Windows, Python 3.12 job only)
+        if: runner.os == 'Windows' && matrix.python == '3.12'
+        shell: pwsh
+        run: |
+          ./scripts/build-package.ps1 -DryRun
+          ./scripts/build-package.ps1 -OutDir ./dist
+          $dest = Join-Path $env:RUNNER_TEMP "unzipped"
+          Expand-Archive -LiteralPath ./dist/JetAI-Hub-portable.zip -DestinationPath $dest
+          $root = Join-Path $dest "JetAI-Hub-portable"
+          Get-Content (Join-Path $root "PACKAGE.txt")
+          $p = Start-Process pwsh -ArgumentList "-NoProfile","-File",(Join-Path $root "jetai.ps1"),"-NoBrowser","-Port","8798" -PassThru -WindowStyle Hidden
+          try {
+            $body = $null
+            for ($i = 0; $i -lt 60 -and -not $body; $i++) {
+              try { $body = (Invoke-WebRequest -Uri "http://127.0.0.1:8798/app" -UseBasicParsing -TimeoutSec 2).Content } catch { Start-Sleep -Milliseconds 500 }
+            }
+            if (-not $body) { throw "the portable package did not serve /app" }
+            if ($body -notmatch "JetAI Hub") { throw "/app did not render the app shell" }
+            $server = Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match "workshop.dashboard" } | Select-Object -First 1
+            if (-not $server -or $server.ExecutablePath -notlike "*JetAI-Hub-portable*python*python.exe") { throw "the server did not run on the bundled Python: $($server.ExecutablePath)" }
+            Write-Host "portable package ran on its bundled Python: $($server.ExecutablePath)"
+          } finally {
+            Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match "workshop.dashboard" } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+            Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+          }
+      - name: Upload portable package
+        if: runner.os == 'Windows' && matrix.python == '3.12'
+        uses: actions/upload-artifact@v4
+        with:
+          name: JetAI-Hub-portable
+          path: dist/JetAI-Hub-portable.zip
+          retention-days: 7
       - name: Compile modules
         run: python -m compileall -q workshop tests
       - name: Unit and local HTTP integration tests

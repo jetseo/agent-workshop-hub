@@ -10,6 +10,9 @@ $ErrorActionPreference = "Stop"
 if (-not (Test-Path -LiteralPath (Join-Path $PSScriptRoot "workshop/dashboard.py"))) { throw "Missing workshop/dashboard.py next to jetai.ps1" }
 
 function Find-Python {
+    # A portable package ships its own interpreter next to this script; prefer it over anything installed.
+    $bundled = Join-Path $PSScriptRoot "python/python.exe"
+    if (Test-Path -LiteralPath $bundled) { return @{ Exe = $bundled; Extra = @() } }
     # Try the py launcher first, then python/python3. Each candidate must really run and be 3.10+:
     # the Microsoft Store "python.exe" stub exists on PATH but only opens the Store.
     $candidates = @(@("py", "-3"), @("python"), @("python3"))
