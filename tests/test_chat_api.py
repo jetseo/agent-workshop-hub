@@ -13,6 +13,7 @@ from workshop.chat_store import ChatStore
 from workshop.dashboard import make_handler
 from workshop.providers import Providers
 from workshop.queue import Queue
+from workshop.usage import UsageLedger
 
 CSRF = "csrf-for-chat-tests"
 SECRET = "sk-test-SECRETKEY-1234567890"
@@ -42,8 +43,10 @@ class MockOpenAI(BaseHTTPRequestHandler):
         body = json.loads(self.rfile.read(int(self.headers["Content-Length"])).decode())
         self.server.requests.append(("POST", self.path, self.headers.get("Authorization"), body))
         model = body["model"]
-        if model == "ratelimit":
+        if model.startswith("ratelimit"):
             return self._json(429, {"error": {"message": "slow down"}})
+        if model == "badopt" and "stream_options" in body:
+            return self._json(400, {"error": {"message": "unknown field stream_options"}})
         reply = "Echo: " + body["messages"][-1]["content"]
         if not body.get("stream"):
             return self._json(200, {"choices": [{"message": {"content": reply}}]})
@@ -57,6 +60,9 @@ class MockOpenAI(BaseHTTPRequestHandler):
                 self.wfile.write(("data: " + json.dumps(chunk) + "\n\n").encode())
                 self.wfile.flush()
                 time.sleep(0.15 if model == "slow" else 0.005)
+            if (body.get("stream_options") or {}).get("include_usage") and model != "nousage":
+                usage = {"choices": [], "usage": {"prompt_tokens": 11, "completion_tokens": 7}}
+                self.wfile.write(("data: " + json.dumps(usage) + "\n\n").encode())
             if model == "midfail":
                 self.wfile.write(b'data: {"error": {"message": "upstream exploded"}}\n\n')
             self.wfile.write(b"data: [DONE]\n\n")
@@ -80,7 +86,8 @@ class ApiBase(unittest.TestCase):
         self.addCleanup(lambda: (self.mock.shutdown(), self.mock.server_close()))
         self.mock_url = "http://127.0.0.1:%d/v1" % self.mock.server_port
         self.providers = Providers(d / "providers.json")
-        self.ctx = Context(self.providers, ChatStore(d / "chats"))
+        self.ledger = UsageLedger(d / "usage.jsonl")
+        self.ctx = Context(self.providers, ChatStore(d / "chats"), ledger=self.ledger)
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(
             Queue(d / "q.db"), CSRF, str(d / "boards"), providers=self.providers, api_ctx=self.ctx))
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
@@ -229,7 +236,7 @@ class ChatFlowTests(ApiBase):
 
     def test_provider_errors_are_reported_and_the_question_is_kept(self):
         chat_id = self.new_chat("mock/ratelimit")
-        status, events = self.sse(chat_id, {"content": "hello"})
+        status, events = self.sse(chat_id, {"content": "hello", "fallback": False})
         self.assertEqual(events[-1][0], "error")
         self.assertIn("429", events[-1][1]["message"])
         chat = self.jcall("GET", "/chats/" + chat_id)[1]
@@ -273,6 +280,172 @@ class ChatFlowTests(ApiBase):
         self.assertIn("tok0", chat["messages"][1]["content"])
         self.assertEqual(self.ctx.active, set())                                  # the lock was released
         self.assertEqual(self.sse(self.new_chat(), {"content": "again"})[1][-1][0], "done")
+
+
+class UsageTests(ApiBase):
+    def setUp(self):
+        super().setUp()
+        self.onboard()
+        self.ledger = UsageLedger(self.ledger.path)
+
+    def summary(self):
+        return self.jcall("GET", "/usage")[1]
+
+    def test_service_reported_numbers_are_recorded_by_tier(self):
+        self.sse(self.new_chat(), {"content": "hi"})
+        s = self.summary()
+        self.assertEqual(s["totals"]["local"], {"requests": 1, "tokens": 18})      # 11 prompt + 7 completion, as reported
+        self.assertEqual(s["totals"]["free"]["tokens"] + s["totals"]["other"]["tokens"], 0)
+        self.assertEqual(s["estimated_share"], 0.0)
+        self.assertEqual(s["free_share"], 1.0)
+        self.assertEqual(s["by_model"][0]["model"], "mock/demo-model")
+
+    def test_estimates_are_flagged_when_the_service_reports_nothing(self):
+        self.sse(self.new_chat("mock/nousage"), {"content": "안녕하세요 오늘 날씨가 어떤가요"})
+        s = self.summary()
+        self.assertGreater(s["totals"]["local"]["tokens"], 5)
+        self.assertEqual(s["estimated_share"], 1.0)
+
+    def test_server_that_rejects_stream_options_still_works(self):
+        status, events = self.sse(self.new_chat("mock/badopt"), {"content": "hi"})
+        self.assertEqual(events[-1][0], "done")
+        posts = [r[3] for r in self.mock.requests if r[0] == "POST" and r[3]["model"] == "badopt"]
+        self.assertEqual(len(posts), 2)
+        self.assertIn("stream_options", posts[0])
+        self.assertNotIn("stream_options", posts[1])
+
+    def test_stopped_answers_are_counted_too(self):
+        chat_id = self.new_chat("mock/slow")
+        sock = socket.create_connection(("127.0.0.1", self.port), timeout=10)
+        body = json.dumps({"content": "go"}).encode()
+        sock.sendall(("POST /api/v1/chats/%s/send HTTP/1.1\r\nHost: 127.0.0.1:%d\r\nX-CSRF-Token: %s\r\n"
+                      "Content-Type: application/json\r\nContent-Length: %d\r\n\r\n" % (chat_id, self.port, CSRF, len(body))).encode() + body)
+        seen = b""
+        while b"tok2" not in seen:
+            seen += sock.recv(4096)
+        sock.close()
+        for _ in range(60):
+            if self.summary()["totals"]["local"]["requests"]:
+                break
+            time.sleep(0.1)
+        s = self.summary()
+        self.assertEqual(s["totals"]["local"]["requests"], 1)
+        self.assertEqual(s["estimated_share"], 1.0)
+
+    def test_tier_rules(self):
+        from workshop.usage import tier_of
+        self.assertEqual(tier_of("local", "anything"), "local")
+        self.assertEqual(tier_of("cloud-may-train", "x-free"), "free")
+        self.assertEqual(tier_of("cloud-may-train", "meta/llama:free"), "free")
+        self.assertEqual(tier_of("cloud-may-train", "gpt-big"), "other")
+        self.assertEqual(tier_of("unknown", "free-ish"), "other")
+
+    def test_ledger_stores_no_text_and_is_private(self):
+        self.sse(self.new_chat(), {"content": "아주 비밀스러운 질문입니다"})
+        content = self.ledger.path.read_text(encoding="utf-8")
+        self.assertNotIn("비밀", content)
+        self.assertNotIn("Echo", content)
+        if __import__("os").name == "posix":
+            import os, stat
+            self.assertEqual(stat.S_IMODE(os.stat(self.ledger.path).st_mode), 0o600)
+
+    def test_usage_page_renders_and_escapes(self):
+        self.ledger.record(provider="p", model="<script>alert(1)</script>", tier="other", prompt_tokens=5,
+                           completion_tokens=5, estimated=False)
+        conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+        conn.request("GET", "/usage")
+        page = conn.getresponse().read().decode("utf-8")
+        self.assertIn("사용량", page)
+        self.assertIn("&lt;script&gt;", page)
+        self.assertNotIn("<script>alert", page)
+
+    def test_ledger_windows_corrupt_lines_and_estimates(self):
+        from workshop.usage import estimate_tokens
+        now = 1_800_000_000
+        self.ledger.record(provider="p", model="old", tier="free", prompt_tokens=100, completion_tokens=0, estimated=False, when=now - 40 * 86400)
+        self.ledger.record(provider="p", model="new", tier="free", prompt_tokens=1, completion_tokens=2, estimated=False, when=now)
+        with open(self.ledger.path, "a", encoding="utf-8") as handle:
+            handle.write("{broken\n")
+        s = self.ledger.summary(days=30, now=now)
+        self.assertEqual(s["totals"]["free"], {"requests": 1, "tokens": 3})          # 40-day-old row is outside the window
+        self.assertEqual(estimate_tokens(""), 0)
+        self.assertEqual(estimate_tokens("abcd"), 1)
+        self.assertGreater(estimate_tokens("가나다라마바사"), estimate_tokens("abcdefg"))
+
+
+class FallbackTests(ApiBase):
+    def setUp(self):
+        super().setUp()
+        self.onboard()
+        for model in ("ratelimit", "ratelimit-free", "demo-free:free"):
+            self.providers.add_model("mock", model)
+
+    def deltas(self, events):
+        return "".join(e[1]["t"] for e in events if e[0] == "delta")
+
+    def test_rate_limited_model_falls_back_to_another_free_or_local_model(self):
+        chat_id = self.new_chat("mock/ratelimit")
+        status, events = self.sse(chat_id, {"content": "ping"})
+        names = [e[0] for e in events]
+        self.assertIn("notice", names)
+        notice = [e[1] for e in events if e[0] == "notice"][0]
+        self.assertIn("429", notice["message"])
+        self.assertTrue(notice["model"].startswith("mock/"))
+        self.assertNotEqual(notice["model"], "mock/ratelimit")
+        self.assertEqual(names[-1], "done")
+        served = events[-1][1]["model"]
+        self.assertEqual(served, notice["model"])
+        self.assertEqual(self.deltas(events).strip(), "Echo: ping")
+        chat = self.jcall("GET", "/chats/" + chat_id)[1]
+        self.assertEqual(chat["messages"][-1]["model"], served)                     # the UI can say who answered
+        s = self.jcall("GET", "/usage")[1]
+        self.assertEqual([m["model"] for m in s["by_model"]], [served])          # usage is booked to the model that served it
+
+    def test_fallback_can_be_switched_off(self):
+        status, events = self.sse(self.new_chat("mock/ratelimit"), {"content": "ping", "fallback": False})
+        self.assertNotIn("notice", [e[0] for e in events])
+        self.assertEqual(events[-1][0], "error")
+        self.assertIn("429", events[-1][1]["message"])
+
+    def test_no_switch_after_part_of_the_answer_was_shown(self):
+        status, events = self.sse(self.new_chat("mock/midfail"), {"content": "x"})
+        names = [e[0] for e in events]
+        self.assertNotIn("notice", names)
+        self.assertEqual(names[-1], "error")
+        self.assertGreater(names.count("delta"), 0)
+
+    def test_every_failure_is_reported_when_nothing_works(self):
+        # only rate-limited models are registered, so the primary and its one candidate both fail
+        self.providers.add("mock", base_url=self.mock_url, data_policy="local", models=["ratelimit", "ratelimit-free"])
+        chat_id = self.new_chat("mock/ratelimit")
+        status, events = self.sse(chat_id, {"content": "again"})
+        notices = [e for e in events if e[0] == "notice"]
+        self.assertEqual(len(notices), 1)
+        self.assertEqual(events[-1][0], "error")
+        self.assertIn("모든 모델이 실패", events[-1][1]["message"])
+        self.assertIn("mock/ratelimit:", events[-1][1]["message"])
+        self.assertIn("mock/ratelimit-free:", events[-1][1]["message"])
+        chat = self.jcall("GET", "/chats/" + chat_id)[1]
+        self.assertEqual([m["role"] for m in chat["messages"]], ["user"])           # the question is kept for a retry
+
+
+class FallbackCandidateTests(unittest.TestCase):
+    def test_candidates_never_include_paid_or_unconsented_models(self):
+        from workshop.chat_api import fallback_candidates
+        with tempfile.TemporaryDirectory() as d:
+            providers = Providers(Path(d) / "p.json")
+            providers.add("loc", base_url="http://127.0.0.1:1/v1", data_policy="local", models=["a", "b-free"])
+            providers.add("cc", base_url="https://c.example.com/v1", data_policy="cloud-may-train", consented=True,
+                          models=["x-free", "y", "z:free"])
+            providers.add("nc", base_url="https://n.example.com/v1", data_policy="cloud-may-train", models=["n-free"])
+            ctx = Context(providers, ChatStore(Path(d) / "chats"), ledger=UsageLedger(Path(d) / "u.jsonl"))
+            refs = fallback_candidates(ctx, "cc/y")
+            self.assertEqual(refs[0], "cc/y")
+            self.assertEqual(refs[1:], ["loc/a", "loc/b-free", "cc/x-free"])      # local first, capped at 3
+            self.assertNotIn("nc/n-free", refs)                                  # no consent
+            self.assertNotIn("cc/y", refs[1:])                                   # the paid-looking model is only ever the primary
+            self.assertEqual(fallback_candidates(ctx, "cc/y", enabled=False), ["cc/y"])
+            self.assertNotIn("cc/z:free", refs)                                  # cap reached, still never a non-free model
 
 
 class StreamParserTests(unittest.TestCase):

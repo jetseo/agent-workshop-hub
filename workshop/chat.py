@@ -37,7 +37,7 @@ def _open(request, timeout):
         raise RuntimeError("Provider unreachable: " + str(error.reason)[:200]) from None
 
 
-def _chat_request(provider, model, messages, max_tokens, stream):
+def _chat_request(provider, model, messages, max_tokens, stream, include_usage=False):
     headers = {"Content-Type": "application/json"}
     key = _key(provider)
     if key:
@@ -45,6 +45,8 @@ def _chat_request(provider, model, messages, max_tokens, stream):
     payload = {"model": model, "messages": messages, "max_tokens": max_tokens}
     if stream:
         payload["stream"] = True
+        if include_usage:
+            payload["stream_options"] = {"include_usage": True}   # ask for real token counts
     return urllib.request.Request(provider["base_url"] + "/chat/completions", data=json.dumps(payload).encode(),
                                   headers=headers, method="POST")
 
@@ -58,9 +60,20 @@ def chat(provider, model, messages, *, timeout=120, max_tokens=2000):
         raise RuntimeError("Unexpected provider response format") from None
 
 
-def chat_stream(provider, model, messages, *, timeout=120, max_tokens=2048):
-    """Yield text deltas from an OpenAI-style server-sent-events stream."""
-    with _open(_chat_request(provider, model, messages, max_tokens, True), timeout) as response:
+def chat_stream(provider, model, messages, *, timeout=120, max_tokens=2048, usage=None):
+    """Yield text deltas from an OpenAI-style server-sent-events stream.
+
+    If `usage` (a dict) is given it is filled with prompt_tokens/completion_tokens when the service reports them."""
+    response = None
+    for include in (True, False):
+        try:
+            response = _open(_chat_request(provider, model, messages, max_tokens, True, include_usage=include), timeout)
+            break
+        except RuntimeError as error:
+            if include and "HTTP 400" in str(error):      # some servers reject stream_options: retry without it
+                continue
+            raise
+    with response:
         for raw in response:
             line = raw.decode("utf-8", "replace").strip()
             if not line.startswith("data:"):
@@ -72,11 +85,18 @@ def chat_stream(provider, model, messages, *, timeout=120, max_tokens=2048):
                 event = json.loads(payload)
             except ValueError:
                 continue
-            if isinstance(event, dict) and event.get("error"):
+            if not isinstance(event, dict):
+                continue
+            if event.get("error"):
                 detail = event["error"]
                 raise RuntimeError("Provider error: " + str(detail.get("message") if isinstance(detail, dict) else detail)[:200])
-            choices = event.get("choices") if isinstance(event, dict) else None
-            delta = ((choices or [{}])[0].get("delta") or {}).get("content") if choices else None
+            reported = event.get("usage")
+            if usage is not None and isinstance(reported, dict):
+                for key in ("prompt_tokens", "completion_tokens"):
+                    if isinstance(reported.get(key), int) and reported[key] >= 0:
+                        usage[key] = reported[key]
+            choices = event.get("choices")
+            delta = ((choices[0] or {}).get("delta") or {}).get("content") if choices else None
             if isinstance(delta, str) and delta:
                 yield delta
 

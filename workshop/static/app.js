@@ -2,8 +2,8 @@
   "use strict";
   var body = document.body, CSRF = body.dataset.csrf, TERM = body.dataset.terminal;
   var state = { providers: [], catalog: [], onboarded: false, chats: [], chat: null, model: "",
-                view: "chat", streaming: null, wiz: null };
-  var VIEWS = ["chat", "settings", "tasks", "boards", "terminal"];
+                view: "chat", streaming: null, wiz: null, fallback: store("fallback") !== "0" };
+  var VIEWS = ["chat", "settings", "tasks", "boards", "usage", "terminal"];
   var SUGGESTIONS = ["이 프로젝트의 빠른 시작 가이드를 5줄로 요약해줘",
                      "파이썬으로 CSV 파일을 읽어서 열별 합계를 구하는 코드를 작성해줘",
                      "다음 문장을 자연스러운 영어로 번역해줘: 오늘 회의는 3시에 시작합니다.",
@@ -123,7 +123,15 @@
     var b = $("theme");
     b.textContent = t === "dark" ? "\u2600" : "\u263E";               // sun in dark mode, moon in light mode
     b.title = b.ariaLabel = t === "dark" ? "밝은 테마로 전환" : "어두운 테마로 전환";
+    syncFrames();
   }
+  function syncFrames() {          // framed pages that support themes (the usage view) follow the app theme
+    Array.prototype.forEach.call(document.querySelectorAll("iframe.view"), function (f) {
+      try { if (f.contentDocument && f.contentDocument.documentElement) f.contentDocument.documentElement.dataset.theme = document.documentElement.dataset.theme; }
+      catch (e) { /* cross-origin or not loaded yet */ }
+    });
+  }
+  Array.prototype.forEach.call(document.querySelectorAll("iframe.view"), function (f) { f.addEventListener("load", syncFrames); });
   applyTheme(store("theme") || (window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"));
   $("theme").addEventListener("click", function () { applyTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark"); });
   function setSide(open) {
@@ -167,6 +175,18 @@
     pickDefaultModel(); renderModelBtn(); renderWelcome();
   }
   async function loadChats() { state.chats = (await api("GET", "/chats")).chats; pickDefaultModel(); renderChats(); renderModelBtn(); }
+
+  /* ---------- usage chip ---------- */
+  function fmt(n) { return n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? (n / 1e3).toFixed(1) + "k" : String(n); }
+  async function loadUsage() {
+    try {
+      var u = await api("GET", "/usage"), t = u.today, chip = $("usage-chip");
+      var cheap = t.local.tokens + t.free.tokens, other = t.other.tokens;
+      chip.hidden = !(cheap || other);
+      chip.textContent = "오늘 무료·로컬 " + fmt(cheap) + " · 그 밖 " + fmt(other) + " 토큰";
+      chip.title = "내 PC나 -free/:free 모델이 처리한 토큰과 그 밖의 모델이 처리한 토큰. 사용량 탭에서 자세히 볼 수 있습니다.";
+    } catch (e) { /* the chip is optional */ }
+  }
 
   /* ---------- sidebar chat list ---------- */
   function groupName(ts) {
@@ -224,7 +244,7 @@
     Array.prototype.forEach.call(document.querySelectorAll(".side-nav [data-view]"), function (b) { b.classList.toggle("active", b.dataset.view === name); });
     $("modelbtn").parentNode.style.visibility = name === "chat" ? "visible" : "hidden";
     if (name === "terminal") startTerminal();
-    if (name === "chat") loadState();
+    if (name === "chat") { loadState(); loadUsage(); }
     if (window.innerWidth <= 760) setSide(false);
   }
   Array.prototype.forEach.call(document.querySelectorAll(".side-nav [data-view]"), function (b) { b.addEventListener("click", function () { showView(b.dataset.view); }); });
@@ -256,23 +276,25 @@
     if (force || s.scrollHeight - s.scrollTop - s.clientHeight < 140) s.scrollTop = s.scrollHeight;
   }
   function typing() { return h("span", { class: "typing", "aria-label": "답변 작성 중" }, h("b"), h("b"), h("b")); }
-  function fillActions(actions, getText, withRegen) {
+  function fillActions(actions, getText, withRegen, modelRef) {
     actions.textContent = "";
     actions.appendChild(h("button", { type: "button", text: "복사", onclick: function () { copyText(getText()); } }));
     if (withRegen) actions.appendChild(h("button", { type: "button", text: "다시 생성", "data-regen": "1", onclick: function () { regenerate(); } }));
+    if (modelRef) actions.appendChild(h("span", { class: "who", "data-model": modelRef, title: "이 답변을 만든 모델", text: modelRef }));
   }
-  function assistantNode(content, withRegen) {
-    var md = h("div", { class: "md" }), actions = h("div", { class: "actions" });
+  function assistantNode(content, withRegen, modelRef) {
+    var md = h("div", { class: "md" }), actions = h("div", { class: "actions" }), notices = h("div", { class: "notices" });
     md.innerHTML = renderMarkdown(content);
-    fillActions(actions, function () { return content; }, withRegen);
-    return { md: md, actions: actions, wrap: h("div", { class: "msg assistant" }, h("div", { class: "avatar", text: "A" }), h("div", { class: "col" }, md, actions)) };
+    fillActions(actions, function () { return content; }, withRegen, modelRef);
+    return { md: md, actions: actions, notices: notices,
+             wrap: h("div", { class: "msg assistant" }, h("div", { class: "avatar", text: "A" }), h("div", { class: "col" }, notices, md, actions)) };
   }
   function renderMessages() {
     var box = $("messages"), msgs = state.chat ? state.chat.messages : [];
     box.textContent = "";
     msgs.forEach(function (m, i) {
       if (m.role === "user") box.appendChild(h("div", { class: "msg user" }, h("div", { class: "bubble", text: m.content })));
-      else box.appendChild(assistantNode(m.content, i === msgs.length - 1).wrap);
+      else box.appendChild(assistantNode(m.content, i === msgs.length - 1, m.model).wrap);
     });
     renderWelcome(); scrollDown(true);
   }
@@ -319,17 +341,18 @@
     box.appendChild(node.wrap); scrollDown(true);
     var ctrl = new AbortController();
     state.streaming = { ctrl: ctrl }; updateSend(); renderChats();
-    var acc = "", failed = "", aborted = false, title = "", raf = 0;
+    var acc = "", failed = "", aborted = false, title = "", served = "", raf = 0;
     function paint() { raf = 0; node.md.innerHTML = renderMarkdown(acc); scrollDown(false); }
     try {
       var res = await fetch("/api/v1/chats/" + chat.id + "/send", { method: "POST", signal: ctrl.signal,
         headers: { "X-CSRF-Token": CSRF, "Content-Type": "application/json" },
-        body: JSON.stringify(regenerateMode ? { regenerate: true, model: state.model } : { content: text, model: state.model }) });
+        body: JSON.stringify(regenerateMode ? { regenerate: true, model: state.model, fallback: state.fallback } : { content: text, model: state.model, fallback: state.fallback }) });
       if (!res.ok) { var j = {}; try { j = await res.json(); } catch (e) { /* ignore */ } throw new Error(j.error || ("HTTP " + res.status)); }
       for await (var ev of sseEvents(res)) {
         if (ev.event === "meta") loadChats();            // the chat now has its title: show it in the sidebar right away
         else if (ev.event === "delta") { acc += ev.data.t; if (!raf) raf = requestAnimationFrame(paint); }
-        else if (ev.event === "done") title = ev.data.title;
+        else if (ev.event === "notice") node.notices.appendChild(h("div", { class: "notice", text: "\u21AA " + ev.data.message }));
+        else if (ev.event === "done") { title = ev.data.title; served = ev.data.model || ""; }
         else if (ev.event === "error") failed = ev.data.message;
       }
     } catch (e) {
@@ -344,7 +367,7 @@
     node.md.innerHTML = acc ? renderMarkdown(acc) : (aborted ? "(중단됨)" : "");
     if (acc) {
       chat.messages.push({ role: "assistant", content: acc });
-      fillActions(node.actions, function () { return finalText; }, true);
+      fillActions(node.actions, function () { return finalText; }, true, served);
       node.actions.hidden = false;
     }
     if (failed) {
@@ -352,7 +375,7 @@
         h("button", { class: "btn", type: "button", text: "다시 시도", onclick: function () { regenerate(); } })));
     }
     if (title) chat.title = title;
-    updateSend(); await loadChats();
+    updateSend(); await loadChats(); loadUsage();
   }
   function regenerate() { if (!state.streaming && state.chat) send(null, true); }
 
@@ -393,6 +416,9 @@
       });
       menu.appendChild(h("button", { type: "button", class: "more", "data-more": p.name, text: "모델 더 보기…", onclick: function (e) { e.stopPropagation(); renderMoreModels(p); } }));
     });
+    menu.appendChild(h("label", { class: "opt", id: "fallback-opt" },
+      h("input", { type: "checkbox", id: "fallback-toggle", checked: state.fallback ? "checked" : false, onchange: function (e) { state.fallback = e.target.checked; store("fallback", state.fallback ? "1" : "0"); } }),
+      h("span", { text: "한도·오류가 나면 다른 무료/로컬 모델로 자동 전환 (요금이 나올 수 있는 모델로는 넘어가지 않습니다)" })));
     menu.appendChild(h("button", { type: "button", class: "foot", text: "+ 서비스 연결 · 서비스 추가", onclick: function () { closeMenu(); openWizard(); } }));
   }
   async function renderMoreModels(p) {
@@ -585,7 +611,7 @@
   /* ---------- start ---------- */
   (async function init() {
     updateSend();
-    try { await loadState(); await loadChats(); } catch (e) { toast("상태를 불러오지 못했습니다: " + e.message); }
+    try { await loadState(); await loadChats(); loadUsage(); } catch (e) { toast("상태를 불러오지 못했습니다: " + e.message); }
     renderWelcome(); showView("chat");
     if (!state.onboarded) openWizard();
     $("input").focus();

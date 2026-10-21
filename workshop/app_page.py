@@ -33,6 +33,7 @@ def render(terminal_state, term_token="", csrf=""):
             '<div id="chatlist" class="chat-list" role="list"></div>'
             '<nav class="side-nav"><button data-view="settings"><i>&#9881;</i>설정</button>'
             '<button data-view="tasks"><i>&#9776;</i>작업</button><button data-view="boards"><i>&#9636;</i>보드</button>'
+            '<button data-view="usage"><i>&#9645;</i>사용량</button>'
             + terminal_nav +
             '</nav><div class="side-foot">로컬 전용 · 127.0.0.1</div></aside>'
             '<div id="scrim" hidden></div>'
@@ -45,10 +46,11 @@ def render(terminal_state, term_token="", csrf=""):
             '<form id="composer" autocomplete="off"><div class="box"><textarea id="input" rows="1" maxlength="20000" '
             'placeholder="메시지를 입력하세요" aria-label="메시지"></textarea>'
             '<button id="send" type="submit" aria-label="보내기" disabled>&#8593;</button></div>'
-            '<p class="hint">Enter로 전송 · Shift+Enter로 줄바꿈 · 모델이 틀릴 수 있으니 중요한 내용은 확인하세요.</p></form></div>'
+            '<p class="hint">Enter로 전송 · Shift+Enter로 줄바꿈 · 모델이 틀릴 수 있으니 중요한 내용은 확인하세요.<span id="usage-chip" hidden></span></p></form></div>'
             '<iframe id="view-settings" class="view" src="about:blank" data-src="/setup" title="설정" hidden></iframe>'
             '<iframe id="view-tasks" class="view" src="about:blank" data-src="/" title="작업" hidden></iframe>'
             '<iframe id="view-boards" class="view" src="about:blank" data-src="/boards" title="보드" hidden></iframe>'
+            '<iframe id="view-usage" class="view" src="about:blank" data-src="/usage" title="사용량" hidden></iframe>'
             + terminal_pane +
             '</main></section><div id="wizard" hidden></div><div id="toast" role="status" hidden></div></div>'
             '<script src="/static/xterm.js"></script><script src="/static/addon-fit.js"></script>'

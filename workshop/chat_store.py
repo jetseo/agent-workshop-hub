@@ -87,14 +87,19 @@ class ChatStore:
         with self._lock:
             return self._read(chat_id)
 
-    def append(self, chat_id, role, content):
+    def append(self, chat_id, role, content, model=None):
         if role not in ROLES or not isinstance(content, str) or not 1 <= len(content) <= MAX_MESSAGE:
             raise ValueError("Invalid message")
+        if model is not None and (not isinstance(model, str) or len(model) > 300):
+            raise ValueError("Invalid model")
         with self._lock:
             chat = self._read(chat_id)
             if len(chat["messages"]) >= MAX_MESSAGES:
                 raise ValueError("This chat is full; start a new one")
-            chat["messages"].append({"role": role, "content": content, "time": _now()})
+            message = {"role": role, "content": content, "time": _now()}
+            if model:
+                message["model"] = model                       # which model actually answered
+            chat["messages"].append(message)
             chat["updated"] = _now()
             if role == "user" and chat["title"] == DEFAULT_TITLE:
                 chat["title"] = " ".join(content.split())[:40] or DEFAULT_TITLE
