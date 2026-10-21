@@ -616,6 +616,7 @@
       if (env.ollama.running) Array.prototype.forEach.call(document.querySelectorAll('.svc[data-service="ollama"]'), function (b) { b.classList.add("rec"); });
     });
     card.appendChild(h("div", { class: "grid" }, items));
+    card.appendChild(h("div", { class: "foot" }, h("button", { class: "btn", type: "button", id: "w-later", text: "나중에 할게요", onclick: function () { closeWizard(); } })));
     card.appendChild(h("p", { class: "note", text: "처음이라면 무료 티어가 있는 서비스나 Ollama(내 PC)를 추천합니다. 무료 서비스는 입력이 학습에 쓰일 수 있고 한도가 자주 바뀝니다." }));
   }
   function wizStep2(card, w) {

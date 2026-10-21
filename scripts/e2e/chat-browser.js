@@ -35,6 +35,7 @@ const ok = (cond, msg) => { if (!cond) throw new Error("CHECK FAILED: " + msg); 
   await until(async () => !(await $("#w-env").textContent()).includes("확인하는 중"), 6000, "environment check text");
   ok((await $("#w-env").textContent()).includes("Ollama"), "first-run screen reports whether Ollama was found");
   await shot("01-wizard-step1");
+  ok(await $("#w-later").isVisible(), "the first screen offers 'later' so onboarding can be skipped");
   await $('#wizard [data-service="custom"]').click();
   await $("#w-name").fill("mock");
   await $("#w-url").fill(`http://127.0.0.1:${mockPort}/v1`);

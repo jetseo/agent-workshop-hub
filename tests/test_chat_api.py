@@ -601,6 +601,24 @@ class MultiAccountTests(ApiBase):
         self.assertTrue(ratelimit.try_acquire(provider, "기본", 1))     # the other account is unaffected
 
 
+class ExplainedErrorTests(ApiBase):
+    def test_a_failed_connection_test_explains_the_cause_in_korean_and_keeps_the_raw_message(self):
+        body = dict(service="custom", custom_name="mock", custom_url=self.mock_url, model="ratelimit", prompt="hi", save="on")
+        status, result = self.jcall("POST", "/onboard/test", body)
+        self.assertFalse(result["ok"])
+        self.assertIn("사용 한도에 도달", result["error"])
+        self.assertIn("HTTP 429", result["error"])
+        self.assertEqual(self.providers.load(), {})                        # a failed test saves nothing
+
+    def test_chat_errors_are_explained_too(self):
+        self.onboard()
+        self.providers.add_model("mock", "ratelimit")
+        status, events = self.sse(self.new_chat("mock/ratelimit"), {"content": "x", "fallback": False})
+        self.assertEqual(events[-1][0], "error")
+        self.assertIn("사용 한도에 도달", events[-1][1]["message"])
+        self.assertIn("429", events[-1][1]["message"])
+
+
 class FallbackCandidateTests(unittest.TestCase):
     def test_candidates_never_include_paid_or_unconsented_models(self):
         from workshop.chat_api import fallback_candidates

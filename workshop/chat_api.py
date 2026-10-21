@@ -7,6 +7,7 @@ import re
 import threading
 
 from . import digest, envcheck, setup_page, usage
+from .explain import explain
 from .chat import chat, chat_stream, list_models
 from .chat_store import DEFAULT_TITLE, CHAT_ID, ChatStore
 from .usage import UsageLedger
@@ -116,7 +117,7 @@ def _clean(error, provider):
     text = str(error)
     if provider and provider.get("api_key"):
         text = text.replace(provider["api_key"], "***")
-    return text[:300]
+    return explain(text)[:600]
 
 
 def _record_usage(ctx, ref, provider, history, text, reported):
@@ -289,5 +290,5 @@ def dispatch(ctx, method, path, body):
     except PermissionError as error:
         raise ApiError(403, str(error)) from None
     except RuntimeError as error:
-        raise ApiError(502, str(error)) from None
+        raise ApiError(502, explain(str(error))) from None
     raise ApiError(404, "Not found")

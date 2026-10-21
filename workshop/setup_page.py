@@ -11,6 +11,7 @@ from urllib.parse import urlparse
 
 from .adapters import find_opencode
 from .chat import chat, list_models
+from .explain import explain
 from .providers import NAME, validate, validate_key, mask_key
 
 # Base URLs and key pages are from memory, not verified against each provider's current docs
@@ -117,7 +118,7 @@ def run_test(providers, form, chat_fn=chat):
             result["saved"] = True
     except (ValueError, PermissionError, RuntimeError, OSError) as error:
         text = str(error)
-        result["error"] = text.replace(key, "***") if key else text
+        result["error"] = explain(text.replace(key, "***") if key else text)
     result["seconds"] = round(time.monotonic() - started, 1)
     return result
 
