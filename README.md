@@ -1,4 +1,4 @@
-# JetAI Hub
+# JetAI
 
 A local-first AI workspace that saves development tokens: it sends coding and text work to free, local or low-cost models, with explicit opt-in, approval and cost guards.
 

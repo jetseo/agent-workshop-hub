@@ -39,7 +39,7 @@ def _safe_console():
 
 def main(argv=None):
     _safe_console()
-    parser = argparse.ArgumentParser(description="JetAI Hub provider onboarding")
+    parser = argparse.ArgumentParser(description="JetAI provider onboarding")
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("list")
     sub.add_parser("check")

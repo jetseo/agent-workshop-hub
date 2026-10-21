@@ -1,13 +1,13 @@
-# Jet Studio 인수 프롬프트: 이미지·ComfyUI 기능 (JetAI Hub에서 분리)
+# Jet Studio 인수 프롬프트: 이미지·ComfyUI 기능 (JetAI에서 분리)
 
 > 이 문서는 **Jet Studio 저장소의 Claude Code 세션**에 그대로 붙여 넣는 프롬프트입니다.
-> JetAI Hub(개발 토큰 절약 도구)에서는 이미지·ComfyUI 기능을 모두 제거했고, 이 문서가 그 기능의 전부입니다.
-> 제거 직전 코드는 JetAI Hub 저장소 커밋 `db80290`(브랜치 `claude/wonderful-cannon-4ajrxy`의 이력)에도 남아 있습니다: `git show db80290:workshop/comfyui.py`.
+> JetAI(개발 토큰 절약 도구)에서는 이미지·ComfyUI 기능을 모두 제거했고, 이 문서가 그 기능의 전부입니다.
+> 제거 직전 코드는 JetAI 저장소 커밋 `db80290`(브랜치 `claude/wonderful-cannon-4ajrxy`의 이력)에도 남아 있습니다: `git show db80290:workshop/comfyui.py`.
 
 ## 당신의 역할
-Jet Studio는 **쇼츠(짧은 영상) 제작 프로젝트**입니다. 아래는 다른 프로젝트(JetAI Hub)에서 먼저 만들어 둔 로컬 ComfyUI 연동 기능입니다. 이를 Jet Studio의 이미지/영상 생성 단계에 맞게 **이식·정리**하세요. JetAI Hub 쪽 요구사항(토큰 절약, 채팅 UI)을 가져오지 마세요.
+Jet Studio는 **쇼츠(짧은 영상) 제작 프로젝트**입니다. 아래는 다른 프로젝트(JetAI)에서 먼저 만들어 둔 로컬 ComfyUI 연동 기능입니다. 이를 Jet Studio의 이미지/영상 생성 단계에 맞게 **이식·정리**하세요. JetAI 쪽 요구사항(토큰 절약, 채팅 UI)을 가져오지 마세요.
 
-## 기능 요약 (JetAI Hub에서 제거된 것)
+## 기능 요약 (JetAI에서 제거된 것)
 1. **ComfyUI 제출** (`workshop/comfyui.py`): API 형식 워크플로 JSON을 `http://127.0.0.1:8188`(루프백만 허용)에 제출하고 `prompt_id`를 받는다. 제출 직후 prompt_id 형식을 검증(폴링·다운로드 전)한다.
 2. **상태 조회/대기** (`workshop/comfyui_status.py`): history 조회, 완료 대기, 오류 분류.
 3. **스모크 테스트/이미지 다운로드** (`scripts/comfyui_smoke.py`): 결과 PNG/JPEG/WebP 다운로드, 파일 시그니처·크기 한도 검사, SHA-256 기록, JSON 리포트, 기존 파일 덮어쓰기 금지, 기본은 미리보기이고 `--submit`일 때만 제출.

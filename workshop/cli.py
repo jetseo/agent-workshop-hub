@@ -5,7 +5,7 @@ from pathlib import Path
 from .queue import Queue
 
 def main():
-    p = argparse.ArgumentParser(description="JetAI Hub")
+    p = argparse.ArgumentParser(description="JetAI")
     p.add_argument("--db", default=str(Path.home() / ".agent-workshop" / "jobs.sqlite3"))
     sub = p.add_subparsers(dest="command", required=True)
     add = sub.add_parser("add")

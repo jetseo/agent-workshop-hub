@@ -1,4 +1,4 @@
-# JetAI Hub - native Windows launcher (no WSL needed): chat, onboarding, usage, digest, boards of text steps.
+# JetAI - native Windows launcher (no WSL needed): chat, onboarding, usage, digest, boards of text steps.
 # The WSL terminal tab, OpenCode and git-worktree code steps still need WSL; use start.ps1 for those.
 [CmdletBinding()]
 param(
@@ -43,7 +43,7 @@ if ($DryRun) {
 }
 $busy = $null
 try { $busy = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction Stop } catch { }
-if ($busy) { throw "Port $Port is already in use. Close the other JetAI Hub window, or run: .\jetai.ps1 -Port <another port>" }
+if ($busy) { throw "Port $Port is already in use. Close the other JetAI window, or run: .\jetai.ps1 -Port <another port>" }
 if (-not $NoBrowser) {
     $opener = {
         param($port)
@@ -58,9 +58,9 @@ if (-not $NoBrowser) {
     }
     Start-Job -ScriptBlock $opener -ArgumentList $Port | Out-Null
 }
-Write-Host "Starting local JetAI Hub (Ctrl+C or closing this window stops it). App window: http://127.0.0.1:$Port/app"
+Write-Host "Starting local JetAI (Ctrl+C or closing this window stops it). App window: http://127.0.0.1:$Port/app"
 Push-Location $PSScriptRoot
 try {
     & $python.Exe @serverArgs
-    if ($LASTEXITCODE -ne 0) { throw "JetAI Hub exited with code $LASTEXITCODE" }
+    if ($LASTEXITCODE -ne 0) { throw "JetAI exited with code $LASTEXITCODE" }
 } finally { Pop-Location }

@@ -1,1 +1,1 @@
-"""JetAI Hub core."""
+"""JetAI core."""

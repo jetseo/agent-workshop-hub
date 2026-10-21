@@ -101,7 +101,7 @@ The Windows installer performs preflight, optional Linux prerequisites, and opt-
 ## 프로그램처럼 쓰기: 앱 창 + 내장 터미널
 ```powershell
 .\scripts\create-shortcut.ps1 -DryRun     # 먼저 무엇을 만들지 확인
-.\scripts\create-shortcut.ps1             # 바탕화면에 "JetAI Hub" 바로가기 생성
+.\scripts\create-shortcut.ps1             # 바탕화면에 "JetAI" 바로가기 생성
 ```
 바로가기를 실행하면 `start.ps1 -Terminal`이 WSL에서 허브를 시작하고, 서버가 뜨면 **Edge 앱 창**(주소창·탭 없는 별도 창)을 엽니다. Edge가 없으면 기본 브라우저가 열립니다. 직접 실행: `.\start.ps1 -Terminal`
 (창을 열지 않으려면 `-NoBrowser`). 창 안에는 탭 4개가 있습니다: **설정 · 작업 · 보드 · 터미널**.
@@ -155,9 +155,9 @@ WSL 설정 없이 Windows 파이썬(3.10 이상)만으로 채팅·온보딩·압
 - 검증 상태: GitHub Windows 러너에서 서버가 뜨고 `/app`이 렌더링되는지만 자동 확인합니다. 실제 PC에서의 동작은 **미검증**입니다.
 
 ## 휴대용 패키지 (설치 없이 압축만 풀어 실행)
-GitHub Actions의 `JetAI-Hub-portable` 산출물(또는 `.\scripts\build-package.ps1`)이 만드는 zip에는 앱과 공식 임베디드 파이썬이 들어 있어 **파이썬이 없는 PC에서도** 됩니다.
+GitHub Actions의 `JetAI-portable` 산출물(또는 `.\scripts\build-package.ps1`)이 만드는 zip에는 앱과 공식 임베디드 파이썬이 들어 있어 **파이썬이 없는 PC에서도** 됩니다.
 1. zip을 원하는 폴더에 풉니다(관리자 권한 불필요).
-2. `JetAI Hub.cmd`를 더블클릭하면 서버가 시작되고 Edge 앱 창이 열립니다. 종료는 창을 닫거나 콘솔에서 Ctrl+C.
+2. `JetAI.cmd`를 더블클릭하면 서버가 시작되고 Edge 앱 창이 열립니다. 종료는 창을 닫거나 콘솔에서 Ctrl+C.
 - 실행 중에는 아무것도 내려받지 않습니다. 파이썬은 빌드할 때 python.org에서 HTTPS로 받으며 SHA256을 `PACKAGE.txt`에 기록합니다(고정된 해시와 대조하는 검증은 아직 없음).
 - 키·대화는 `C:\Users\<이름>\.agent-workshop`에 저장되며 패키지 폴더를 지워도 남습니다.
 - 서명되지 않은 프로그램이라 Windows SmartScreen 경고가 나올 수 있습니다. 코드 서명은 아직 없습니다.

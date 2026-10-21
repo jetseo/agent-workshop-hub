@@ -1,5 +1,5 @@
-# JetAI Hub - build a portable Windows package (zip): app + the official embeddable Python, no installer, no admin rights.
-# Unzip anywhere and run "JetAI Hub.cmd". Nothing is written outside the unzipped folder except the usual data
+# JetAI - build a portable Windows package (zip): app + the official embeddable Python, no installer, no admin rights.
+# Unzip anywhere and run "JetAI.cmd". Nothing is written outside the unzipped folder except the usual data
 # folder (~/.agent-workshop), and nothing is downloaded when the package runs.
 [CmdletBinding()]
 param(
@@ -10,10 +10,10 @@ param(
 $ErrorActionPreference = "Stop"
 $repo = Split-Path -Parent $PSScriptRoot
 $url = "https://www.python.org/ftp/python/$PythonVersion/python-$PythonVersion-embed-amd64.zip"
-$name = "JetAI-Hub-portable"
+$name = "JetAI-portable"
 if ($DryRun) {
     Write-Host "[dry-run] Download (HTTPS, python.org only): $url"
-    Write-Host "[dry-run] Package folder: $name (app files + python/ + 'JetAI Hub.cmd'), zip written to $OutDir"
+    Write-Host "[dry-run] Package folder: $name (app files + python/ + 'JetAI.cmd'), zip written to $OutDir"
     Write-Host "[dry-run] Nothing was downloaded or created."
     return
 }
@@ -38,8 +38,8 @@ try {
     }
     Copy-Item -Recurse -LiteralPath (Join-Path $repo "docs") -Destination (Join-Path $stage "docs")
     $cmd = "@echo off`r`ncd /d `"%~dp0`"`r`npowershell.exe -NoProfile -ExecutionPolicy Bypass -File `"%~dp0jetai.ps1`" %*`r`n"
-    Set-Content -LiteralPath (Join-Path $stage "JetAI Hub.cmd") -Value $cmd -Encoding ASCII -NoNewline
-    $manifest = "JetAI Hub portable package`r`nPython: $PythonVersion embeddable (amd64), downloaded over HTTPS from python.org`r`nPython zip SHA256: $hash`r`nBuilt: $((Get-Date).ToUniversalTime().ToString('yyyy-MM-dd HH:mm')) UTC`r`n"
+    Set-Content -LiteralPath (Join-Path $stage "JetAI.cmd") -Value $cmd -Encoding ASCII -NoNewline
+    $manifest = "JetAI portable package`r`nPython: $PythonVersion embeddable (amd64), downloaded over HTTPS from python.org`r`nPython zip SHA256: $hash`r`nBuilt: $((Get-Date).ToUniversalTime().ToString('yyyy-MM-dd HH:mm')) UTC`r`n"
     Set-Content -LiteralPath (Join-Path $stage "PACKAGE.txt") -Value $manifest -Encoding ASCII
     New-Item -ItemType Directory -Path $OutDir -Force | Out-Null
     $zip = Join-Path (Resolve-Path $OutDir).Path "$name.zip"

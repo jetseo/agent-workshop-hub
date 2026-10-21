@@ -1,10 +1,10 @@
-# Claude Code handoff: JetAI Hub (formerly Agent Workshop Hub)
+# Claude Code handoff: JetAI (formerly Agent Workshop Hub)
 
 ## Project objective
 Build a reliable, local-first AI agent orchestration platform for a Windows + WSL2 environment. Connect OpenCode, local Ollama models, and optional cloud providers. The user has explicitly postponed service naming, logo, and branding. Focus exclusively on technical reliability and verification.
 
 ## Project scope: two separate projects
-- **JetAI Hub (this repository)** exists to **save development tokens**: route coding and text work to free, local or low-cost models instead of spending paid tokens, with explicit opt-in, approval and cost guards. Judge new features by whether they serve that goal.
+- **JetAI (this repository)** exists to **save development tokens**: route coding and text work to free, local or low-cost models instead of spending paid tokens, with explicit opt-in, approval and cost guards. Judge new features by whether they serve that goal.
 - **Jet Studio is a different project** for **producing Shorts (short-form videos)**. It is not part of this repository. Do not mix the two: do not add shorts-production features, assets or naming here, and do not treat Jet Studio requirements as Hub requirements.
 - If a request is ambiguous about which project it belongs to, ask before changing anything. The earlier image/ComfyUI features were removed from this repository at the user's request and handed to Jet Studio as a prompt (`docs/handoff/jet-studio-comfyui-prompt.md`); do not re-add image, ComfyUI or video features here.
 
@@ -30,7 +30,7 @@ Build a reliable, local-first AI agent orchestration platform for a Windows + WS
 - Use temporary worktrees and temporary databases for tests.
 - Keep secrets outside version control.
 - Distinguish code committed, tests passed in CI, and tested on user's Windows PC.
-- Project name is **JetAI Hub** (decided by the user). The repository, the Python package `workshop` and the data folder `~/.agent-workshop` keep their old names on purpose (renaming them would break existing keys and chats); do not move or delete the data folder.
+- Project name is **JetAI** (decided by the user; it briefly was "JetAI Hub"). The repository, the Python package `workshop` and the data folder `~/.agent-workshop` keep their old names on purpose (renaming them would break existing keys and chats); do not move or delete the data folder.
 
 ## Quick commands
 ```bash

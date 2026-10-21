@@ -1,7 +1,7 @@
-# JetAI Hub - create a desktop shortcut. -Native starts jetai.ps1 (no WSL); otherwise start.ps1 with the WSL terminal.
+# JetAI - create a desktop shortcut. -Native starts jetai.ps1 (no WSL); otherwise start.ps1 with the WSL terminal.
 [CmdletBinding()]
 param(
-    [ValidateNotNullOrEmpty()][string]$Name = "JetAI Hub",
+    [ValidateNotNullOrEmpty()][string]$Name = "JetAI",
     [ValidateNotNullOrEmpty()][string]$Distro = "Ubuntu-24.04",
     [switch]$NoTerminal,
     [switch]$Native,
@@ -30,6 +30,6 @@ $shortcut.TargetPath = (Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1
 $shortcut.Arguments = $arguments
 $shortcut.WorkingDirectory = $repo
 $shortcut.WindowStyle = 7   # minimized: the console hosts the server; closing it stops the Hub
-$shortcut.Description = "Start JetAI Hub (local only)"
+$shortcut.Description = "Start JetAI (local only)"
 $shortcut.Save()
 Write-Host "Created: $link"

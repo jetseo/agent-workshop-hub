@@ -23,11 +23,11 @@ def render(terminal_state, term_token="", csrf=""):
         terminal_pane = ""
     return ('<!doctype html><html lang="ko"><head><meta charset="utf-8">'
             '<meta name="viewport" content="width=device-width,initial-scale=1">'
-            '<meta name="color-scheme" content="light dark"><title>JetAI Hub</title>'
+            '<meta name="color-scheme" content="light dark"><title>JetAI</title>'
             '<link rel="stylesheet" href="/static/xterm.css"><link rel="stylesheet" href="/static/app.css"></head>'
             '<body data-csrf="' + esc(csrf) + '" data-terminal="' + esc(terminal_state) + '" data-term-token="' + esc(term_token) + '">'
             '<div id="app">'
-            '<aside id="side"><div class="side-top"><span class="brand">JetAI Hub</span>'
+            '<aside id="side"><div class="side-top"><span class="brand">JetAI</span>'
             '<button id="side-close" class="icon" aria-label="사이드바 닫기" title="사이드바 닫기">&#x2715;</button></div>'
             '<button id="newchat" class="newchat"><i>+</i>새 채팅</button>'
             '<div id="chatlist" class="chat-list" role="list"></div>'

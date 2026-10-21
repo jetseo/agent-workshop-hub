@@ -1,4 +1,4 @@
-# JetAI Hub - Windows launcher (WSL2)
+# JetAI - Windows launcher (WSL2)
 [CmdletBinding()]
 param(
     [switch]$AllowOpenCode,
@@ -62,6 +62,6 @@ if (-not $NoBrowser) {
     }
     Start-Job -ScriptBlock $opener -ArgumentList $Port, $Distro, ([bool]$Terminal) | Out-Null
 }
-Write-Host "Starting local JetAI Hub (Ctrl+C to stop). App window: http://127.0.0.1:$Port/app"
+Write-Host "Starting local JetAI (Ctrl+C to stop). App window: http://127.0.0.1:$Port/app"
 & wsl.exe @argsList
 if ($LASTEXITCODE -ne 0) { throw "Hub exited with code $LASTEXITCODE" }

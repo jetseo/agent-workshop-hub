@@ -19,7 +19,7 @@ from . import applog, pagestyle
 
 PAGE = """<!doctype html><html lang="ko"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>JetAI Hub</title>
+<title>JetAI</title>
 <style>__CSS__
 .job{display:flex;justify-content:space-between;gap:14px;align-items:center;flex-wrap:wrap}.job>div:first-child{min-width:0;overflow-wrap:anywhere}.job form{max-width:100%}@media(max-width:600px){.job{display:block}}
 </style></head><body>
@@ -350,7 +350,7 @@ def make_handler(queue, token, boards_root=None, providers=None, chat_fn=None, l
     return Handler
 
 def main():
-    parser = argparse.ArgumentParser(description="Local-only JetAI Hub dashboard")
+    parser = argparse.ArgumentParser(description="Local-only JetAI dashboard")
     parser.add_argument("--db", default=str(Path.home() / ".agent-workshop" / "jobs.sqlite3"))
     parser.add_argument("--port", type=int, default=8787)
     parser.add_argument("--enable-terminal", action="store_true",
@@ -372,7 +372,7 @@ def main():
             Queue(args.db), token, terminal_key=terminal_key, terminal_cwd=str(Path(__file__).resolve().parent.parent)))
     except OSError as error:
         if error.errno in (98, 10048, 48) or "Address already in use" in str(error):
-            print("포트 %d를 이미 다른 프로그램이 쓰고 있습니다. JetAI Hub가 이미 실행 중일 수 있습니다: "
+            print("포트 %d를 이미 다른 프로그램이 쓰고 있습니다. JetAI가 이미 실행 중일 수 있습니다: "
                   "http://127.0.0.1:%d/app 을 열어 보세요. 아니라면 --port 로 다른 포트를 지정하세요." % (args.port, args.port),
                   file=sys.stderr, flush=True)
             raise SystemExit(2)

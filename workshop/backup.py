@@ -80,7 +80,7 @@ def restore(archive_path, root, force=False, include_secrets=False):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description="Back up or restore JetAI Hub data (chats, services, usage, boards)")
+    parser = argparse.ArgumentParser(description="Back up or restore JetAI data (chats, services, usage, boards)")
     sub = parser.add_subparsers(dest="command", required=True)
     e = sub.add_parser("export")
     e.add_argument("--out", help="zip file to create (default: jetai-backup-<date>.zip in the current folder)")
