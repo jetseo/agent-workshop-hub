@@ -43,6 +43,8 @@ class MockOpenAI(BaseHTTPRequestHandler):
         body = json.loads(self.rfile.read(int(self.headers["Content-Length"])).decode())
         self.server.requests.append(("POST", self.path, self.headers.get("Authorization"), body))
         model = body["model"]
+        if model == "keyed" and (self.headers.get("Authorization") or "").endswith("LIMITED00"):
+            return self._json(429, {"error": {"message": "this key is out of quota"}})
         if model.startswith("ratelimit"):
             return self._json(429, {"error": {"message": "slow down"}})
         if model == "badopt" and "stream_options" in body:
@@ -154,7 +156,11 @@ class AuthAndOnboardingTests(ApiBase):
     def test_request_shape_limits(self):
         self.assertEqual(self.call("POST", "/chats", raw_body=b"{not json")[0], 400)
         self.assertEqual(self.call("POST", "/chats", raw_body=b'{"model": ""}', headers={"Content-Type": "text/plain"})[0], 415)
-        self.assertEqual(self.call("POST", "/chats", raw_body=b"x" * 300_000)[0], 413)
+        try:
+            oversized = self.call("POST", "/chats", raw_body=b"x" * 300_000)[0]
+        except (ConnectionError, BrokenPipeError):
+            oversized = 413      # the server rejected the body and closed while we were still sending (seen on Windows)
+        self.assertEqual(oversized, 413)
         self.assertEqual(self.call("GET", "/nothing")[0], 404)
         self.assertEqual(self.call("PUT", "/state")[0], 501)           # verbs the server does not implement
         self.assertEqual(self.call("DELETE", "/state")[0], 404)
@@ -186,7 +192,7 @@ class AuthAndOnboardingTests(ApiBase):
         self.assertEqual(self.providers.load(), {})
         status, result = self.jcall("POST", "/onboard/test", dict(service="groq", key=SECRET, model="m", prompt="x"))
         self.assertFalse(result["ok"])
-        self.assertIn("consent", result["error"].lower())
+        self.assertIn("동의", result["error"])
 
     def test_remove_provider_clears_token(self):
         self.onboard()
@@ -488,6 +494,133 @@ class DigestApiTests(ApiBase):
     def test_no_fallback_reports_the_error(self):
         status, events = self.digest({"model": "mock/ratelimit-free", "text": "abc " * 30, "fallback": False})
         self.assertEqual(events[-1][0], "error")
+
+
+class RpmLimitTests(ApiBase):
+    def setUp(self):
+        super().setUp()
+        from workshop import ratelimit
+        ratelimit.reset()
+        self.addCleanup(ratelimit.reset)
+        self.onboard()
+        self.providers.add("mock", base_url=self.mock_url, data_policy="local", rpm=1)
+
+    def test_second_request_over_the_limit_is_stopped_before_reaching_the_service(self):
+        chat_id = self.new_chat("mock/demo-model")
+        status, events = self.sse(chat_id, {"content": "one", "fallback": False})
+        self.assertEqual(events[-1][0], "done")
+        posts = lambda: len([r for r in self.mock.requests if r[0] == "POST"])
+        before = posts()
+        status, events = self.sse(chat_id, {"content": "two", "fallback": False})
+        self.assertEqual(events[-1][0], "error")
+        self.assertIn("requests/minute", events[-1][1]["message"])
+        self.assertEqual(posts(), before)           # nothing was sent, so no 429 and no wasted quota
+
+
+class EnvApiTests(ApiBase):
+    def test_env_reports_what_is_found_without_changing_anything(self):
+        self.ctx.env_fn = lambda: {"os": "Windows", "ollama": {"running": False, "models": []}}
+        status, body = self.jcall("GET", "/env")
+        self.assertEqual((status, body["os"]), (200, "Windows"))
+        self.assertEqual(self.providers.load(), {})
+
+    def test_real_inspection_survives_everything_being_absent(self):
+        from workshop import envcheck
+        def boom(timeout=1):
+            raise OSError("no ollama")
+        result = envcheck.inspect(ollama_fn=boom, which=lambda name: None)
+        self.assertEqual(result["ollama"], {"running": False, "models": []})
+        self.assertFalse(result["wsl"]["available"])
+        self.assertFalse(result["opencode"])
+        found = envcheck.inspect(ollama_fn=lambda timeout=1: ["llama3.2:3b"], which=lambda name: "/x/" + name)
+        self.assertEqual(found["ollama"]["models"], ["llama3.2:3b"])
+        self.assertTrue(found["opencode"])
+
+
+class MultiAccountTests(ApiBase):
+    def setUp(self):
+        super().setUp()
+        from workshop import ratelimit
+        ratelimit.reset()
+        self.addCleanup(ratelimit.reset)
+        self.onboard(key="first-LIMITED00")
+        self.providers.add_model("mock", "keyed")
+
+    def auth_sequence(self):
+        return [r[2] for r in self.mock.requests if r[0] == "POST" and r[3]["model"] == "keyed"]
+
+    def add_account(self, label="개인2", key="second-GOODKEY00", **extra):
+        body = {"name": "mock", "label": label, "key": key, "confirm_own": True}
+        body.update(extra)
+        return self.jcall("POST", "/providers/accounts", body)
+
+    def test_a_429_on_one_account_moves_to_the_next_account_not_the_next_model(self):
+        self.assertEqual(self.add_account()[0], 200)
+        status, events = self.sse(self.new_chat("mock/keyed"), {"content": "hi", "fallback": False})
+        self.assertEqual(events[-1][0], "done")
+        self.assertEqual(self.auth_sequence(), ["Bearer first-LIMITED00", "Bearer second-GOODKEY00"])
+        self.assertNotIn("notice", [e[0] for e in events])           # no model switch was needed
+
+    def test_without_a_working_second_account_the_429_still_reaches_the_user(self):
+        status, events = self.sse(self.new_chat("mock/keyed"), {"content": "hi", "fallback": False})
+        self.assertEqual(events[-1][0], "error")
+        self.assertIn("429", events[-1][1]["message"])
+
+    def test_adding_needs_the_ownership_confirmation(self):
+        status, body = self.add_account(confirm_own=False)
+        self.assertEqual(status, 400)
+        self.assertIn("약관", body["error"])
+        self.assertEqual(self.providers.list_accounts("mock")[0]["label"], "기본")
+        self.assertEqual(len(self.providers.list_accounts("mock")), 1)
+
+    def test_tokens_are_masked_everywhere_and_never_in_providers_json(self):
+        self.add_account()
+        status, state = self.jcall("GET", "/state")
+        accounts = state["providers"][0]["accounts"]
+        self.assertEqual([a["label"] for a in accounts], ["기본", "개인2"])
+        self.assertNotIn("GOODKEY00", json.dumps(state))
+        self.assertNotIn("GOODKEY00", self.providers.path.read_text())
+        self.assertEqual(accounts[1]["token"], "\u2022\u2022\u2022\u2022EY00")
+
+    def test_bad_input_is_rejected_and_removal_deletes_the_key(self):
+        self.assertEqual(self.add_account(label="bad label!")[0], 400)
+        self.assertEqual(self.add_account(label="기본")[0], 400)
+        self.assertEqual(self.add_account(key="short")[0], 400)
+        self.assertEqual(self.add_account(rpm=-1)[0], 400)
+        self.add_account()
+        status, body = self.jcall("POST", "/providers/accounts/remove", {"name": "mock", "label": "개인2"})
+        self.assertEqual([a["label"] for a in body["accounts"]], ["기본"])
+        self.assertNotIn("GOODKEY00", self.providers.secrets_path.read_text())
+        self.add_account()
+        self.jcall("POST", "/providers/remove", {"name": "mock"})
+        self.assertNotIn("GOODKEY00", self.providers.secrets_path.read_text())
+
+    def test_each_account_has_its_own_rpm_window(self):
+        from workshop import ratelimit
+        self.add_account(rpm=1)
+        provider = self.providers.get("mock")
+        self.assertEqual([a["label"] for a in provider["accounts"]], ["기본", "개인2"])
+        self.assertTrue(ratelimit.try_acquire(provider, "개인2", 1))
+        self.assertFalse(ratelimit.try_acquire(provider, "개인2", 1))
+        self.assertTrue(ratelimit.try_acquire(provider, "기본", 1))     # the other account is unaffected
+
+
+class ExplainedErrorTests(ApiBase):
+    def test_a_failed_connection_test_explains_the_cause_in_korean_and_keeps_the_raw_message(self):
+        body = dict(service="custom", custom_name="mock", custom_url=self.mock_url, model="ratelimit", prompt="hi", save="on")
+        status, result = self.jcall("POST", "/onboard/test", body)
+        self.assertFalse(result["ok"])
+        self.assertIn("사용 한도에 도달", result["error"])
+        self.assertIn("HTTP 429", result["error"])
+        self.assertEqual(self.providers.load(), {})                        # a failed test saves nothing
+
+    def test_chat_errors_are_explained_too(self):
+        self.onboard()
+        self.providers.add_model("mock", "ratelimit")
+        status, events = self.sse(self.new_chat("mock/ratelimit"), {"content": "x", "fallback": False})
+        self.assertEqual(events[-1][0], "error")
+        self.assertIn("사용 한도에 도달", events[-1][1]["message"])
+        self.assertIn("429", events[-1][1]["message"])
 
 
 class FallbackCandidateTests(unittest.TestCase):

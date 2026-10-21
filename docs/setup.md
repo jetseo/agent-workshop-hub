@@ -60,7 +60,7 @@ Start the dashboard only after configuring WSL and base prerequisites:
 ```
 
 To enable an executor, review its workspace permissions and any provider charges
-before passing `-AllowOpenCode` or `-AllowComfyUI`. The worker never starts
+before passing `-AllowOpenCode`. The worker never starts
 from the launcher dry run.
 
 ## Runtime integration (not automated yet)
@@ -77,35 +77,14 @@ from the launcher dry run.
    existing OpenCode installations, and does not configure model providers.
    Review the upstream package before installing.
 2. Ollama on Windows can be installed explicitly with `./install.ps1 -InstallOllama` (uses `winget install --id Ollama.Ollama --exact --source winget`). Use `-DryRun` to inspect first. The installer does not download a model or start the service. After starting Ollama, run `./scripts/ollama.ps1` to check local connectivity and list installed models. To explicitly download a model, run `./scripts/ollama.ps1 -DryRun -Pull -Model qwen2.5-coder:7b` first, then remove `-DryRun`. Model downloads can use multiple GB of storage. Select one Ollama host to avoid port conflicts.
-3. ComfyUI source checkout on Windows: `./install.ps1 -DryRun -InstallComfyUISource`, then `./install.ps1 -InstallComfyUISource`. This clones the official repository into `~/ComfyUI` without overwriting an existing directory. It does **not** install Python, PyTorch, CUDA, dependencies or models. After installing Python 3.11, run `./install.ps1 -SetupComfyUIEnv` to create `~/ComfyUI/.venv`. To opt into downloading the upstream Python dependencies, use `./install.ps1 -InstallComfyUIRequirements`. This can download large packages and does not ensure a compatible GPU/PyTorch backend. After configuring the Python environment, run `./scripts/comfyui-gpu.ps1` for read-only NVIDIA driver and PyTorch CUDA diagnostics. Launch the existing environment with `./scripts/start-comfyui.ps1` (localhost only, default port 8188), then check its HTTP endpoint with `./scripts/comfyui-status.ps1`. Use `-DryRun` on either script to preview without running. CUDA PyTorch installation is available as a separate explicit opt-in: `./scripts/install-comfyui-torch.ps1 -DryRun -CudaWheel cu128` followed by the same command without `-DryRun`. Supported wheel choices are `cu126` and `cu128`; check driver compatibility before installing. The script verifies `torch.cuda.is_available()` after installation. Checkpoint downloads are supported as an explicit operation with a user-provided trusted HTTPS URL, filename and published SHA-256 checksum: `./scripts/download-comfyui-model.ps1 -DryRun -Url <https-url> -Sha256 <64-hex-digits> -FileName model.safetensors`; remove `-DryRun` after checking details. No default model is selected and no license is implicitly accepted. For an opt-in generation smoke test, export an API-format workflow from ComfyUI, then run `python -m scripts.comfyui_smoke workflow.json` to preview or `python -m scripts.comfyui_smoke workflow.json --submit` to submit and poll for output image metadata. The smoke test downloads returned PNG/JPEG/WebP image bytes into `comfyui-smoke-output/`, checks file signatures and size limits, records SHA-256 digests, and writes a JSON report. Existing output files are not overwritten. It has not yet been run against a real GPU in this project.
 4. Test model API connectivity before enabling any agent workflow.
 5. Connect Codex CLI and Claude Code only through supported, documented endpoints and keep their existing credentials untouched.
 
-Do not expose Ollama, ComfyUI or any model gateway to the public internet. Do not commit credentials, model tokens or private workspaces. Paid-model calls and Git pushes require explicit approval.
+Do not expose Ollama or any model gateway to the public internet. Do not commit credentials, model tokens or private workspaces. Paid-model calls and Git pushes require explicit approval.
 
 ## Current scope
 
-The Windows installer performs preflight, optional Linux prerequisites, and opt-in Node.js/OpenCode setup. Node.js from Ubuntu apt may be too old. Ollama has an opt-in Windows winget installer, but ComfyUI has an opt-in source checkout, but its Python virtual environment and requirements can be installed with explicit switches; GPU-compatible PyTorch installation is opt-in with a runtime check; checkpoint download is opt-in and requires a trusted URL and checksum; end-to-end generation tests remain unverified. It does **not** install or run the full multi-agent platform yet.
-
-
-### Save ComfyUI job results through the worker
-
-For an image job payload, set `{"workflow": "/absolute/path/workflow-api.json", "save_outputs": true, "output_dir": "/absolute/path/outputs"}`. After explicit queue approval and starting the worker with `--allow-comfyui`, the worker submits the API workflow, waits for completion, downloads output images, writes a JSON report, and moves the job to `review`. The default image-job behavior without `save_outputs` remains status-only. Do not reuse output paths containing existing report filenames. Actual GPU integration is not yet verified.
-
-
-### Dashboard image results
-
-The local dashboard at `http://127.0.0.1:8787/` now accepts an optional absolute **Image output directory** when adding an image task. After authorizing execution and running the opt-in ComfyUI worker, image jobs that save outputs show their generated file count and whether a local report was saved. Final approval still requires the review button. The dashboard deliberately does not serve generated files over HTTP. CLI equivalent: `python -m workshop.cli add image "Generate art" --workflow /absolute/workflow.json --output-dir /absolute/output`. Actual ComfyUI GPU end-to-end execution remains unverified.
-
-
-### Local image gallery
-
-The dashboard shows up to 24 image previews for image tasks in review or done state. The layout adapts to narrow mobile screens. Each image URL is scoped to the job and signed; file bytes are checked against the recorded SHA-256 before delivery. The gallery is available only on the local dashboard. Run `python -m unittest discover -s tests -v` to exercise HTTP gallery tests.
-
-
-### CI diagnostics
-
-The validation workflow uploads unittest and runtime preflight logs for Windows and Ubuntu, Python 3.11 and 3.12. Open the GitHub Actions run, select the relevant job, and download the diagnostics artifact. Logs are retained for 14 days. The workflow preserves failing test exit codes, so a captured log does not conceal test failures.
+The Windows installer performs preflight, optional Linux prerequisites, and opt-in Node.js/OpenCode setup. Node.js from Ubuntu apt may be too old. Ollama has an opt-in Windows winget installer. It does **not** install or run the full multi-agent platform yet.
 
 ## 서비스 연결 · 토큰 입력 · 프롬프트 테스트 (한 화면)
 `.\start.ps1` (또는 WSL에서 `bash scripts/start.sh`)을 실행하면 브라우저가 `http://127.0.0.1:8787/setup`을 엽니다(`-NoBrowser`로 끌 수 있음).
@@ -122,7 +101,7 @@ The validation workflow uploads unittest and runtime preflight logs for Windows 
 ## 프로그램처럼 쓰기: 앱 창 + 내장 터미널
 ```powershell
 .\scripts\create-shortcut.ps1 -DryRun     # 먼저 무엇을 만들지 확인
-.\scripts\create-shortcut.ps1             # 바탕화면에 "JetAI Hub" 바로가기 생성
+.\scripts\create-shortcut.ps1             # 바탕화면에 "JetAI" 바로가기 생성
 ```
 바로가기를 실행하면 `start.ps1 -Terminal`이 WSL에서 허브를 시작하고, 서버가 뜨면 **Edge 앱 창**(주소창·탭 없는 별도 창)을 엽니다. Edge가 없으면 기본 브라우저가 열립니다. 직접 실행: `.\start.ps1 -Terminal`
 (창을 열지 않으려면 `-NoBrowser`). 창 안에는 탭 4개가 있습니다: **설정 · 작업 · 보드 · 터미널**.
@@ -162,3 +141,36 @@ The validation workflow uploads unittest and runtime preflight logs for Windows 
 - 후보는 연결한 서비스 중 로컬 모델 → `-free`/`:free` 모델 순서로 최대 3개입니다. **요금이 나올 수 있는 모델로는 절대 넘어가지 않고**, 동의하지 않은 클라우드 서비스도 후보에서 제외됩니다.
 - 답변이 이미 일부 나온 뒤에는 모델을 바꾸지 않습니다(한 답변에 두 모델이 섞이지 않게). 말풍선에 전환 안내가 표시되고, 각 답변 아래에 **실제로 답한 모델**이 표시됩니다.
 - 끄면 오류가 그대로 보입니다. 모든 후보가 실패하면 각 모델의 실패 이유를 함께 보여줍니다.
+
+## Windows 단독 실행 (WSL 없이)
+WSL 설정 없이 Windows 파이썬(3.10 이상)만으로 채팅·온보딩·압축·사용량을 쓸 수 있습니다.
+```powershell
+.\jetai.ps1 -DryRun        # 무엇을 실행할지 미리 보기(아무것도 시작하지 않음)
+.\jetai.ps1                # 서버 시작 + Edge 앱 창 열기 (닫으면 종료: Ctrl+C)
+.\scripts\create-shortcut.ps1 -Native    # 바탕화면 바로가기(WSL 없는 실행)
+```
+- 파이썬이 없으면 설치 방법을 안내하고 멈춥니다(자동 설치 안 함). `winget install Python.Python.3.12`로 설치할 수 있습니다.
+- 키·대화·사용량은 `C:\Users\<이름>\.agent-workshop`에 저장됩니다(WSL에서 쓰던 폴더와 별개). NTFS에는 유닉스 권한 비트가 없어, 사용자 프로필 폴더의 기본 접근 권한(본인 계정만)에 의존합니다.
+- **이 방식에서 쓸 수 없는 것:** 내장 터미널 탭, OpenCode, 코드 단계(worktree). 이들은 `start.ps1`(WSL)이 필요합니다.
+- 검증 상태: GitHub Windows 러너에서 서버가 뜨고 `/app`이 렌더링되는지만 자동 확인합니다. 실제 PC에서의 동작은 **미검증**입니다.
+
+## 휴대용 패키지 (설치 없이 압축만 풀어 실행)
+GitHub Actions의 `JetAI-portable` 산출물(또는 `.\scripts\build-package.ps1`)이 만드는 zip에는 앱과 공식 임베디드 파이썬이 들어 있어 **파이썬이 없는 PC에서도** 됩니다.
+1. zip을 원하는 폴더에 풉니다(관리자 권한 불필요).
+2. `JetAI.cmd`를 더블클릭하면 서버가 시작되고 Edge 앱 창이 열립니다. 종료는 창을 닫거나 콘솔에서 Ctrl+C.
+- 실행 중에는 아무것도 내려받지 않습니다. 파이썬은 빌드할 때 python.org에서 HTTPS로 받으며 SHA256을 `PACKAGE.txt`에 기록합니다(고정된 해시와 대조하는 검증은 아직 없음).
+- 키·대화는 `C:\Users\<이름>\.agent-workshop`에 저장되며 패키지 폴더를 지워도 남습니다.
+- 서명되지 않은 프로그램이라 Windows SmartScreen 경고가 나올 수 있습니다. 코드 서명은 아직 없습니다.
+- 검증 상태: CI에서 빌드 → 압축 해제 → 번들 파이썬으로 서버가 뜨는지만 확인합니다. 실제 PC는 **미검증**.
+
+## 안정성: 로그, 백업, 종료
+- **로그:** `~/.agent-workshop/logs/hub.log`(1MB씩 3개까지 순환). 요청 줄과 시작·종료만 기록하며 토큰·대화 내용·시작 키는 남기지 않습니다. 문제가 생기면 이 파일을 보여 주세요.
+- **백업/복원:**
+  ```bash
+  python -m workshop.backup export                    # jetai-backup-<날짜>.zip (서비스 목록, 대화, 사용량, 보드)
+  python -m workshop.backup export --include-secrets  # 저장한 키까지 포함(파일을 공유·동기화 폴더에 두지 마세요)
+  python -m workshop.backup import 백업.zip            # 이미 있는 파일은 덮어쓰지 않음(--force로 덮어쓰기)
+  ```
+  기본 백업에는 키(`secrets.json`)와 시작 키, 로그, 임시 worktree가 들어가지 않습니다. 복원할 때 키는 `--include-secrets`를 줘야 풀립니다. 백업 파일 안에 `..`나 절대 경로가 있으면 아무것도 쓰지 않고 거부합니다.
+- **중복 실행:** 같은 포트가 이미 쓰이면 "이미 실행 중일 수 있습니다" 안내를 보이고 종료 코드 2로 끝납니다(`jetai.ps1`은 시작 전에 먼저 확인).
+- **종료:** Ctrl+C, 창 닫기(`SIGBREAK`), `kill`(SIGTERM) 모두 서버를 정상 종료하고 로그에 `stop`을 남깁니다.

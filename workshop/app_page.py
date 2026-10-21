@@ -6,6 +6,7 @@ STATIC_FILES = {
     "xterm.js": "text/javascript; charset=utf-8", "addon-fit.js": "text/javascript; charset=utf-8",
     "app.js": "text/javascript; charset=utf-8", "xterm.css": "text/css; charset=utf-8",
     "app.css": "text/css; charset=utf-8",
+    "jetai-icon.svg": "image/svg+xml", "jetai-mark.svg": "image/svg+xml", "jetai.ico": "image/x-icon",
 }
 
 
@@ -23,11 +24,12 @@ def render(terminal_state, term_token="", csrf=""):
         terminal_pane = ""
     return ('<!doctype html><html lang="ko"><head><meta charset="utf-8">'
             '<meta name="viewport" content="width=device-width,initial-scale=1">'
-            '<meta name="color-scheme" content="light dark"><title>JetAI Hub</title>'
+            '<meta name="color-scheme" content="light dark"><title>JetAI</title>'
+            '<link rel="icon" type="image/svg+xml" href="/static/jetai-icon.svg"><link rel="alternate icon" href="/favicon.ico">'
             '<link rel="stylesheet" href="/static/xterm.css"><link rel="stylesheet" href="/static/app.css"></head>'
             '<body data-csrf="' + esc(csrf) + '" data-terminal="' + esc(terminal_state) + '" data-term-token="' + esc(term_token) + '">'
             '<div id="app">'
-            '<aside id="side"><div class="side-top"><span class="brand">JetAI Hub</span>'
+            '<aside id="side"><div class="side-top"><span class="brand"><svg class="logo" viewBox="200 320 860 610" width="32" height="22" aria-hidden="true" fill="currentColor"><path d="M215 608C215 598 235 592 255 588L890 462C905 459 912 466 908 474L655 830C640 855 600 880 560 900C540 910 520 918 513 908L598 722C600 712 592 708 580 712L440 785C420 793 360 795 353 787C350 782 355 778 365 772L700 565C715 558 730 558 727 566C724 572 715 576 700 582L415 672C405 676 395 676 385 674L228 632C218 629 215 620 215 608Z"/><path d="M966 335Q974 406 1043 414Q974 421 966 497Q958 421 889 411Q958 404 966 335Z"/></svg>JetAI</span>'
             '<button id="side-close" class="icon" aria-label="사이드바 닫기" title="사이드바 닫기">&#x2715;</button></div>'
             '<button id="newchat" class="newchat"><i>+</i>새 채팅</button>'
             '<div id="chatlist" class="chat-list" role="list"></div>'
@@ -61,7 +63,13 @@ def render(terminal_state, term_token="", csrf=""):
             '<div id="dg-status" aria-live="polite"></div><div id="dg-notices"></div>'
             '<div id="dg-result" hidden><div class="row"><b>결과</b><button id="dg-copy" class="btn" type="button">복사</button></div>'
             '<pre id="dg-out"></pre><p id="dg-stats"></p></div></div></div>'
-            '<iframe id="view-settings" class="view" src="about:blank" data-src="/setup" title="설정" hidden></iframe>'
+            '<div id="view-settings" class="view" hidden><div class="settings"><h2>설정</h2>'
+            '<section id="set-env"><h3>이 PC</h3><p id="set-env-text" class="sub">확인하는 중…</p></section>'
+            '<section id="set-services"><div class="row"><h3>연결된 서비스</h3>'
+            '<button id="set-add" class="btn" type="button">+ 서비스 추가</button></div><div id="set-list"></div></section>'
+            '<section><h3>내 데이터</h3><p class="sub">키·대화·사용량은 이 PC의 <code>.agent-workshop</code> 폴더에만 저장됩니다. '
+            '백업은 터미널에서 <code>python -m workshop.backup export</code>(키 제외)로 만들 수 있습니다.</p></section>'
+            '</div></div>'
             '<iframe id="view-tasks" class="view" src="about:blank" data-src="/" title="작업" hidden></iframe>'
             '<iframe id="view-boards" class="view" src="about:blank" data-src="/boards" title="보드" hidden></iframe>'
             '<iframe id="view-usage" class="view" src="about:blank" data-src="/usage" title="사용량" hidden></iframe>'

@@ -11,6 +11,8 @@ from urllib.parse import urlparse
 
 from .adapters import find_opencode
 from .chat import chat, list_models
+from .explain import explain
+from . import pagestyle
 from .providers import NAME, validate, validate_key, mask_key
 
 # Base URLs and key pages are from memory, not verified against each provider's current docs
@@ -64,12 +66,12 @@ def resolve_service(form, providers=None):
     if service != "custom":
         stored = providers.get(service) if providers is not None and NAME.fullmatch(service) else None
         if not stored:
-            raise ValueError("Choose a service")
+            raise ValueError("서비스를 선택하세요.")
         return service, {"base_url": stored["base_url"], "data_policy": stored["data_policy"],
                          "needs_key": stored["data_policy"] != "local", "default_model": ""}
     name, url = _field(form, "custom_name"), _field(form, "custom_url")
     if not NAME.fullmatch(name):
-        raise ValueError("Custom name: lowercase letters, digits, - or _ (max 32)")
+        raise ValueError("직접 입력 이름은 영문 소문자·숫자·-·_ 만 쓸 수 있습니다(최대 32자).")
     loopback = urlparse(url).hostname in ("127.0.0.1", "localhost")
     entry = {"base_url": url, "data_policy": "local" if loopback else "cloud-may-train",
              "needs_key": not loopback, "default_model": ""}
@@ -88,19 +90,19 @@ def run_test(providers, form, chat_fn=chat):
         model = _field(form, "model") or entry["default_model"]
         prompt = _field(form, "prompt")
         if not model:
-            raise ValueError("Enter a model name (see 'models' list after the first save, or the service docs)")
+            raise ValueError("모델 이름을 입력하세요. 서비스 문서나 모델 목록에서 확인할 수 있습니다.")
         if not 1 <= len(prompt) <= MAX_PROMPT:
-            raise ValueError("Prompt must be 1-" + str(MAX_PROMPT) + " characters")
+            raise ValueError("테스트 프롬프트는 1~" + str(MAX_PROMPT) + "자로 입력하세요.")
         result["model"] = model
         if entry["data_policy"] != "local" and _field(form, "consent") != "on":
-            raise PermissionError("Tick the consent box: your token and prompt are sent to this service")
+            raise PermissionError("동의 칸을 체크하세요. 토큰과 프롬프트가 이 서비스로 전송됩니다.")
         key = _field(form, "key")
         stored = providers.get(name) or {}
         if key:
             key = validate_key(key)
         elif entry["needs_key"] and not stored.get("api_key") and not (
                 stored.get("key_env") and os.environ.get(stored["key_env"])):
-            raise ValueError("Paste your token")
+            raise ValueError("토큰을 붙여 넣으세요.")
         provider = {"base_url": entry["base_url"], "data_policy": entry["data_policy"],
                     "key_env": stored.get("key_env"), "api_key": key or stored.get("api_key")}
         result["reply"] = chat_fn(provider, model, [{"role": "user", "content": prompt}],
@@ -117,7 +119,7 @@ def run_test(providers, form, chat_fn=chat):
             result["saved"] = True
     except (ValueError, PermissionError, RuntimeError, OSError) as error:
         text = str(error)
-        result["error"] = text.replace(key, "***") if key else text
+        result["error"] = explain(text.replace(key, "***") if key else text)
     result["seconds"] = round(time.monotonic() - started, 1)
     return result
 
@@ -134,7 +136,7 @@ def models_for_form(providers, form, list_fn=list_models):
     key = _field(form, "key")
     key = validate_key(key) if key else stored.get("api_key")
     if entry["needs_key"] and not key and not (stored.get("key_env") and os.environ.get(stored["key_env"])):
-        raise ValueError("Paste your token")
+        raise ValueError("토큰을 붙여 넣으세요.")
     return list_fn({"base_url": entry["base_url"], "data_policy": entry["data_policy"],
                     "key_env": stored.get("key_env"), "api_key": key})
 
@@ -142,7 +144,7 @@ def models_for_form(providers, form, list_fn=list_models):
 def run_models(providers, name, list_fn=list_models):
     provider = providers.get(name)
     if provider is None:
-        raise ValueError("Unknown service")
+        raise ValueError("알 수 없는 서비스입니다.")
     return list_fn(provider)
 
 
@@ -192,13 +194,8 @@ def render_page(providers, csrf, *, result=None, models=None, notice="", ollama_
                   + (_esc(", ".join(free[:40])) or "없음") + "</p><details><summary>전체</summary><pre>"
                   + _esc("\n".join(models)) + "</pre></details></section>")
     return ('<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
-            "<title>Setup</title><style>body{font-family:system-ui,sans-serif;background:#111827;color:#e5e7eb;max-width:900px;margin:30px auto;padding:0 14px}"
-            "section{background:#1f2937;border:1px solid #374151;border-radius:12px;padding:16px;margin:14px 0}"
-            "input,select,textarea,button{padding:10px;border-radius:8px;border:1px solid #4b5563;background:#111827;color:#fff;max-width:100%;box-sizing:border-box}"
-            "input[type=text],input[type=password],textarea,select{width:100%;margin:4px 0 10px}button{cursor:pointer;background:#2563eb;border:0}"
-            "code,pre{background:#0b1220;padding:2px 5px;border-radius:4px}pre{white-space:pre-wrap;overflow-wrap:anywhere;padding:10px}"
-            "td,th{padding:6px 10px;text-align:left}small{color:#9ca3af}a{color:#93c5fd}</style></head><body>"
-            '<h1>시작하기 / Setup</h1>' + ("" if embedded else '<a href="/">← Tasks</a> · <a href="/boards">Boards</a>')
+            "<title>서비스 연결</title>" + pagestyle.HEAD_ICON + "<style>" + pagestyle.CSS + "</style></head><body>"
+            '<h1>서비스 연결</h1>' + ("" if embedded else '<a href="/">← 작업</a> · <a href="/boards">보드</a>')
             + (("<p><b>" + _esc(notice) + "</b></p>") if notice else "")
             + _status_panel(ollama_models or [], opencode_path)
             + block

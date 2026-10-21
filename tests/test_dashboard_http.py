@@ -44,6 +44,13 @@ class DashboardHTTPTests(unittest.TestCase):
         except urllib.error.HTTPError as error:
             return error.code
 
+    def test_model_field_is_stored_for_code_tasks(self):
+        self.assertEqual(self.post("/add", token="integration-token", kind="code", title="Fix",
+                                   resource="/tmp/worktree", model="opencode/big-pickle-free"), 303)
+        import json
+        self.assertEqual(json.loads(self.queue.list()[0]["payload"]),
+                         {"workspace": "/tmp/worktree", "model": "opencode/big-pickle-free"})
+
     def test_create_authorize_and_approve(self):
         self.assertEqual(
             self.post("/add", token="integration-token", kind="code",
@@ -64,7 +71,7 @@ class DashboardHTTPTests(unittest.TestCase):
 
     def test_reject_missing_resource(self):
         self.assertEqual(
-            self.post("/add", token="integration-token", kind="image", title="Sprite"), 400
+            self.post("/add", token="integration-token", kind="code", title="Sprite"), 400
         )
         self.assertEqual(self.queue.list(), [])
 

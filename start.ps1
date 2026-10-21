@@ -1,8 +1,7 @@
-# JetAI Hub - Windows launcher (WSL2)
+# JetAI - Windows launcher (WSL2)
 [CmdletBinding()]
 param(
     [switch]$AllowOpenCode,
-    [switch]$AllowComfyUI,
     [ValidateRange(1024,65535)][int]$Port = 8787,
     [ValidateNotNullOrEmpty()][string]$Distro = "Ubuntu-24.04",
     [switch]$Terminal,
@@ -14,7 +13,6 @@ $launcher = Join-Path $PSScriptRoot "scripts/start.sh"
 if (-not (Test-Path -LiteralPath $launcher)) { throw "Missing scripts/start.sh" }
 $flags = @("--port=$Port")
 if ($AllowOpenCode) { $flags += "--allow-opencode" }
-if ($AllowComfyUI) { $flags += "--allow-comfyui" }
 if ($Terminal) { $flags += "--enable-terminal" }
 if ($DryRun) {
     Write-Host "[dry-run] WSL distro: $Distro"
@@ -64,6 +62,6 @@ if (-not $NoBrowser) {
     }
     Start-Job -ScriptBlock $opener -ArgumentList $Port, $Distro, ([bool]$Terminal) | Out-Null
 }
-Write-Host "Starting local JetAI Hub (Ctrl+C to stop). App window: http://127.0.0.1:$Port/app"
+Write-Host "Starting local JetAI (Ctrl+C to stop). App window: http://127.0.0.1:$Port/app"
 & wsl.exe @argsList
 if ($LASTEXITCODE -ne 0) { throw "Hub exited with code $LASTEXITCODE" }

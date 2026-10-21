@@ -39,7 +39,7 @@ class Queue:
             db.close()
 
     def add(self, kind, title, payload=None, *, require_approval=False, depends_on=()):
-        if (kind not in ("plan", "code", "image", "qa") or not isinstance(title, str)
+        if (kind not in ("plan", "code", "qa") or not isinstance(title, str)
                 or not title.strip() or len(title) > 500):
             raise ValueError("Invalid task")
         deps = list(depends_on)
@@ -65,7 +65,7 @@ class Queue:
             if allowed is not None:
                 if not allowed:
                     return None
-                if any(kind not in ("code", "image", "plan", "qa") for kind in allowed):
+                if any(kind not in ("code", "plan", "qa") for kind in allowed):
                     raise ValueError("Invalid kind filter")
             if max_running is not None:
                 running = db.execute("SELECT COUNT(*) FROM jobs WHERE state='running'").fetchone()[0]

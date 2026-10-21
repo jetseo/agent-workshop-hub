@@ -5,6 +5,8 @@ import json
 import os
 import re
 import secrets
+import signal
+import sys
 import hashlib
 import hmac
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -13,68 +15,30 @@ from pathlib import Path
 from .adapters import find_opencode
 from urllib.parse import parse_qs, urlsplit, quote
 from .queue import Queue
+from . import applog, pagestyle
 
 PAGE = """<!doctype html><html lang="ko"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>JetAI Hub</title>
-<style>
-:root{font-family:system-ui,sans-serif;color-scheme:dark}
-body{max-width:1000px;margin:32px auto;padding:0 18px;background:#111827;color:#e5e7eb}*{box-sizing:border-box}
-h1{font-size:1.8rem}p{color:#9ca3af}
-section,.job{background:#1f2937;border:1px solid #374151;border-radius:12px;padding:18px;margin:14px 0}
-input,select,button{padding:10px;border-radius:8px;border:1px solid #4b5563;background:#111827;color:#fff}
-input{width:min(440px,85%)}button{cursor:pointer;background:#2563eb;border:0}
-.job{display:flex;justify-content:space-between;gap:14px;align-items:center;flex-wrap:wrap}.job>div:first-child{min-width:0;overflow-wrap:anywhere}.gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px;width:100%;margin-top:12px}.gallery a{display:block;min-width:0}.gallery img{width:100%;height:auto;aspect-ratio:1;object-fit:contain;margin:0;background:#111827}.job form{max-width:100%}@media(max-width:600px){body{margin:12px auto;padding:0 12px}section,.job{padding:12px;margin:10px 0}input,select,button{max-width:100%;width:100%;min-height:44px;margin:4px 0}.job{display:block}.gallery{grid-template-columns:repeat(2,minmax(0,1fr))}}
-small{color:#9ca3af} .tag{color:#93c5fd}
+<title>JetAI</title>
+<link rel="icon" type="image/svg+xml" href="/static/jetai-icon.svg">
+<style>__CSS__
+.job{display:flex;justify-content:space-between;gap:14px;align-items:center;flex-wrap:wrap}.job>div:first-child{min-width:0;overflow-wrap:anywhere}.job form{max-width:100%}@media(max-width:600px){.job{display:block}}
 </style></head><body>
-<h1>JetAI Hub</h1>
-<p>Local task dashboard · A separately enabled worker executes queued tasks.<br>로컬 작업 대시보드 · 작업은 별도로 허용한 워커만 실행합니다.</p>
-<section><h2>Add task / 작업 추가</h2><form method="post" action="/add">
+<h1>작업</h1>
+<p>로컬 작업 대시보드입니다. 작업은 별도로 허용(옵트인)한 워커만 실행하며, 코드 작업은 승인 후에만 실행됩니다.</p>
+<section><h2>작업 추가</h2><form method="post" action="/add">
 <input type="hidden" name="token" value="__TOKEN__">
-<select name="kind"><option>plan</option><option>code</option><option>image</option><option>qa</option></select>
-<input name="title" placeholder="Describe a task" required maxlength="500">
-<input name="resource" placeholder="Code: absolute worktree path / Image: workflow JSON path" maxlength="2000">
-<label>Image output directory (optional) <input name="output_dir" placeholder="Absolute directory for generated images" maxlength="2000"></label>
-<button>Add / 추가</button></form></section>
-<h2>Tasks / 작업 목록</h2><p><a href="/setup" style="color:#93c5fd">Setup / 서비스 연결·테스트 →</a> · <a href="/boards" style="color:#93c5fd">Boards / 멀티 모델 보드 →</a></p>__JOBS__
+<select name="kind" aria-label="작업 종류"><option value="plan">계획(plan)</option><option value="code">코드(code)</option><option value="qa">검수(qa)</option></select>
+<input name="title" placeholder="작업 내용을 적으세요" required maxlength="500">
+<input name="resource" placeholder="코드 작업: 작업 폴더(worktree)의 절대 경로" maxlength="2000">
+<input name="model" placeholder="모델(선택, 예: opencode/big-pickle-free, ollama/qwen2.5-coder · 로컬·무료만 가능)" maxlength="200">
+<button>추가</button></form></section>
+<h2>작업 목록</h2><p><a href="/setup">서비스 연결·테스트 →</a> · <a href="/boards">멀티 모델 보드 →</a></p>__JOBS__
 </body></html>"""
 
 STATE_KO = {"pending_approval": " (실행 승인 대기)", "queued": " (대기 중)",
             "running": " (실행 중)", "review": " (결과 검토 대기)",
             "done": " (완료)", "failed": " (실패 · 부수효과 확인 후 다시 추가)"}
-
-def gallery_files(job):
-    if not job or job["kind"] != "image" or job["state"] not in ("review", "done"):
-        return []
-    try:
-        payload = json.loads(job.get("payload") or "{}")
-        output_dir = payload.get("output_dir")
-        if not isinstance(output_dir, str) or not Path(output_dir).is_absolute():
-            return []
-        root = Path(output_dir).resolve()
-        files = json.loads(job.get("result") or "{}").get("files", [])
-        if not isinstance(files, list):
-            return []
-        valid = []
-        for item in files[:24]:
-            if not isinstance(item, dict):
-                continue
-            path, digest = item.get("path"), item.get("sha256")
-            if (isinstance(path, str) and Path(path).is_absolute()
-                    and Path(path).suffix.lower() in (".png", ".jpg", ".webp")
-                    and Path(path).resolve().parent == root
-                    and Path(path).name.startswith("image-")
-                    and isinstance(digest, str) and len(digest) == 64
-                    and all(c in "0123456789abcdefABCDEF" for c in digest)):
-                valid.append((Path(path), digest))
-        return valid
-    except (ValueError, TypeError, AttributeError):
-        return []
-
-
-def gallery_signature(token, job_id, index):
-    return hmac.new(token.encode(), f"{job_id}:{index}".encode(), hashlib.sha256).hexdigest()
-
 
 def make_handler(queue, token, boards_root=None, providers=None, chat_fn=None, list_fn=None,
                  terminal_key=None, terminal_argv=None, terminal_cwd=None, chats_dir=None, api_ctx=None):
@@ -114,7 +78,9 @@ def make_handler(queue, token, boards_root=None, providers=None, chat_fn=None, l
         def log_message(self, format, *args):
             # The one-time terminal entry key must not be echoed into logs.
             line = re.sub(r"(key=)[^&\s]+", r"\1***", format % args)
-            print("%s - - [%s] %s" % (self.address_string(), self.log_date_time_string(), line), flush=True)
+            line = "%s - - [%s] %s" % (self.address_string(), self.log_date_time_string(), line)
+            print(line, flush=True)
+            applog.write(line)
 
         def _json(self, status, payload):
             self._send(status, json.dumps(payload, ensure_ascii=False), "application/json; charset=utf-8",
@@ -210,47 +176,6 @@ def make_handler(queue, token, boards_root=None, providers=None, chat_fn=None, l
             if not self._trusted_host():
                 self._send(403, "Invalid Host", "text/plain")
                 return
-            if urlsplit(self.path).path == "/image":
-                params = parse_qs(urlsplit(self.path).query)
-                job_id = params.get("id", [""])[0]
-                index_text = params.get("index", [""])[0]
-                signature = params.get("sig", [""])[0]
-                if not index_text.isdecimal() or len(index_text) > 3:
-                    self._send(404, "Not found", "text/plain")
-                    return
-                index = int(index_text)
-                if not hmac.compare_digest(signature, gallery_signature(token, job_id, index)):
-                    self._send(403, "Forbidden", "text/plain")
-                    return
-                job = next((j for j in queue.list() if j["id"] == job_id), None)
-                images = gallery_files(job)
-                if index >= len(images):
-                    self._send(404, "Not found", "text/plain")
-                    return
-                image_path, digest = images[index]
-                try:
-                    if not image_path.is_file() or image_path.stat().st_size > 64 * 1024 * 1024:
-                        raise ValueError("Invalid image")
-                    data = image_path.read_bytes()
-                    if hashlib.sha256(data).hexdigest().lower() != digest.lower():
-                        raise ValueError("Checksum mismatch")
-                    ext = image_path.suffix.lower()
-                    signatures = {".png": data.startswith(bytes.fromhex("89504e470d0a1a0a")),
-                                  ".jpg": data.startswith(bytes.fromhex("ffd8ff")),
-                                  ".webp": data[:4] == b"RIFF" and data[8:12] == b"WEBP"}
-                    if not signatures[ext]:
-                        raise ValueError("Invalid image signature")
-                except (OSError, ValueError):
-                    self._send(404, "Image unavailable", "text/plain")
-                    return
-                self.send_response(200)
-                self.send_header("Content-Type", {".png": "image/png", ".jpg": "image/jpeg", ".webp": "image/webp"}[ext])
-                self.send_header("Content-Length", str(len(data)))
-                self.send_header("Cache-Control", "no-store")
-                self.send_header("X-Content-Type-Options", "nosniff")
-                self.end_headers()
-                self.wfile.write(data)
-                return
             if urlsplit(self.path).path == "/api/jobs":
                 # Never expose prompts, workspace paths or execution logs without auth.
                 public_jobs = [
@@ -273,9 +198,8 @@ def make_handler(queue, token, boards_root=None, providers=None, chat_fn=None, l
                 self._send(200, usage_page(summary_with_savings(api.ledger)))
                 return
             if route == "/favicon.ico":
-                self.send_response(204)
-                self.send_header("Content-Length", "0")
-                self.end_headers()
+                self._send(200, (Path(__file__).parent / "static" / "jetai.ico").read_bytes(), "image/x-icon",
+                           csp="default-src 'none'")
                 return
             if route == "/terminal/ws":
                 # A shell as the current user: needs the feature on, loopback Host, a browser Origin from
@@ -316,16 +240,16 @@ def make_handler(queue, token, boards_root=None, providers=None, chat_fn=None, l
                 if route == "/boards":
                     ids = sorted((d.name for d in root.glob("*") if (d / "board.md").is_file()), reverse=True) if root.is_dir() else []
                     items = "".join('<li><a href="/board?id=' + quote(i) + '">' + html.escape(i) + '</a></li>' for i in ids)
-                    self._send(200, '<!doctype html><html lang="ko"><meta charset="utf-8"><body style="font-family:sans-serif;background:#111827;color:#e5e7eb;max-width:900px;margin:30px auto">'
-                               '<h1>Boards / 보드</h1>' + ("" if self._embedded() else '<a href="/" style="color:#93c5fd">← Tasks</a>') + '<ul>' + (items or "<li>No boards yet. / 보드가 없습니다.</li>") + '</ul></body></html>')
+                    self._send(200, '<!doctype html><html lang="ko"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>' + pagestyle.CSS + '</style><body>'
+                               '<h1>보드</h1>' + ("" if self._embedded() else '<a href="/">← 작업</a>') + '<ul>' + (items or "<li>아직 보드가 없습니다.</li>") + '</ul></body></html>')
                     return
                 board_id = parse_qs(urlsplit(self.path).query).get("id", [""])[0]
                 target = root / board_id / "board.md"
                 if not re.fullmatch(r"[0-9a-f-]{36}", board_id) or not target.is_file():
                     self._send(404, "Not found", "text/plain")
                     return
-                self._send(200, '<!doctype html><html lang="ko"><meta charset="utf-8"><body style="font-family:sans-serif;background:#111827;color:#e5e7eb;max-width:900px;margin:30px auto">'
-                           '<a href="/boards" style="color:#93c5fd">← Boards</a><pre style="white-space:pre-wrap;overflow-wrap:anywhere">' +
+                self._send(200, '<!doctype html><html lang="ko"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>' + pagestyle.CSS + '</style><body>'
+                           '<a href="/boards">← 보드</a><pre style="white-space:pre-wrap;overflow-wrap:anywhere">' +
                            html.escape(target.read_text(encoding="utf-8")[:200000]) + '</pre></body></html>')
                 return
             if route != "/":
@@ -342,34 +266,17 @@ def make_handler(queue, token, boards_root=None, providers=None, chat_fn=None, l
                     approve = ('<form method="post" action="/authorize">'
                                '<input type="hidden" name="token" value="' + token + '">'
                                '<input type="hidden" name="id" value="' + html.escape(job["id"]) + '">'
-                               '<button>Authorize execution / 실행 승인</button></form>')
+                               '<button>실행 승인</button></form>')
                 if job["state"] == "review":
                     approve = ('<form method="post" action="/approve">'
                                '<input type="hidden" name="token" value="' + token + '">'
                                '<input type="hidden" name="id" value="' + html.escape(job["id"]) + '">'
-                               '<button>Approve / 결과 승인</button></form>')
+                               '<button>결과 승인</button></form>')
                 detail = ""
-                if job["kind"] == "image" and job["state"] in ("review", "done", "failed"):
-                    try:
-                        result = json.loads(job.get("result") or "{}")
-                        files = result.get("files") or []
-                        if isinstance(files, list) and files:
-                            detail = "<small> · Generated files: " + str(len(files)) + "</small>"
-                        if result.get("report_path"):
-                            detail += "<small> · Report saved locally</small>"
-                    except (ValueError, TypeError, AttributeError):
-                        detail = ""
-                gallery = ""
-                for i, _ in enumerate(gallery_files(job)):
-                    url = ("/image?id=" + quote(job["id"]) + "&index=" + str(i) +
-                           "&sig=" + gallery_signature(token, job["id"], i))
-                    gallery += '<a href="' + url + '"><img loading="lazy" alt="Generated image" src="' + url + '"></a>'
-                if gallery:
-                    detail += '<div class="gallery">' + gallery + '</div>'
                 cards.append('<div class="job"><div><strong>' + name + '</strong><br>'
                              '<small>' + kind + ' · <span class="tag">' + state + STATE_KO.get(job["state"], "") + '</span></small></div>'
                              + detail + approve + '</div>')
-            page = PAGE.replace("__TOKEN__", token).replace("__JOBS__", "".join(cards) or "<p>No tasks yet. / 아직 작업이 없습니다.</p>")
+            page = PAGE.replace("__CSS__", pagestyle.CSS).replace("__TOKEN__", token).replace("__JOBS__", "".join(cards) or "<p>아직 작업이 없습니다.</p>")
             if self._embedded():
                 page = re.sub(r'<p><a href="/setup".*?</p>', "", page, count=1, flags=re.S)
             self._send(200, page)
@@ -422,18 +329,13 @@ def make_handler(queue, token, boards_root=None, providers=None, chat_fn=None, l
                     kind = form.get("kind", [""])[0]
                     title = form.get("title", [""])[0][:500]
                     resource = form.get("resource", [""])[0].strip()
-                    if kind in ("code", "image") and not resource:
-                        raise ValueError("Code and image tasks require a workspace or workflow path")
-                    payload = ({"workspace": resource} if kind == "code" else
-                               {"workflow": resource} if kind == "image" else {})
-                    output_dir = form.get("output_dir", [""])[0].strip()
-                    if output_dir and kind != "image":
-                        raise ValueError("Output directory is only valid for image tasks")
-                    if output_dir:
-                        if len(output_dir) > 2000 or not Path(output_dir).is_absolute():
-                            raise ValueError("Image output directory must be an absolute path")
-                        payload.update({"save_outputs": True, "output_dir": output_dir})
-                    queue.add(kind, title, payload, require_approval=kind in ("code", "image"))
+                    if kind == "code" and not resource:
+                        raise ValueError("Code tasks require a workspace path")
+                    payload = {"workspace": resource} if kind == "code" else {}
+                    model = form.get("model", [""])[0].strip()
+                    if model and kind == "code":
+                        payload["model"] = model
+                    queue.add(kind, title, payload, require_approval=kind == "code")
                 elif path == "/authorize":
                     queue.authorize(form.get("id", [""])[0])
                 else:
@@ -448,7 +350,7 @@ def make_handler(queue, token, boards_root=None, providers=None, chat_fn=None, l
     return Handler
 
 def main():
-    parser = argparse.ArgumentParser(description="Local-only JetAI Hub dashboard")
+    parser = argparse.ArgumentParser(description="Local-only JetAI dashboard")
     parser.add_argument("--db", default=str(Path.home() / ".agent-workshop" / "jobs.sqlite3"))
     parser.add_argument("--port", type=int, default=8787)
     parser.add_argument("--enable-terminal", action="store_true",
@@ -464,8 +366,28 @@ def main():
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             handle.write(terminal_key)
         os.chmod(key_file, 0o600)
-    server = ThreadingHTTPServer(("127.0.0.1", args.port), make_handler(
-        Queue(args.db), token, terminal_key=terminal_key, terminal_cwd=str(Path(__file__).resolve().parent.parent)))
+    applog.setup()
+    try:
+        server = ThreadingHTTPServer(("127.0.0.1", args.port), make_handler(
+            Queue(args.db), token, terminal_key=terminal_key, terminal_cwd=str(Path(__file__).resolve().parent.parent)))
+    except OSError as error:
+        if error.errno in (98, 10048, 10013, 48) or getattr(error, "winerror", None) in (10048, 10013) \
+                or "Address already in use" in str(error):
+            print("포트 %d를 이미 다른 프로그램이 쓰고 있습니다. JetAI가 이미 실행 중일 수 있습니다: "
+                  "http://127.0.0.1:%d/app 을 열어 보세요. 아니라면 --port 로 다른 포트를 지정하세요." % (args.port, args.port),
+                  file=sys.stderr, flush=True)
+            raise SystemExit(2)
+        raise
+    applog.write("start port=%d terminal=%s" % (args.port, "on" if terminal_key else "off"))
+    # A termination request (closing the window, `kill`) should stop the server cleanly like Ctrl+C does.
+    def _stop(*_):
+        raise KeyboardInterrupt
+    for name in ("SIGTERM", "SIGBREAK"):
+        if hasattr(signal, name):
+            try:
+                signal.signal(getattr(signal, name), _stop)
+            except (ValueError, OSError):
+                pass
     print(f"Dashboard: http://127.0.0.1:{args.port}/", flush=True)
     print(f"Setup (connect a service and test a prompt): http://127.0.0.1:{args.port}/setup", flush=True)
     print(f"App window (tabs): http://127.0.0.1:{args.port}/app", flush=True)
@@ -480,6 +402,7 @@ def main():
         pass
     finally:
         server.server_close()
+        applog.write("stop")
 
 if __name__ == "__main__":
     main()

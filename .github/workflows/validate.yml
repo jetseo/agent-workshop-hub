@@ -1,4 +1,4 @@
-name: Validate JetAI Hub
+name: Validate JetAI
 on:
   push:
   pull_request:
@@ -23,7 +23,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          foreach ($file in @("install.ps1", "start.ps1", "scripts/ollama.ps1", "scripts/comfyui-status.ps1", "scripts/install-comfyui.ps1", "scripts/setup-comfyui-env.ps1", "scripts/comfyui-gpu.ps1", "scripts/start-comfyui.ps1", "scripts/install-comfyui-torch.ps1", "scripts/download-comfyui-model.ps1", "scripts/create-shortcut.ps1")) {
+          foreach ($file in @("install.ps1", "start.ps1", "scripts/ollama.ps1", "scripts/create-shortcut.ps1")) {
             $tokens = $null; $errors = $null
             [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file), [ref]$tokens, [ref]$errors) | Out-Null
             if ($errors.Count -gt 0) { $errors | Out-String | Write-Error; exit 1 }
@@ -34,7 +34,6 @@ jobs:
         run: |
           ./install.ps1 -DryRun
           ./install.ps1 -DryRun -InstallOllama
-          ./install.ps1 -DryRun -InstallComfyUISource -SetupComfyUIEnv -InstallComfyUIRequirements
           ./install.ps1 -DryRun -InstallWSL -RunUbuntuBootstrap -InstallOpenCode -InstallNode -UseNvmFallback -Distro Ubuntu-24.04
       - name: Ollama utility dry run (Windows)
         if: runner.os == 'Windows'
@@ -42,26 +41,65 @@ jobs:
         run: |
           ./scripts/ollama.ps1 -DryRun
           ./scripts/ollama.ps1 -DryRun -Pull -Model qwen2.5-coder:7b
-      - name: ComfyUI utilities dry run (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          ./scripts/install-comfyui.ps1 -DryRun
-          ./scripts/setup-comfyui-env.ps1 -DryRun -InstallRequirements
-          ./scripts/comfyui-status.ps1 -DryRun
-          ./scripts/comfyui-gpu.ps1 -DryRun
-          ./scripts/start-comfyui.ps1 -DryRun
-          ./scripts/install-comfyui-torch.ps1 -DryRun -CudaWheel cu128
-          ./scripts/install-comfyui-torch.ps1 -DryRun -CudaWheel cu126
-          ./scripts/download-comfyui-model.ps1 -DryRun -Url https://huggingface.co/example/model/resolve/main/model.safetensors -Sha256 ("a" * 64) -FileName example.safetensors
       - name: Launcher dry run (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           ./start.ps1 -DryRun -Port 8787
           ./start.ps1 -DryRun -Port 8787 -Terminal
+          ./jetai.ps1 -DryRun
+          ./scripts/create-shortcut.ps1 -DryRun -Native
           ./scripts/create-shortcut.ps1 -DryRun
-          ./scripts/create-shortcut.ps1 -DryRun -NoTerminal -Name "JetAI Hub Test"
+          ./scripts/create-shortcut.ps1 -DryRun -NoTerminal -Name "JetAI Test"
+      - name: Native launcher smoke test (Windows, no WSL)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $p = Start-Process pwsh -ArgumentList "-NoProfile","-File","./jetai.ps1","-NoBrowser","-Port","8799" -PassThru -WindowStyle Hidden
+          try {
+            $body = $null
+            for ($i = 0; $i -lt 40 -and -not $body; $i++) {
+              try { $body = (Invoke-WebRequest -Uri "http://127.0.0.1:8799/app" -UseBasicParsing -TimeoutSec 2).Content } catch { Start-Sleep -Milliseconds 500 }
+            }
+            if (-not $body) { throw "jetai.ps1 did not serve /app" }
+            if ($body -notmatch "JetAI") { throw "/app did not render the app shell" }
+            Write-Host "native launcher served /app on Windows without WSL"
+          } finally {
+            Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match "workshop.dashboard" } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+            Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+          }
+      - name: Portable package build and run (Windows, Python 3.12 job only)
+        if: runner.os == 'Windows' && matrix.python == '3.12'
+        shell: pwsh
+        run: |
+          ./scripts/build-package.ps1 -DryRun
+          ./scripts/build-package.ps1 -OutDir ./dist
+          $dest = Join-Path $env:RUNNER_TEMP "unzipped"
+          Expand-Archive -LiteralPath ./dist/JetAI-portable.zip -DestinationPath $dest
+          $root = Join-Path $dest "JetAI-portable"
+          Get-Content (Join-Path $root "PACKAGE.txt")
+          $p = Start-Process pwsh -ArgumentList "-NoProfile","-File",(Join-Path $root "jetai.ps1"),"-NoBrowser","-Port","8798" -PassThru -WindowStyle Hidden
+          try {
+            $body = $null
+            for ($i = 0; $i -lt 60 -and -not $body; $i++) {
+              try { $body = (Invoke-WebRequest -Uri "http://127.0.0.1:8798/app" -UseBasicParsing -TimeoutSec 2).Content } catch { Start-Sleep -Milliseconds 500 }
+            }
+            if (-not $body) { throw "the portable package did not serve /app" }
+            if ($body -notmatch "JetAI") { throw "/app did not render the app shell" }
+            $server = Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match "workshop.dashboard" } | Select-Object -First 1
+            if (-not $server -or $server.ExecutablePath -notlike "*JetAI-portable*python*python.exe") { throw "the server did not run on the bundled Python: $($server.ExecutablePath)" }
+            Write-Host "portable package ran on its bundled Python: $($server.ExecutablePath)"
+          } finally {
+            Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match "workshop.dashboard" } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+            Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+          }
+      - name: Upload portable package
+        if: runner.os == 'Windows' && matrix.python == '3.12'
+        uses: actions/upload-artifact@v4
+        with:
+          name: JetAI-portable
+          path: dist/JetAI-portable.zip
+          retention-days: 7
       - name: Compile modules
         run: python -m compileall -q workshop tests
       - name: Unit and local HTTP integration tests

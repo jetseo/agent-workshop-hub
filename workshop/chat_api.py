@@ -6,7 +6,8 @@ Sending to a cloud service additionally requires the consent recorded when it wa
 import re
 import threading
 
-from . import digest, setup_page, usage
+from . import digest, envcheck, setup_page, usage
+from .explain import explain
 from .chat import chat, chat_stream, list_models
 from .chat_store import DEFAULT_TITLE, CHAT_ID, ChatStore
 from .usage import UsageLedger
@@ -34,10 +35,11 @@ class Stream:
 
 
 class Context:
-    def __init__(self, providers, store=None, chat_fn=chat, stream_fn=chat_stream, list_fn=list_models, ledger=None):
+    def __init__(self, providers, store=None, chat_fn=chat, stream_fn=chat_stream, list_fn=list_models, ledger=None, env_fn=envcheck.inspect):
         self.providers, self.store = providers, store or ChatStore()
         self.ledger = ledger or UsageLedger()
         self.chat_fn, self.stream_fn, self.list_fn = chat_fn, stream_fn, list_fn
+        self.env_fn = env_fn
         self.active = set()
         self._active_lock = threading.Lock()
 
@@ -61,6 +63,7 @@ def _provider_view(ctx, name, entry):
     label = setup_page.BY_ID.get(name, {}).get("label", name)
     return {"name": name, "label": label, "base_url": entry["base_url"], "policy": entry["data_policy"],
             "models": entry.get("models", []), "token": ctx.providers.key_status(name),
+            "accounts": ctx.providers.list_accounts(name),
             "consented": entry["data_policy"] == "local" or bool(entry.get("consented"))}
 
 
@@ -114,7 +117,7 @@ def _clean(error, provider):
     text = str(error)
     if provider and provider.get("api_key"):
         text = text.replace(provider["api_key"], "***")
-    return text[:300]
+    return explain(text)[:600]
 
 
 def _record_usage(ctx, ref, provider, history, text, reported):
@@ -227,6 +230,8 @@ def dispatch(ctx, method, path, body):
                 claim=lambda: ctx.claim("digest"), release=lambda: ctx.release("digest")))
         if parts == ["usage"] and method == "GET":
             return Json(200, usage.summary_with_savings(ctx.ledger))
+        if parts == ["env"] and method == "GET":
+            return Json(200, ctx.env_fn())
         if parts == ["state"] and method == "GET":
             return Json(200, _state(ctx))
         if parts == ["chats"]:
@@ -265,6 +270,18 @@ def dispatch(ctx, method, path, body):
                 raise ApiError(400, "모델 이름이 올바르지 않습니다.")
             ctx.providers.add_model(name, model)
             return Json(200, {"ok": True})
+        if parts == ["providers", "accounts"] and method == "POST":
+            name = str(body.get("name", ""))
+            if ctx.providers.get(name) is None:
+                raise ApiError(400, "연결되지 않은 서비스입니다.")
+            if body.get("confirm_own") is not True:
+                raise ApiError(400, "본인이 직접 발급받았고 서비스 약관이 허용하는 계정인지 확인해 주세요.")
+            ctx.providers.add_account(name, str(body.get("label", "")).strip(), str(body.get("key", "")), body.get("rpm") or 0)
+            return Json(200, {"accounts": ctx.providers.list_accounts(name)})
+        if parts == ["providers", "accounts", "remove"] and method == "POST":
+            name = str(body.get("name", ""))
+            ctx.providers.remove_account(name, str(body.get("label", "")))
+            return Json(200, {"accounts": ctx.providers.list_accounts(name)})
         if parts == ["providers", "remove"] and method == "POST":
             ctx.providers.remove(str(body.get("name", "")))
             return Json(200, {"ok": True})
@@ -273,5 +290,5 @@ def dispatch(ctx, method, path, body):
     except PermissionError as error:
         raise ApiError(403, str(error)) from None
     except RuntimeError as error:
-        raise ApiError(502, str(error)) from None
+        raise ApiError(502, explain(str(error))) from None
     raise ApiError(404, "Not found")

@@ -25,67 +25,8 @@ class WorkerTests(unittest.TestCase):
             result = process_one(self.queue, allow_opencode=True)
         self.assertEqual(result["state"], "review")
 
-    def test_image_outputs_saved_for_review(self):
-        self.queue.add("image", "Render", {"workflow": "workflow.json",
-                                           "save_outputs": True,
-                                           "output_dir": self.temp.name})
-        with patch("workshop.worker.submit_workflow", return_value={"prompt_id": "abc"}), \
-             patch("workshop.worker.wait_for_images", return_value=[{"filename": "test.png"}]), \
-             patch("workshop.worker.download_images", return_value=[{"path": "test.png"}]), \
-             patch("workshop.worker.save_report", return_value=Path(self.temp.name) / "report.json"):
-            result = process_one(self.queue, allow_comfyui=True)
-        self.assertEqual(result["state"], "review")
-        self.assertEqual(result["result"]["files"][0]["path"], "test.png")
-
-    def test_image_output_requires_destination(self):
-        self.queue.add("image", "Render", {"workflow": "workflow.json",
-                                           "save_outputs": True})
-        with patch("workshop.worker.submit_workflow") as submit:
-            result = process_one(self.queue, allow_comfyui=True)
-            submit.assert_not_called()
-        self.assertEqual(result["state"], "failed")
-
-    def test_image_output_rejects_relative_destination_before_submit(self):
-        self.queue.add("image", "Render", {"workflow": "workflow.json",
-                                           "save_outputs": True,
-                                           "output_dir": "relative/images"})
-        with patch("workshop.worker.submit_workflow") as submit:
-            result = process_one(self.queue, allow_comfyui=True)
-            submit.assert_not_called()
-        self.assertEqual(result["state"], "failed")
-    def test_rejects_unsafe_comfyui_prompt_identifier(self):
-        self.queue.add('image', 'Render', {'workflow': 'workflow.json',
-                                           'save_outputs': True,
-                                           'output_dir': self.temp.name})
-        with patch('workshop.worker.submit_workflow', return_value={'prompt_id': '../outside'}), \
-             patch('workshop.worker.wait_for_images', return_value=[]), \
-             patch('workshop.worker.download_images', return_value=[]), \
-             patch('workshop.worker.save_report') as save:
-            result = process_one(self.queue, allow_comfyui=True)
-            save.assert_not_called()
-        self.assertEqual(result['state'], 'failed')
-    def test_invalid_prompt_id_stops_before_network_polling(self):
-        self.queue.add("image", "Render", {"workflow": "workflow.json",
-                                           "save_outputs": True,
-                                           "output_dir": self.temp.name})
-        with patch("workshop.worker.submit_workflow", return_value={"prompt_id": "../escape"}), \
-             patch("workshop.worker.wait_for_images") as poll, \
-             patch("workshop.worker.download_images") as download:
-            result = process_one(self.queue, allow_comfyui=True)
-            poll.assert_not_called()
-            download.assert_not_called()
-        self.assertEqual(result["state"], "failed")
-
-    def test_invalid_prompt_id_without_save_outputs(self):
-        self.queue.add("image", "Render", {"workflow": "workflow.json"})
-        with patch("workshop.worker.submit_workflow", return_value={"prompt_id": None}), \
-             patch("workshop.worker.wait_for_completion") as poll:
-            result = process_one(self.queue, allow_comfyui=True)
-            poll.assert_not_called()
-        self.assertEqual(result["state"], "failed")
-
-    def test_invalid_kind_not_executed(self):
-        self.queue.add("image", "Generate image")
+    def test_kind_without_an_executor_is_not_executed(self):
+        self.queue.add("plan", "Write a plan")
         with patch("workshop.worker.run_opencode") as runner:
             result = process_one(self.queue, allow_opencode=True)
             runner.assert_not_called()
@@ -135,7 +76,7 @@ class WorkerInterruptionTests(unittest.TestCase):
         self.assertEqual(self.queue.list()[0]["state"], "failed")
 
     def test_disabled_executor_leaves_other_kinds_untouched(self):
-        image = self.queue.add("image", "img", {"workflow": "{}"})
+        plan = self.queue.add("plan", "p")
         self.assertIsNone(process_one(self.queue, allow_opencode=True))
         job = self.queue.list()[0]
-        self.assertEqual((job["id"], job["state"], job["attempts"]), (image, "queued", 0))
+        self.assertEqual((job["id"], job["state"], job["attempts"]), (plan, "queued", 0))

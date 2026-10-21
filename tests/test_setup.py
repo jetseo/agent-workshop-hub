@@ -95,7 +95,7 @@ class RunTestTests(unittest.TestCase):
         self.assertEqual(self.providers.load(), {})
 
     def test_cloud_requires_consent_but_local_does_not(self):
-        self.assertIn("consent", self.submit(consent="")["error"].lower())
+        self.assertIn("동의", self.submit(consent="")["error"])
         self.assertEqual(self.calls, [])
         result = self.submit(service="ollama", key="", consent="", model="llama3.2:3b")
         self.assertTrue(result["ok"])
@@ -109,10 +109,10 @@ class RunTestTests(unittest.TestCase):
         self.assertIn("***", error)
 
     def test_missing_token_model_prompt_and_stored_key_reuse(self):
-        self.assertIn("token", self.submit(key="")["error"].lower())
-        self.assertIn("model", self.submit(model="")["error"].lower())
-        self.assertIn("Prompt", self.submit(prompt="")["error"])
-        self.assertIn("Prompt", self.submit(prompt="x" * 2001)["error"])
+        self.assertIn("토큰", self.submit(key="")["error"])
+        self.assertIn("모델", self.submit(model="")["error"])
+        self.assertIn("프롬프트", self.submit(prompt="")["error"])
+        self.assertIn("프롬프트", self.submit(prompt="x" * 2001)["error"])
         self.assertEqual(self.calls, [])
         self.assertTrue(self.submit()["saved"])
         self.assertTrue(self.submit(key="")["ok"])           # reuses the stored token

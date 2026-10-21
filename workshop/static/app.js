@@ -246,6 +246,7 @@
     if (name === "terminal") startTerminal();
     if (name === "chat") { loadState(); loadUsage(); }
     if (name === "digest") digestInit();
+    if (name === "settings") renderSettings();
     if (window.innerWidth <= 760) setSide(false);
   }
   Array.prototype.forEach.call(document.querySelectorAll(".side-nav [data-view]"), function (b) { b.addEventListener("click", function () { showView(b.dataset.view); }); });
@@ -486,6 +487,86 @@
       h("input", { type: "checkbox", id: "fallback-toggle", checked: state.fallback ? "checked" : false, onchange: function (e) { state.fallback = e.target.checked; store("fallback", state.fallback ? "1" : "0"); } }),
       h("span", { text: "한도·오류가 나면 다른 무료/로컬 모델로 자동 전환 (요금이 나올 수 있는 모델로는 넘어가지 않습니다)" })));
     menu.appendChild(h("button", { type: "button", class: "foot", text: "+ 서비스 연결 · 서비스 추가", onclick: function () { closeMenu(); openWizard(); } }));
+    menu.appendChild(h("button", { type: "button", class: "foot", id: "open-accounts", text: "계정(키) 여러 개 관리", onclick: function () { closeMenu(); openAccounts(); } }));
+  }
+  /* ---------- settings view (native; replaces the old framed setup page) ---------- */
+  async function renderSettings() {
+    var list = $("set-list");
+    loadEnv().then(function (env) {
+      var node = $("set-env-text");
+      if (!node) return;
+      if (!env) { node.textContent = "확인하지 못했습니다."; return; }
+      var parts = [env.os + " · Python " + env.python,
+        env.ollama.running ? "Ollama 실행 중(모델 " + env.ollama.models.length + "개)" : "Ollama 없음(선택 사항)"];
+      parts.push(env.opencode ? "OpenCode 있음" : "OpenCode 없음(선택 사항)");
+      if (env.wsl.applicable) parts.push(env.wsl.available ? "WSL 사용 가능" : "WSL 없음(터미널·코드 작업에만 필요)");
+      node.textContent = parts.join(" · ");
+    });
+    try { await loadState(); } catch (e) { /* keep what we have */ }
+    list.textContent = "";
+    if (!state.providers.length) { list.appendChild(h("p", { class: "sub", text: "아직 연결된 서비스가 없습니다. 위의 \"서비스 추가\"로 시작하세요." })); return; }
+    state.providers.forEach(function (p) {
+      var local = p.policy === "local";
+      var badge = local ? "내 PC" : (p.consented ? "클라우드 · 전송 동의함" : "클라우드 · 동의 필요");
+      var addModel = h("input", { type: "text", placeholder: "모델 이름 추가", "aria-label": "모델 이름 추가", maxlength: "200" });
+      var msg = h("span", { class: "sub" });
+      var card = h("div", { class: "svc-card", "data-provider": p.name },
+        h("div", { class: "row" }, h("b", { text: p.label }), h("span", { class: "pill", text: badge })),
+        h("div", { class: "sub", text: p.base_url + " · 토큰 " + p.token }),
+        h("div", { class: "sub", text: "모델 " + p.models.length + "개" + (p.models.length ? ": " + p.models.slice(0, 6).join(", ") + (p.models.length > 6 ? " …" : "") : "") }),
+        h("div", { class: "row" }, addModel,
+          h("button", { type: "button", class: "btn", text: "추가", onclick: async function () {
+            var m = addModel.value.trim(); if (!m) return;
+            try { await api("POST", "/providers/models", { name: p.name, model: m }); await renderSettings(); } catch (e) { msg.textContent = e.message; } } })),
+        h("div", { class: "row" },
+          local ? h("span") : h("button", { type: "button", class: "btn", text: "계정(키) 관리", onclick: function () { openAccounts(); } }),
+          h("button", { type: "button", class: "btn danger", "data-remove": p.name, text: "연결 해제", onclick: async function () {
+            if (!window.confirm(p.label + " 연결을 해제할까요? 저장된 토큰도 함께 삭제됩니다.")) return;
+            try { await api("POST", "/providers/remove", { name: p.name }); await loadState(); pickDefaultModel(); renderModelBtn(); await renderSettings(); } catch (e) { msg.textContent = e.message; } } })),
+        msg);
+      list.appendChild(card);
+    });
+  }
+  $("set-add").addEventListener("click", function () { openWizard(); });
+
+  /* ---------- accounts: several keys of one service, used in turn ---------- */
+  function openAccounts() {
+    var root = $("wizard"), msg = h("p", { class: "note", id: "acc-msg", text: "" });
+    root.hidden = false;
+    function paint() {
+      root.textContent = "";
+      var card = h("div", { class: "card", role: "dialog", "aria-modal": "true", "aria-label": "계정 관리" },
+        h("header", {}, h("div", {}, h("h2", { text: "서비스별 계정(키) 관리" }),
+          h("p", { class: "sub", text: "한 서비스에 키를 여러 개 두면, 한도(429)가 차거나 분당 요청 수를 넘을 때 다음 계정으로 넘어갑니다." })),
+          h("button", { class: "icon", "aria-label": "닫기", text: "✕", onclick: function () { root.hidden = true; root.textContent = ""; } })));
+      card.appendChild(h("p", { class: "note", text: "본인이 직접 발급받았고 서비스 약관이 허용하는 계정만 등록하세요(예: 개인 계정과 회사·팀 계정). 한 사람이 무료 한도를 늘리려고 계정을 여러 개 만드는 것은 대부분의 서비스가 금지하며 계정이 정지될 수 있습니다." }));
+      var cloud = state.providers.filter(function (p) { return p.policy !== "local"; });
+      if (!cloud.length) card.appendChild(h("p", { class: "note", text: "먼저 클라우드 서비스를 하나 연결하세요." }));
+      cloud.forEach(function (p) {
+        var box = h("section", { class: "acc-box", "data-provider": p.name }, h("b", { text: p.label }));
+        (p.accounts || []).forEach(function (a) {
+          box.appendChild(h("div", { class: "acc-row" }, h("span", { text: a.label + " · " + a.token + (a.rpm ? " · 분당 " + a.rpm + "회" : "") }),
+            a.primary ? h("i", { text: "기본" }) : h("button", { type: "button", class: "btn", text: "삭제", onclick: async function () {
+              try { await api("POST", "/providers/accounts/remove", { name: p.name, label: a.label }); await loadState(); paint(); } catch (e) { msg.textContent = e.message; } } })));
+        });
+        var label = h("input", { type: "text", maxlength: "20", placeholder: "별칭(예: 회사)", "aria-label": "별칭" });
+        var key = h("input", { type: "password", autocomplete: "off", spellcheck: "false", maxlength: "512", placeholder: "토큰", "aria-label": "토큰" });
+        var rpm = h("input", { type: "number", min: "0", max: "100000", placeholder: "분당 한도(0=제한 없음)", "aria-label": "분당 한도" });
+        var own = h("input", { type: "checkbox", "aria-label": "본인 계정 확인" });
+        box.appendChild(h("div", { class: "acc-add" }, label, key, rpm,
+          h("label", { class: "opt" }, own, h("span", { text: "본인이 발급받았고 약관이 허용하는 계정입니다" })),
+          h("button", { type: "button", class: "btn", "data-add": p.name, text: "계정 추가", onclick: async function () {
+            try {
+              await api("POST", "/providers/accounts", { name: p.name, label: label.value.trim(), key: key.value.trim(), rpm: Number(rpm.value) || 0, confirm_own: own.checked });
+              await loadState(); paint(); $("acc-msg").textContent = "추가했습니다. 채팅에서 한도가 차면 이 계정으로 넘어갑니다.";
+            } catch (e) { $("acc-msg").textContent = e.message; }
+          } })));
+        card.appendChild(box);
+      });
+      card.appendChild(msg);
+      root.appendChild(h("div", { class: "card-wrap", style: "display:contents" }, card));
+    }
+    paint();
   }
   async function renderMoreModels(p) {
     var menu = $("modelmenu");
@@ -554,6 +635,7 @@
     if (w.step === 1) wizStep1(card, w); else if (w.step === 2) wizStep2(card, w); else wizStep3(card, w);
     root.appendChild(h("div", { class: "card-wrap", style: "display:contents" }, card));
   }
+  async function loadEnv() { try { return await api("GET", "/env"); } catch (e) { return null; } }
   function wizStep1(card, w) {
     var items = state.catalog.map(function (c) {
       return h("button", { class: "svc", type: "button", "data-service": c.id, onclick: function () { w.service = c.id; w.step = 2; w.error = ""; renderWizard(); } },
@@ -561,7 +643,21 @@
     });
     items.push(h("button", { class: "svc", type: "button", "data-service": "custom", onclick: function () { w.service = "custom"; w.step = 2; w.error = ""; renderWizard(); } },
       h("b", { text: "직접 입력" }), h("span", { text: "OpenAI 호환 주소를 직접 지정" })));
+    var envBox = h("p", { class: "note", id: "w-env", text: "이 PC를 확인하는 중…" });
+    card.appendChild(envBox);
+    loadEnv().then(function (env) {
+      var node = $("w-env");
+      if (!node) return;
+      if (!env) { node.textContent = ""; return; }
+      var parts = [];
+      parts.push(env.ollama.running ? "Ollama 실행 중 (모델 " + env.ollama.models.length + "개) — 아래에서 Ollama를 고르면 토큰 없이 바로 쓸 수 있습니다."
+                                    : "Ollama는 감지되지 않았습니다(선택 사항). 클라우드 무료 서비스로 먼저 시작해도 됩니다.");
+      if (env.wsl.applicable) parts.push(env.wsl.available ? "WSL 사용 가능(터미널·코드 작업에 필요)." : "WSL 없음 — 채팅·압축·사용량은 WSL 없이 쓸 수 있습니다.");
+      node.textContent = parts.join(" ");
+      if (env.ollama.running) Array.prototype.forEach.call(document.querySelectorAll('.svc[data-service="ollama"]'), function (b) { b.classList.add("rec"); });
+    });
     card.appendChild(h("div", { class: "grid" }, items));
+    card.appendChild(h("div", { class: "foot" }, h("button", { class: "btn", type: "button", id: "w-later", text: "나중에 할게요", onclick: function () { closeWizard(); } })));
     card.appendChild(h("p", { class: "note", text: "처음이라면 무료 티어가 있는 서비스나 Ollama(내 PC)를 추천합니다. 무료 서비스는 입력이 학습에 쓰일 수 있고 한도가 자주 바뀝니다." }));
   }
   function wizStep2(card, w) {

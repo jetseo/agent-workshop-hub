@@ -1,11 +1,11 @@
 """Run read-only checks: python -m workshop.doctor."""
 import json
 from .preflight import describe_error
-from .adapters import capabilities, ollama_models, comfyui_health
+from .adapters import capabilities, ollama_models
 
 def diagnose():
     result = {"executables": capabilities(), "services": {}}
-    for name, fn in (("ollama", ollama_models), ("comfyui", comfyui_health)):
+    for name, fn in (("ollama", ollama_models),):
         try:
             value = fn()
             result["services"][name] = {"available": True, "details": value}

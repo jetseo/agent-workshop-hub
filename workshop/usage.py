@@ -12,6 +12,8 @@ import threading
 import time
 from pathlib import Path
 
+from . import pagestyle
+
 TIERS = ("local", "free", "other")
 TIER_LABELS = {"local": "내 PC(로컬)", "free": "무료 모델", "other": "그 밖(유료일 수 있음)"}
 MAX_READ_BYTES = 20 * 1024 * 1024
@@ -143,14 +145,13 @@ def render_page(summary):
               "<div class='card'><div class='k'>캐시 재사용으로 아낀 토큰</div><div class='v' style='color:#5aa9ff'>%s</div>"
               "<div class='s'>같은 요청 %s회를 다시 부르지 않음(추정)</div></div></div>"
               % (_n(summary["free_or_local_tokens"]), _n(cache["tokens_saved"]), _n(cache["hits"])))
-    labels = {"chat": "채팅", "board": "보드(멀티 모델 작업)", "digest": "긴 글 압축"}
+    labels = {"chat": "채팅", "board": "보드(멀티 모델 작업)", "digest": "긴 글 압축", "queue": "작업 큐(OpenCode)"}
     sources = " · ".join(esc(labels.get(k, k)) + " " + _n(v["tokens"]) for k, v in sorted(summary.get("by_source", {}).items())) or "기록 없음"
     note = ("일부 수치는 서비스가 사용량을 알려주지 않아 글자 수로 추정했습니다 (%.0f%%)." % (summary["estimated_share"] * 100)
             if summary["estimated_share"] else "모든 수치는 서비스가 보고한 사용량입니다.")
     return ("<!doctype html><html lang='ko'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>"
-            "<title>사용량</title><style>:root{--bg:#111827;--fg:#e5e7eb;--card:#1f2937;--line:#374151;--muted:#9ca3af}"
-            ":root[data-theme='light']{--bg:#fff;--fg:#1f2328;--card:#f7f7f8;--line:#e5e7eb;--muted:#6b7280}"
-            "body{font-family:system-ui,'Malgun Gothic',sans-serif;background:var(--bg);color:var(--fg);max-width:900px;margin:28px auto;padding:0 16px}"
+            "<title>사용량</title><style>" + pagestyle.TOKENS + pagestyle.BASE + ":root{--card:var(--bg2);--line:var(--border)}"
+            ""
             "h1{margin:0 0 4px}p.sub{color:var(--muted);margin:0 0 18px}.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px}"
             ".card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px}.k{color:var(--muted);font-size:13px}.v{font-size:28px;font-weight:700}.s{color:var(--muted);font-size:13px}"
             "h2{font-size:16px;margin:26px 0 8px}table{width:100%;border-collapse:collapse}td,th{padding:7px 8px;border-bottom:1px solid var(--line);text-align:left;font-size:14px}"

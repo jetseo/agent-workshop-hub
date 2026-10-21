@@ -13,10 +13,15 @@ class TestQueue(unittest.TestCase):
             q.approve(task)
             self.assertEqual(q.list()[0]["state"], "done")
 
+    def test_removed_image_kind_is_rejected(self):
+        with tempfile.TemporaryDirectory() as d:
+            with self.assertRaises(ValueError):
+                Queue(Path(d) / "tasks.db").add("image", "Generate sprite")
+
     def test_retry_limit(self):
         with tempfile.TemporaryDirectory() as d:
             q = Queue(Path(d) / "tasks.db")
-            task = q.add("image", "Generate sprite")
+            task = q.add("code", "Generate sprite")
             self.assertEqual(q.claim()["id"], task)
             self.assertEqual(q.finish(task, success=False), "failed")
             self.assertIsNone(q.claim())

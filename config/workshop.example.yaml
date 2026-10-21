@@ -21,9 +21,6 @@ agents:
   coding:
     primary: opencode
     optional: [codex, claude-code]
-  image:
-    engine: comfyui
-    max_gpu_jobs: 1
   qa:
     enabled: false
 safety:
