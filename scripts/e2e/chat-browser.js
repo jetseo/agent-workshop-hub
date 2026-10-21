@@ -16,7 +16,12 @@ const ok = (cond, msg) => { if (!cond) throw new Error("CHECK FAILED: " + msg); 
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
   const page = await ctx.newPage();
   const problems = [];
-  page.on("console", m => { if (m.type() === "error") problems.push(m.text()); });
+  let expected400 = 0;      // the one refusal we provoke on purpose (adding an account without the ownership confirmation)
+  page.on("console", m => {
+    if (m.type() !== "error") return;
+    if (expected400 > 0 && m.text().includes("status of 400")) { expected400--; return; }
+    problems.push(m.text());
+  });
   page.on("pageerror", e => problems.push("pageerror: " + e.message));
   let dialogs = 0; page.on("dialog", d => { dialogs++; d.accept(); });
   const shot = n => page.screenshot({ path: out + "/" + n + ".png" });
@@ -79,7 +84,7 @@ const ok = (cond, msg) => { if (!cond) throw new Error("CHECK FAILED: " + msg); 
   // switch to the md model through the picker
   await $("#modelbtn").click();
   await shot("06-model-menu");
-  ok((await $("#modelmenu button.foot").count()) === 1, "picker offers 'connect another service'");
+  ok((await $("#modelmenu button.foot").count()) === 2, "picker offers connecting another service and managing accounts");
   ok((await $("#modelmenu [data-more]").count()) === 1, "picker offers 'more models' for the service");
   await $("#modelmenu [data-more]").click();
   await $("#more-list [data-pick]").first().waitFor({ timeout: 8000 });
@@ -196,6 +201,41 @@ const ok = (cond, msg) => { if (!cond) throw new Error("CHECK FAILED: " + msg); 
   ok((await $("#dg-out").textContent()).length > 0, "digest shows a result");
   ok((await $("#dg-stats").textContent()).includes("토큰"), "digest shows token stats");
   await shot("15-digest");
+
+  console.log("7c. several accounts per service");
+  {
+    const fs = require("fs"), path = require("path");
+    const dir = path.join(process.env.HOME, ".agent-workshop"), file = path.join(dir, "providers.json");
+    const data = JSON.parse(fs.readFileSync(file, "utf8"));
+    data.providers.cloudx = { base_url: "https://example.invalid/v1", key_env: null, data_policy: "cloud-no-train", rpm: 0, models: ["m1-free"], consented: true };
+    fs.writeFileSync(file, JSON.stringify(data));
+  }
+  await $('.side-nav [data-view="chat"]').count();
+  await page.reload();
+  await until(async () => (await $("#modelbtn").textContent()).length > 0, 6000, "app reloaded");
+  await $("#modelbtn").click();
+  await $("#open-accounts").click();
+  await until(async () => (await $('.acc-box[data-provider="cloudx"]').count()) === 1, 6000, "cloud service listed");
+  ok((await $("#wizard .note").first().textContent()).includes("약관"), "the terms warning is shown before adding accounts");
+  const box = $('.acc-box[data-provider="cloudx"]');
+  await box.locator('input[aria-label="별칭"]').fill("회사");
+  await box.locator('input[aria-label="토큰"]').fill("work-key-ABCD1234");
+  expected400 = 1;
+  await box.locator('[data-add="cloudx"]').click();
+  await until(async () => (await $("#acc-msg").textContent()).includes("약관"), 4000, "refused without confirmation");
+  ok(expected400 === 0, "the refusal was the expected 400");
+  ok(true, "adding without the ownership confirmation is refused");
+  await $('.acc-box[data-provider="cloudx"] input[aria-label="별칭"]').fill("회사");
+  await $('.acc-box[data-provider="cloudx"] input[aria-label="토큰"]').fill("work-key-ABCD1234");
+  await $('.acc-box[data-provider="cloudx"] input[aria-label="본인 계정 확인"]').check();
+  await $('.acc-box[data-provider="cloudx"] [data-add="cloudx"]').click();
+  await until(async () => (await $('.acc-box[data-provider="cloudx"] .acc-row').count()) === 1, 4000, "account row");
+  const rowText = await $('.acc-box[data-provider="cloudx"] .acc-row').first().textContent();
+  ok(rowText.includes("회사") && rowText.includes("\u2022\u2022\u2022\u2022") && !rowText.includes("work-key"), "the new account shows a masked token only");
+  await shot("16-accounts");
+  await $('.acc-box[data-provider="cloudx"] .acc-row button').click();
+  await until(async () => (await $('.acc-box[data-provider="cloudx"] .acc-row').count()) === 0, 4000, "account removed");
+  await $('#wizard [aria-label="닫기"]').click();
 
   console.log("8. other views, theme");
   await $('.side-nav [data-view="settings"]').click();

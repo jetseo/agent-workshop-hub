@@ -62,6 +62,7 @@ def _provider_view(ctx, name, entry):
     label = setup_page.BY_ID.get(name, {}).get("label", name)
     return {"name": name, "label": label, "base_url": entry["base_url"], "policy": entry["data_policy"],
             "models": entry.get("models", []), "token": ctx.providers.key_status(name),
+            "accounts": ctx.providers.list_accounts(name),
             "consented": entry["data_policy"] == "local" or bool(entry.get("consented"))}
 
 
@@ -268,6 +269,18 @@ def dispatch(ctx, method, path, body):
                 raise ApiError(400, "모델 이름이 올바르지 않습니다.")
             ctx.providers.add_model(name, model)
             return Json(200, {"ok": True})
+        if parts == ["providers", "accounts"] and method == "POST":
+            name = str(body.get("name", ""))
+            if ctx.providers.get(name) is None:
+                raise ApiError(400, "연결되지 않은 서비스입니다.")
+            if body.get("confirm_own") is not True:
+                raise ApiError(400, "본인이 직접 발급받았고 서비스 약관이 허용하는 계정인지 확인해 주세요.")
+            ctx.providers.add_account(name, str(body.get("label", "")).strip(), str(body.get("key", "")), body.get("rpm") or 0)
+            return Json(200, {"accounts": ctx.providers.list_accounts(name)})
+        if parts == ["providers", "accounts", "remove"] and method == "POST":
+            name = str(body.get("name", ""))
+            ctx.providers.remove_account(name, str(body.get("label", "")))
+            return Json(200, {"accounts": ctx.providers.list_accounts(name)})
         if parts == ["providers", "remove"] and method == "POST":
             ctx.providers.remove(str(body.get("name", "")))
             return Json(200, {"ok": True})

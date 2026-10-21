@@ -43,6 +43,8 @@ class MockOpenAI(BaseHTTPRequestHandler):
         body = json.loads(self.rfile.read(int(self.headers["Content-Length"])).decode())
         self.server.requests.append(("POST", self.path, self.headers.get("Authorization"), body))
         model = body["model"]
+        if model == "keyed" and (self.headers.get("Authorization") or "").endswith("LIMITED00"):
+            return self._json(429, {"error": {"message": "this key is out of quota"}})
         if model.startswith("ratelimit"):
             return self._json(429, {"error": {"message": "slow down"}})
         if model == "badopt" and "stream_options" in body:
@@ -529,6 +531,74 @@ class EnvApiTests(ApiBase):
         found = envcheck.inspect(ollama_fn=lambda timeout=1: ["llama3.2:3b"], which=lambda name: "/x/" + name)
         self.assertEqual(found["ollama"]["models"], ["llama3.2:3b"])
         self.assertTrue(found["opencode"])
+
+
+class MultiAccountTests(ApiBase):
+    def setUp(self):
+        super().setUp()
+        from workshop import ratelimit
+        ratelimit.reset()
+        self.addCleanup(ratelimit.reset)
+        self.onboard(key="first-LIMITED00")
+        self.providers.add_model("mock", "keyed")
+
+    def auth_sequence(self):
+        return [r[2] for r in self.mock.requests if r[0] == "POST" and r[3]["model"] == "keyed"]
+
+    def add_account(self, label="개인2", key="second-GOODKEY00", **extra):
+        body = {"name": "mock", "label": label, "key": key, "confirm_own": True}
+        body.update(extra)
+        return self.jcall("POST", "/providers/accounts", body)
+
+    def test_a_429_on_one_account_moves_to_the_next_account_not_the_next_model(self):
+        self.assertEqual(self.add_account()[0], 200)
+        status, events = self.sse(self.new_chat("mock/keyed"), {"content": "hi", "fallback": False})
+        self.assertEqual(events[-1][0], "done")
+        self.assertEqual(self.auth_sequence(), ["Bearer first-LIMITED00", "Bearer second-GOODKEY00"])
+        self.assertNotIn("notice", [e[0] for e in events])           # no model switch was needed
+
+    def test_without_a_working_second_account_the_429_still_reaches_the_user(self):
+        status, events = self.sse(self.new_chat("mock/keyed"), {"content": "hi", "fallback": False})
+        self.assertEqual(events[-1][0], "error")
+        self.assertIn("429", events[-1][1]["message"])
+
+    def test_adding_needs_the_ownership_confirmation(self):
+        status, body = self.add_account(confirm_own=False)
+        self.assertEqual(status, 400)
+        self.assertIn("약관", body["error"])
+        self.assertEqual(self.providers.list_accounts("mock")[0]["label"], "기본")
+        self.assertEqual(len(self.providers.list_accounts("mock")), 1)
+
+    def test_tokens_are_masked_everywhere_and_never_in_providers_json(self):
+        self.add_account()
+        status, state = self.jcall("GET", "/state")
+        accounts = state["providers"][0]["accounts"]
+        self.assertEqual([a["label"] for a in accounts], ["기본", "개인2"])
+        self.assertNotIn("GOODKEY00", json.dumps(state))
+        self.assertNotIn("GOODKEY00", self.providers.path.read_text())
+        self.assertEqual(accounts[1]["token"], "\u2022\u2022\u2022\u2022EY00")
+
+    def test_bad_input_is_rejected_and_removal_deletes_the_key(self):
+        self.assertEqual(self.add_account(label="bad label!")[0], 400)
+        self.assertEqual(self.add_account(label="기본")[0], 400)
+        self.assertEqual(self.add_account(key="short")[0], 400)
+        self.assertEqual(self.add_account(rpm=-1)[0], 400)
+        self.add_account()
+        status, body = self.jcall("POST", "/providers/accounts/remove", {"name": "mock", "label": "개인2"})
+        self.assertEqual([a["label"] for a in body["accounts"]], ["기본"])
+        self.assertNotIn("GOODKEY00", self.providers.secrets_path.read_text())
+        self.add_account()
+        self.jcall("POST", "/providers/remove", {"name": "mock"})
+        self.assertNotIn("GOODKEY00", self.providers.secrets_path.read_text())
+
+    def test_each_account_has_its_own_rpm_window(self):
+        from workshop import ratelimit
+        self.add_account(rpm=1)
+        provider = self.providers.get("mock")
+        self.assertEqual([a["label"] for a in provider["accounts"]], ["기본", "개인2"])
+        self.assertTrue(ratelimit.try_acquire(provider, "개인2", 1))
+        self.assertFalse(ratelimit.try_acquire(provider, "개인2", 1))
+        self.assertTrue(ratelimit.try_acquire(provider, "기본", 1))     # the other account is unaffected
 
 
 class FallbackCandidateTests(unittest.TestCase):

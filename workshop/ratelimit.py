@@ -14,11 +14,31 @@ class RateLimited(RuntimeError):
     pass
 
 
-def acquire(provider, *, clock=time.monotonic, sleep=time.sleep, max_wait=MAX_WAIT):
-    limit = int(provider.get("rpm") or 0)
+def _scope(provider, account):
+    return provider.get("base_url", "") + ("|" + account if account else "")
+
+
+def try_acquire(provider, account=None, rpm=None, *, clock=time.monotonic):
+    """Take a slot now if one is free (never waits). Used to pick among several accounts of one service."""
+    limit = int(rpm if rpm is not None else provider.get("rpm") or 0)
+    if limit <= 0:
+        return True
+    key = _scope(provider, account)
+    with _lock:
+        now = clock()
+        window = [t for t in _calls.get(key, []) if now - t < WINDOW]
+        ok = len(window) < limit
+        if ok:
+            window.append(now)
+        _calls[key] = window
+        return ok
+
+
+def acquire(provider, account=None, rpm=None, *, clock=time.monotonic, sleep=time.sleep, max_wait=MAX_WAIT):
+    limit = int(rpm if rpm is not None else provider.get("rpm") or 0)
     if limit <= 0:
         return
-    key = provider.get("base_url", "")
+    key = _scope(provider, account)
     while True:
         with _lock:
             now = clock()

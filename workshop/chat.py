@@ -39,6 +39,39 @@ def _open(request, timeout):
         raise RuntimeError("Provider unreachable: " + str(error.reason)[:200]) from None
 
 
+def _accounts(provider):
+    """Accounts to try in order. Without extra accounts this is just the provider itself (no behaviour change)."""
+    accounts = provider.get("accounts")
+    if not accounts:
+        return [(None, provider, None)]
+    return [(a["label"], {**provider, "api_key": a["api_key"]}, a.get("rpm") or provider.get("rpm") or 0) for a in accounts]
+
+
+def _with_account(provider, attempt):
+    """Run attempt(provider_view) on the first account with free quota; a 429 moves on to the next account.
+
+    Any other error, and a 429 on the last account, is raised unchanged so the model fallback can take over."""
+    choices = _accounts(provider)
+    if len(choices) == 1:
+        ratelimit.acquire(provider)
+        return attempt(choices[0][1])
+    last, tried = None, False
+    for label, view, rpm in choices:               # first account with free quota; a 429 moves on to the next one
+        if not ratelimit.try_acquire(provider, label, rpm):
+            continue
+        tried = True
+        try:
+            return attempt(view)
+        except RuntimeError as error:
+            last = error
+            if "HTTP 429" not in str(error):
+                raise
+    if tried:
+        raise last
+    ratelimit.acquire(provider, choices[0][0], choices[0][2])      # every account is at its limit: wait or fail
+    return attempt(choices[0][1])
+
+
 def _chat_request(provider, model, messages, max_tokens, stream, include_usage=False):
     headers = {"Content-Type": "application/json"}
     key = _key(provider)
@@ -54,9 +87,10 @@ def _chat_request(provider, model, messages, max_tokens, stream, include_usage=F
 
 
 def chat(provider, model, messages, *, timeout=120, max_tokens=2000):
-    ratelimit.acquire(provider)
-    with _open(_chat_request(provider, model, messages, max_tokens, False), timeout) as response:
-        data = json.load(response)
+    def attempt(view):
+        with _open(_chat_request(view, model, messages, max_tokens, False), timeout) as response:
+            return json.load(response)
+    data = _with_account(provider, attempt)
     try:
         return data["choices"][0]["message"]["content"]
     except (KeyError, IndexError, TypeError):
@@ -67,16 +101,15 @@ def chat_stream(provider, model, messages, *, timeout=120, max_tokens=2048, usag
     """Yield text deltas from an OpenAI-style server-sent-events stream.
 
     If `usage` (a dict) is given it is filled with prompt_tokens/completion_tokens when the service reports them."""
-    ratelimit.acquire(provider)
-    response = None
-    for include in (True, False):
-        try:
-            response = _open(_chat_request(provider, model, messages, max_tokens, True, include_usage=include), timeout)
-            break
-        except RuntimeError as error:
-            if include and "HTTP 400" in str(error):      # some servers reject stream_options: retry without it
-                continue
-            raise
+    def attempt(view):
+        for include in (True, False):
+            try:
+                return _open(_chat_request(view, model, messages, max_tokens, True, include_usage=include), timeout)
+            except RuntimeError as error:
+                if include and "HTTP 400" in str(error):      # some servers reject stream_options: retry without it
+                    continue
+                raise
+    response = _with_account(provider, attempt)
     with response:
         for raw in response:
             line = raw.decode("utf-8", "replace").strip()
