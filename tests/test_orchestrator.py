@@ -189,7 +189,11 @@ class ReferenceFileTests(Fixture):
         (root / ".env").write_text("KEY=1", encoding="utf-8")
         (root / "auth.json").write_text("{}", encoding="utf-8")
         (self.dir / "outside.md").write_text("outside", encoding="utf-8")
-        (root / "link.md").symlink_to(self.dir / "outside.md")
+        try:
+            (root / "link.md").symlink_to(self.dir / "outside.md")
+            self.has_symlink = True
+        except (OSError, NotImplementedError):  # Windows without the symlink privilege
+            self.has_symlink = False
         return root
 
     def spec(self, files):
@@ -207,8 +211,11 @@ class ReferenceFileTests(Fixture):
 
     def test_unsafe_references_are_refused(self):
         root = self.make_root()
-        for bad in ([".env"], ["auth.json"], ["link.md"], ["../outside.md"], [str(root / "README.md")],
-                    ["missing.md"], [123], ["README.md"] * 11):
+        bad_specs = [[".env"], ["auth.json"], ["../outside.md"], [str(root / "README.md")],
+                     ["missing.md"], [123], ["README.md"] * 11]
+        if self.has_symlink:
+            bad_specs.append(["link.md"])
+        for bad in bad_specs:
             with self.assertRaises(ValueError, msg=str(bad)):
                 create_board(self.dir / "bx", self.spec(bad), context_root=root)
 

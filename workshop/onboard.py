@@ -28,7 +28,17 @@ def _opencode(args):
     return done.stdout.strip() if done.returncode == 0 else "(exit " + str(done.returncode) + ")"
 
 
+def _safe_console():
+    """Legacy Windows code pages (cp949 ...) cannot print the key mask bullets; replace instead of crashing."""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(errors="replace")
+        except (AttributeError, ValueError):
+            pass
+
+
 def main(argv=None):
+    _safe_console()
     parser = argparse.ArgumentParser(description="JetAI Hub provider onboarding")
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("list")
