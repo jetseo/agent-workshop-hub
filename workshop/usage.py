@@ -79,7 +79,7 @@ class UsageLedger:
         blank = lambda: {"requests": 0, "tokens": 0}
         totals = {t: blank() for t in TIERS}
         today = {t: blank() for t in TIERS}
-        by_model, by_day = {}, {}
+        by_model, by_day, by_source = {}, {}, {}
         estimated = every = 0
         for r in self._records():
             if r["ts"] < cutoff:
@@ -93,12 +93,13 @@ class UsageLedger:
             entry = by_model.setdefault(key, blank()); entry["requests"] += 1; entry["tokens"] += tokens
             day = time.strftime("%m-%d", time.localtime(r["ts"]))
             by_day.setdefault(day, {t: 0 for t in TIERS})[tier] += tokens
+            src = by_source.setdefault(str(r.get("source", "chat")), blank()); src["requests"] += 1; src["tokens"] += tokens
             every += tokens
             if r.get("estimated"):
                 estimated += tokens
         models = sorted(({"model": k[0], "tier": k[1], **v} for k, v in by_model.items()), key=lambda m: -m["tokens"])[:10]
         saved = totals["local"]["tokens"] + totals["free"]["tokens"]
-        return {"days": days, "totals": totals, "today": today, "by_model": models,
+        return {"days": days, "totals": totals, "today": today, "by_model": models, "by_source": by_source,
                 "by_day": [{"day": d, **by_day[d]} for d in sorted(by_day)][-14:],
                 "all_tokens": every, "free_or_local_tokens": saved,
                 "free_share": round(saved / every, 3) if every else 0.0,
@@ -124,6 +125,8 @@ def render_page(summary):
                                for t in TIERS if d[t]), _n(d["local"] + d["free"] + d["other"])) for d in summary["by_day"]) \
         or "<p>아직 기록이 없습니다.</p>"
     share = "%.0f%%" % (summary["free_share"] * 100)
+    labels = {"chat": "채팅", "board": "보드(멀티 모델 작업)"}
+    sources = " · ".join(esc(labels.get(k, k)) + " " + _n(v["tokens"]) for k, v in sorted(summary.get("by_source", {}).items())) or "기록 없음"
     note = ("일부 수치는 서비스가 사용량을 알려주지 않아 글자 수로 추정했습니다 (%.0f%%)." % (summary["estimated_share"] * 100)
             if summary["estimated_share"] else "모든 수치는 서비스가 보고한 사용량입니다.")
     return ("<!doctype html><html lang='ko'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>"
@@ -138,6 +141,7 @@ def render_page(summary):
             ".t{width:90px;text-align:right;font-size:13px;color:var(--muted)}small{color:var(--muted)}</style></head><body>"
             "<h1>사용량</h1><p class='sub'>최근 " + str(int(summary["days"])) + "일 · 무료·로컬 모델이 처리한 비중 <b>" + share + "</b></p>"
             "<div class='cards'>" + cards + "</div>"
+            + "<p class='sub'>출처별 토큰: " + sources + "</p>"
             + "<h2>하루별 토큰</h2>" + days
             + "<h2>모델별 (상위 10)</h2><table><tr><th>모델</th><th>구분</th><th>요청</th><th>토큰</th></tr>" + rows + "</table>"
             + "<p><small>" + esc(note) + " 금액으로 환산하지 않습니다(서비스별 단가가 다르고 자주 바뀜). "

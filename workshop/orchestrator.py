@@ -18,6 +18,7 @@ from .chat import chat
 from .modelpolicy import classify
 from . import worktree
 from .providers import Providers
+from .usage import UsageLedger, estimate_tokens, tier_of
 
 OPENCODE_PROVIDERS = ("opencode", "openai")  # served by the OpenCode CLI, not a chat endpoint
 CODE_NOTE = ("Make only the requested change inside the current working directory. Do not commit, push, "
@@ -92,6 +93,22 @@ def strip_banner(text):
     return "\n".join(lines).strip()
 
 
+_TIER = {"local": "local", "free": "free", "paid": "other"}
+
+
+def _record(flags, step, tier, sent, received):
+    """Book one successful step in the usage ledger. Step runs report no token counts, so these are estimates."""
+    ledger = flags.get("ledger")
+    if ledger is None:
+        return
+    name, _, model = step["model"].partition("/")
+    try:
+        ledger.record(provider=name, model=model, tier=tier, prompt_tokens=estimate_tokens(sent),
+                      completion_tokens=estimate_tokens(received), estimated=True, source="board")
+    except OSError:
+        pass                                   # a full disk must never fail a step
+
+
 def _require_cloud_consent(step, flags):
     if classify(step["model"]) != "local" and not (flags["allow_cloud"] and flags["allow_may_train"]):
         raise PermissionError("Model '" + step["model"] + "' runs on a cloud service that may train on your "
@@ -115,6 +132,7 @@ def _opencode_text(prompt, step, flags, sid, code_fn):
                          timeout=TEXT_TIMEOUT)
     if result.get("exit_code", 0) != 0:
         raise RuntimeError(_exit_error(result))
+    _record(flags, step, _TIER[classify(step["model"])], NO_TOOLS_NOTE + prompt, result.get("stdout", ""))
     return strip_banner(result.get("stdout", ""))
 
 
@@ -138,6 +156,7 @@ def _run_step(board, sid, step, providers, flags, text_fn, code_fn):
             if result.get("exit_code", 0) != 0:
                 raise RuntimeError(_exit_error(result) + " (worktree kept for inspection: " + str(path) + ")")
             info = worktree.collect_diff(path)
+            _record(flags, step, _TIER[classify(step["model"])], CODE_NOTE + prompt, result.get("stdout", ""))
             return ("Worktree: " + str(path) + "\nBranch: " + branch + "\n"
                     "Nothing was committed, pushed or merged. Review the diff, then merge or discard it yourself.\n\n"
                     + ("No files changed." if not info["changed"] else
@@ -148,6 +167,7 @@ def _run_step(board, sid, step, providers, flags, text_fn, code_fn):
         result = code_fn(CODE_NOTE + prompt, step["workspace"], enabled=True, model=step["model"])
         if result.get("exit_code", 0) != 0:
             raise RuntimeError(_exit_error(result))
+        _record(flags, step, _TIER[classify(step["model"])], CODE_NOTE + prompt, result.get("stdout", ""))
         return strip_banner(result.get("stdout", ""))
     provider = providers.get(provider_name)
     if provider is None and provider_name in OPENCODE_PROVIDERS:
@@ -162,7 +182,9 @@ def _run_step(board, sid, step, providers, flags, text_fn, code_fn):
     last = None
     for _ in range(TEXT_ATTEMPTS):
         try:
-            return text_fn(provider, model, [{"role": "user", "content": prompt}])
+            reply = text_fn(provider, model, [{"role": "user", "content": prompt}])
+            _record(flags, step, tier_of(policy, model), prompt, reply)     # only the attempt that succeeded
+            return reply
         except PermissionError:
             raise
         except Exception as error:
@@ -172,8 +194,8 @@ def _run_step(board, sid, step, providers, flags, text_fn, code_fn):
 
 def run_board(board, providers, *, allow_opencode=False, allow_cloud=False, allow_may_train=False,
               allow_paid=False, approve_text_agents=False, allow_main_checkout=False,
-              worktree_base=None, approved_code=(), max_parallel=2, text_fn=chat, code_fn=run_opencode, progress=None):
-    flags = {"allow_opencode": allow_opencode, "allow_cloud": allow_cloud,
+              worktree_base=None, approved_code=(), max_parallel=2, text_fn=chat, code_fn=run_opencode, progress=None, ledger=None):
+    flags = {"ledger": ledger, "allow_opencode": allow_opencode, "allow_cloud": allow_cloud,
              "allow_may_train": allow_may_train, "allow_paid": allow_paid, "approve_text_agents": approve_text_agents,
              "allow_main_checkout": allow_main_checkout,
              "worktree_base": worktree_base or worktree.default_base(),
@@ -245,7 +267,7 @@ def main(argv=None):
                         allow_paid=args.allow_paid_models,
                         approve_text_agents=args.approve_text_agents,
                         allow_main_checkout=args.allow_main_checkout, approved_code=args.approve_code, max_parallel=args.max_parallel,
-                        progress=lambda m: print(m, file=sys.stderr, flush=True))
+                        progress=lambda m: print(m, file=sys.stderr, flush=True), ledger=UsageLedger())
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     return 0 if not summary["failed"] and not summary["blocked"] else 1
 

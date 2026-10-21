@@ -223,3 +223,76 @@ class ReferenceFileTests(Fixture):
         self.assertLessEqual(len(prompt), 5100)
         self.assertIn("# Goal", prompt)
         self.assertTrue(prompt.rstrip().endswith("Q"))
+
+
+class BoardUsageTests(Fixture):
+    def setUp(self):
+        super().setUp()
+        from workshop.usage import UsageLedger
+        self.ledger = UsageLedger(self.dir / "usage.jsonl")
+
+    def records(self):
+        return self.ledger._records()
+
+    def run_steps(self, steps, **kw):
+        board = self.board(steps)
+        return run_board(board, self.providers, ledger=self.ledger, **kw)
+
+    def test_text_steps_are_booked_by_tier_as_estimates(self):
+        summary = self.run_steps([{"id": "a", "model": "loc/m1", "prompt": "안녕하세요 무엇을 도와드릴까요"},
+                                  {"id": "b", "model": "free/big-free", "prompt": "q"},
+                                  {"id": "c", "model": "free/pricey", "prompt": "q"}],
+                                 allow_cloud=True, allow_may_train=True, text_fn=lambda p, m, msgs: "a reply of some length")
+        self.assertEqual(sorted(summary["done"]), ["a", "b", "c"])
+        by_model = {(r["provider"], r["model"]): r for r in self.records()}
+        self.assertEqual(by_model[("loc", "m1")]["tier"], "local")
+        self.assertEqual(by_model[("free", "big-free")]["tier"], "free")
+        self.assertEqual(by_model[("free", "pricey")]["tier"], "other")      # a cloud model that is not marked free
+        for record in by_model.values():
+            self.assertTrue(record["estimated"])
+            self.assertEqual(record["source"], "board")
+            self.assertGreater(record["prompt"], 0)
+            self.assertGreater(record["completion"], 0)
+        self.assertEqual(self.ledger.summary()["by_source"]["board"]["requests"], 3)
+
+    def test_opencode_text_and_code_steps_are_booked(self):
+        fake = lambda prompt, ws, **kw: {"exit_code": 0, "stdout": "> build · m\n\nsome output text"}
+        self.run_steps([{"id": "t", "model": "opencode/glm-5.3-flash-free", "prompt": "q"},
+                        {"id": "c", "kind": "code", "model": "ollama/q", "workspace": str(self.dir), "prompt": "edit"}],
+                       allow_opencode=True, approve_text_agents=True, approved_code=["c"], allow_cloud=True, allow_may_train=True,
+                       allow_main_checkout=True, code_fn=fake)
+        tiers = {r["model"]: r["tier"] for r in self.records()}
+        self.assertEqual(tiers, {"glm-5.3-flash-free": "free", "q": "local"})
+
+    def test_failed_steps_and_failed_attempts_are_not_booked(self):
+        calls = []
+        def flaky(provider, model, messages):
+            calls.append(1)
+            if len(calls) == 1:
+                raise RuntimeError("temporary")
+            return "ok now"
+        self.run_steps([{"id": "a", "model": "loc/m", "prompt": "q"}], text_fn=flaky)
+        self.assertEqual(len(self.records()), 1)                              # the retry that succeeded, once
+        board_failed = self.run_steps([{"id": "x", "model": "loc/m", "prompt": "q"}],
+                                      text_fn=lambda *a: (_ for _ in ()).throw(RuntimeError("down")))
+        self.assertIn("x", board_failed["failed"])
+        self.assertEqual(len(self.records()), 1)                              # nothing new for the failed step
+
+    def test_no_ledger_means_nothing_is_written_and_ledger_errors_do_not_fail_steps(self):
+        board = self.board([{"id": "a", "model": "loc/m", "prompt": "q"}])
+        run_board(board, self.providers, text_fn=lambda *a: "ok")
+        self.assertFalse(self.ledger.path.exists())
+        class Broken:
+            def record(self, **kw):
+                raise OSError("disk full")
+        summary = run_board(self.board([{"id": "a", "model": "loc/m", "prompt": "q"}]), self.providers,
+                            text_fn=lambda *a: "ok", ledger=Broken())
+        self.assertEqual(summary["done"], ["a"])
+
+    def test_usage_page_shows_the_source_split(self):
+        from workshop.usage import render_page
+        self.run_steps([{"id": "a", "model": "loc/m", "prompt": "q"}], text_fn=lambda *a: "reply")
+        self.ledger.record(provider="p", model="m", tier="free", prompt_tokens=10, completion_tokens=5, estimated=False)
+        page = render_page(self.ledger.summary())
+        self.assertIn("보드(멀티 모델 작업)", page)
+        self.assertIn("채팅", page)
