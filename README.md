@@ -18,6 +18,7 @@
 **Windows (WSL 없이, 가장 쉬움)** — 파이썬 3.10 이상 필요
 ```powershell
 .\jetai.ps1            # 서버 시작 + 앱 창
+.\scriptsuild-exe.ps1 # 한 번만: 더블클릭용 JetAI.exe 만들기 (이후 JetAI.exe 더블클릭)
 ```
 파이썬이 없으면 GitHub Actions의 `JetAI-portable.zip`(파이썬 포함)을 받아 풀고 `JetAI.cmd`를 실행하세요.
 

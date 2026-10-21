@@ -13,3 +13,6 @@ data/
 models/
 outputs/
 worktrees/
+
+# built by scripts/build-exe.ps1 (not committed)
+JetAI.exe
