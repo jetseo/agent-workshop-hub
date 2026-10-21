@@ -14,6 +14,7 @@ from .explain import explain
 from .chat import chat, chat_stream, list_models
 from .chat_store import DEFAULT_TITLE, CHAT_ID, ChatStore
 from . import arbiter, router
+from .engine import Engine, EngineError
 from .modelinfo import ModelInfo
 from .modelwatch import ModelWatch
 from .router import route_task
@@ -56,6 +57,7 @@ class Context:
         # that adds new free/local models. Both keep their files next to providers.json.
         self.info = ModelInfo(providers.path.parent / "modelinfo.json")
         self.watch = ModelWatch(providers, list_fn, info=self.info)
+        self.engine = Engine(providers.path.parent / "engine", providers)      # built-in local engine (llama.cpp), off until installed
         self.active = set()
         self._active_lock = threading.Lock()
 
@@ -89,6 +91,39 @@ def open_external(ctx, url):
         raise ApiError(400, "열 수 없는 주소입니다.")
     ctx.open_url_fn(url)
     return {"ok": True}
+
+
+def _engine_api(ctx, method, rest, body):
+    """Built-in local engine. Installing needs the exact byte total the user was shown (confirm_bytes)."""
+    engine = ctx.engine
+    try:
+        if not rest and method == "GET":
+            return engine.status()
+        if method != "POST" or len(rest) != 1:
+            raise LookupError("Unknown engine route")
+        action = rest[0]
+        if action == "plan":
+            return engine.plan(str(body.get("model", "")))
+        if action == "install":
+            confirm = body.get("confirm_bytes")
+            if not isinstance(confirm, int) or isinstance(confirm, bool):
+                raise ApiError(400, "받을 크기를 확인해 주세요.")
+            return {"ok": True, "plan": engine.install(str(body.get("model", "")), confirm)}
+        if action == "cancel":
+            engine.cancel()
+            return {"ok": True}
+        if action == "start":
+            engine.start(str(body.get("model", "")))
+            return {"ok": True}
+        if action == "stop":
+            engine.stop()
+            return {"ok": True}
+        if action == "remove":
+            engine.remove(str(body.get("what", "")))
+            return {"ok": True}
+    except EngineError as error:
+        raise ApiError(400, str(error))
+    raise LookupError("Unknown engine route")
 
 
 def _form(body):
@@ -373,9 +408,12 @@ def dispatch(ctx, method, path, body):
                 chat_fn=ctx.chat_fn, ledger=ctx.ledger, body=body,
                 claim=lambda: ctx.claim("digest"), release=lambda: ctx.release("digest")))
         if parts == ["settings"] and method == "POST":
-            if not isinstance(body.get("auto_add_models"), bool):
+            keys = [k for k in body if k in ctx.watch.settings()]
+            if len(keys) != 1 or not isinstance(body[keys[0]], bool):
                 raise ApiError(400, "잘못된 설정입니다.")
-            return Json(200, {"settings": ctx.watch.set_setting("auto_add_models", body["auto_add_models"])})
+            return Json(200, {"settings": ctx.watch.set_setting(keys[0], body[keys[0]])})
+        if parts and parts[0] == "engine":
+            return Json(200, _engine_api(ctx, method, parts[1:], body))
         if parts == ["models", "check"] and method == "POST":
             ctx.info.refresh()                                   # the public catalog, at most once a day
             return Json(200, ctx.watch.check(force=True))
