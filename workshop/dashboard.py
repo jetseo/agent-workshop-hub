@@ -269,8 +269,8 @@ def make_handler(queue, token, boards_root=None, providers=None, chat_fn=None, l
                            csp="default-src 'none'; frame-ancestors 'self'")
                 return
             if route == "/usage":
-                from .usage import render_page as usage_page
-                self._send(200, usage_page(api.ledger.summary()))
+                from .usage import render_page as usage_page, summary_with_savings
+                self._send(200, usage_page(summary_with_savings(api.ledger)))
                 return
             if route == "/favicon.ico":
                 self.send_response(204)

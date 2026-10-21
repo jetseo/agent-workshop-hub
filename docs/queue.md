@@ -44,3 +44,12 @@ The chosen model is written back to the board. Every executed step's outcome (su
 `~/.agent-workshop/runstats.jsonl` (`workshop/runstats.py`, no prompts or outputs); permission refusals are not counted,
 and a model with more than 50% failures over >= 3 runs in the last 30 days is skipped next time.
 Not yet wired into chat or the queue worker; the cost side is still the usage ledger (`/usage`).
+
+## Result cache (`workshop/cache.py`, opt-in `--cache`)
+Identical text-step requests (same model id + same final prompt) are answered from `~/.agent-workshop/cache`
+instead of calling a model again. Text replies only (code steps have side effects and are never cached). Consent and
+cloud gates run before the cache, so a cached reply never bypasses them. Entries are private files (0600), expire after
+7 days, the store is capped at 500 entries, and a cache I/O error counts as a miss. Cached replies contain prompt-derived
+content, so the folder stays outside version control. Each hit appends estimated saved tokens to `cache/hits.jsonl`;
+the orchestrator prints `{"cache": {"hits", "tokens_saved"}}` in its summary (estimates, like all board token counts).
+Not yet shown on the usage page; chat requests are not cached.

@@ -226,7 +226,7 @@ def dispatch(ctx, method, path, body):
                 chat_fn=ctx.chat_fn, ledger=ctx.ledger, body=body,
                 claim=lambda: ctx.claim("digest"), release=lambda: ctx.release("digest")))
         if parts == ["usage"] and method == "GET":
-            return Json(200, ctx.ledger.summary())
+            return Json(200, usage.summary_with_savings(ctx.ledger))
         if parts == ["state"] and method == "GET":
             return Json(200, _state(ctx))
         if parts == ["chats"]:

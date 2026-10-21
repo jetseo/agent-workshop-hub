@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 
 from .chat import chat
+from .logsum import reduce_log
 from .usage import UsageLedger, estimate_tokens, tier_of
 
 MAX_INPUT = 300_000
@@ -66,6 +67,11 @@ def stream(*, resolve, candidates, chat_fn, ledger, body, claim=None, release=No
         raise ValueError("중점 사항은 %d자 이내로 쓰세요." % MAX_FOCUS)
     model_ref = body.get("model")
     provider, model = resolve(model_ref)
+    original, prefilter = text, None
+    if body.get("prefilter") is True:       # deterministic log reducer first: fewer tokens reach any model
+        reduced = reduce_log(text)
+        if reduced["text"].strip():
+            text, prefilter = reduced["text"], reduced["stats"]
     chunks = split_chunks(text)
     if len(chunks) > MAX_CHUNKS:
         raise ValueError("조각이 너무 많습니다.")
@@ -124,11 +130,11 @@ def stream(*, resolve, candidates, chat_fn, ledger, body, claim=None, release=No
                 if len(current) == 1 or len(combined) <= MAX_COMBINED or passes >= MAX_PASSES:
                     break
                 current = split_chunks(combined)
-            before, after = estimate_tokens(text), estimate_tokens(combined)
+            before, after = estimate_tokens(original), estimate_tokens(combined)
             yield "done", {"digest": combined, "model": refs[min(used["index"], len(refs) - 1)], "requests": used["requests"],
                            "before_tokens": before, "after_tokens": after, "spent_tokens": used["spent"],
                            "reduction_pct": round(100 * (1 - after / before)) if before else 0,
-                           "passes": passes, "still_long": len(combined) > MAX_COMBINED}
+                           "passes": passes, "still_long": len(combined) > MAX_COMBINED, "prefilter": prefilter}
         except GeneratorExit:
             raise
         except Exception as error:
