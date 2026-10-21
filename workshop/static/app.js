@@ -246,6 +246,7 @@
     if (name === "terminal") startTerminal();
     if (name === "chat") { loadState(); loadUsage(); }
     if (name === "digest") digestInit();
+    if (name === "settings") renderSettings();
     if (window.innerWidth <= 760) setSide(false);
   }
   Array.prototype.forEach.call(document.querySelectorAll(".side-nav [data-view]"), function (b) { b.addEventListener("click", function () { showView(b.dataset.view); }); });
@@ -488,6 +489,46 @@
     menu.appendChild(h("button", { type: "button", class: "foot", text: "+ 서비스 연결 · 서비스 추가", onclick: function () { closeMenu(); openWizard(); } }));
     menu.appendChild(h("button", { type: "button", class: "foot", id: "open-accounts", text: "계정(키) 여러 개 관리", onclick: function () { closeMenu(); openAccounts(); } }));
   }
+  /* ---------- settings view (native; replaces the old framed setup page) ---------- */
+  async function renderSettings() {
+    var list = $("set-list");
+    loadEnv().then(function (env) {
+      var node = $("set-env-text");
+      if (!node) return;
+      if (!env) { node.textContent = "확인하지 못했습니다."; return; }
+      var parts = [env.os + " · Python " + env.python,
+        env.ollama.running ? "Ollama 실행 중(모델 " + env.ollama.models.length + "개)" : "Ollama 없음(선택 사항)"];
+      parts.push(env.opencode ? "OpenCode 있음" : "OpenCode 없음(선택 사항)");
+      if (env.wsl.applicable) parts.push(env.wsl.available ? "WSL 사용 가능" : "WSL 없음(터미널·코드 작업에만 필요)");
+      node.textContent = parts.join(" · ");
+    });
+    try { await loadState(); } catch (e) { /* keep what we have */ }
+    list.textContent = "";
+    if (!state.providers.length) { list.appendChild(h("p", { class: "sub", text: "아직 연결된 서비스가 없습니다. 위의 \"서비스 추가\"로 시작하세요." })); return; }
+    state.providers.forEach(function (p) {
+      var local = p.policy === "local";
+      var badge = local ? "내 PC" : (p.consented ? "클라우드 · 전송 동의함" : "클라우드 · 동의 필요");
+      var addModel = h("input", { type: "text", placeholder: "모델 이름 추가", "aria-label": "모델 이름 추가", maxlength: "200" });
+      var msg = h("span", { class: "sub" });
+      var card = h("div", { class: "svc-card", "data-provider": p.name },
+        h("div", { class: "row" }, h("b", { text: p.label }), h("span", { class: "pill", text: badge })),
+        h("div", { class: "sub", text: p.base_url + " · 토큰 " + p.token }),
+        h("div", { class: "sub", text: "모델 " + p.models.length + "개" + (p.models.length ? ": " + p.models.slice(0, 6).join(", ") + (p.models.length > 6 ? " …" : "") : "") }),
+        h("div", { class: "row" }, addModel,
+          h("button", { type: "button", class: "btn", text: "추가", onclick: async function () {
+            var m = addModel.value.trim(); if (!m) return;
+            try { await api("POST", "/providers/models", { name: p.name, model: m }); await renderSettings(); } catch (e) { msg.textContent = e.message; } } })),
+        h("div", { class: "row" },
+          local ? h("span") : h("button", { type: "button", class: "btn", text: "계정(키) 관리", onclick: function () { openAccounts(); } }),
+          h("button", { type: "button", class: "btn danger", "data-remove": p.name, text: "연결 해제", onclick: async function () {
+            if (!window.confirm(p.label + " 연결을 해제할까요? 저장된 토큰도 함께 삭제됩니다.")) return;
+            try { await api("POST", "/providers/remove", { name: p.name }); await loadState(); pickDefaultModel(); renderModelBtn(); await renderSettings(); } catch (e) { msg.textContent = e.message; } } })),
+        msg);
+      list.appendChild(card);
+    });
+  }
+  $("set-add").addEventListener("click", function () { openWizard(); });
+
   /* ---------- accounts: several keys of one service, used in turn ---------- */
   function openAccounts() {
     var root = $("wizard"), msg = h("p", { class: "note", id: "acc-msg", text: "" });

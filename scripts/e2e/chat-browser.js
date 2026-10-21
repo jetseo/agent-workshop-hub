@@ -238,9 +238,23 @@ const ok = (cond, msg) => { if (!cond) throw new Error("CHECK FAILED: " + msg); 
   await until(async () => (await $('.acc-box[data-provider="cloudx"] .acc-row').count()) === 0, 4000, "account removed");
   await $('#wizard [aria-label="닫기"]').click();
 
+  console.log("7d. settings view: add a model, disconnect a service");
+  await $('.side-nav [data-view="settings"]').click();
+  await until(async () => (await $('.svc-card[data-provider="cloudx"]').count()) === 1, 6000, "cloudx card");
+  await $('.svc-card[data-provider="cloudx"] input[aria-label="모델 이름 추가"]').fill("m2-free");
+  await $('.svc-card[data-provider="cloudx"] button:has-text("추가")').click();
+  await until(async () => (await $('.svc-card[data-provider="cloudx"]').textContent()).includes("m2-free"), 5000, "model added from settings");
+  ok(true, "a model can be added from the settings view");
+  await $('.svc-card[data-provider="cloudx"] [data-remove="cloudx"]').click();
+  await until(async () => (await $('.svc-card[data-provider="cloudx"]').count()) === 0, 5000, "cloudx removed");
+  ok(true, "a service can be disconnected from the settings view (after confirmation)");
+  ok((await $(".svc-card").count()) >= 1, "the other service is untouched");
+
   console.log("8. other views, theme");
   await $('.side-nav [data-view="settings"]').click();
-  await until(async () => (await page.frameLocator("#view-settings").locator("h1").first().textContent()).includes("서비스 연결"), 6000, "settings iframe");
+  await until(async () => (await $("#set-list .svc-card").count()) >= 1, 6000, "settings view lists the connected service");
+  ok((await $("#set-env-text").textContent()).includes("Python"), "settings view shows this PC's environment");
+  ok((await $("#set-list").textContent()).includes("mock"), "settings view shows the connected mock service");
   ok(!(await $("#modelbtn").isVisible()), "model picker hides outside the chat view");
   await $('.side-nav [data-view="terminal"]').click();
   await until(async () => (await $("#term-status").textContent()).includes("연결됨"), 10000, "terminal");
