@@ -292,6 +292,8 @@ def dispatch(ctx, method, path, body):
     body = body if isinstance(body, dict) else {}
     try:
         if parts == ["digest"] and method == "POST":
+            if body.get("model") == AUTO and isinstance(body.get("text"), str):
+                body = dict(body, model=pick_auto(ctx, body["text"][:3000]))      # 'auto' works for compression too
             return Stream(digest.stream(
                 resolve=lambda ref: _resolve_model(ctx, ref),
                 candidates=lambda ref, enabled: fallback_candidates(ctx, ref, enabled),

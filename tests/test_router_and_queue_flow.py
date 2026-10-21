@@ -37,7 +37,7 @@ class RouterTests(unittest.TestCase):
                  "ollama/qwen2.5-coder:32b": {"runs": 1, "failures": 1}}  # too few runs to judge
         decision = route("rename a variable", self.MODELS, kind="code", stats=stats)
         self.assertEqual(decision["model"], "ollama/qwen2.5-coder:32b")
-        self.assertIn("failure rate", decision["reason"])
+        self.assertIn("cooling down", decision["reason"])
 
     def test_role_floor_and_validation(self):
         self.assertEqual(estimate_difficulty("tiny", role="reviewer"), "medium")
@@ -160,3 +160,41 @@ class QueueFlowTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CooldownAndSpreadTests(unittest.TestCase):
+    MODELS = ["ollama/a-3b", "ollama/b-3b"]
+
+    def stats(self, **entries):
+        full = {m: {} for m in self.MODELS}                      # every model has history, so only the entries differ
+        full.update(entries)
+        return {m: {"runs": 5, "failures": 0, "streak_fail": 0, "last_ts": 0, **e} for m, e in full.items()}
+
+    def test_a_just_failed_model_cools_down_then_comes_back(self):
+        fail_now = self.stats(**{"ollama/a-3b": {"streak_fail": 1, "last_ts": 1000}})
+        self.assertEqual(route("hi", self.MODELS, stats=fail_now, now=1030)["model"], "ollama/b-3b")
+        self.assertEqual(route("hi", self.MODELS, stats=fail_now, now=1100)["model"], "ollama/a-3b")   # after 60 s
+
+    def test_repeated_failures_cool_down_longer(self):
+        stats = self.stats(**{"ollama/a-3b": {"streak_fail": 2, "last_ts": 1000}})
+        self.assertEqual(route("hi", self.MODELS, stats=stats, now=1300)["model"], "ollama/b-3b")
+        self.assertEqual(route("hi", self.MODELS, stats=stats, now=1700)["model"], "ollama/a-3b")
+
+    def test_everything_cooling_down_is_reported_not_guessed(self):
+        stats = self.stats(**{m: {"streak_fail": 3, "last_ts": 1000} for m in self.MODELS})
+        self.assertIsNone(route("hi", self.MODELS, stats=stats, now=1010)["model"])
+
+    def test_equal_models_share_the_load(self):
+        stats = self.stats(**{"ollama/a-3b": {"runs": 9}, "ollama/b-3b": {"runs": 2}})
+        self.assertEqual(route("hi", self.MODELS, stats=stats)["model"], "ollama/b-3b")
+
+    def test_run_stats_track_the_failure_streak(self):
+        import tempfile
+        from pathlib import Path
+        from workshop.runstats import RunStats
+        with tempfile.TemporaryDirectory() as d:
+            rs = RunStats(Path(d) / "r.jsonl")
+            for ok, ts in ((False, 1), (False, 2), (True, 3), (False, 4)):
+                rs.record("m/x", ok=ok, seconds=1, when=ts)
+            entry = rs.load(now=10)["m/x"]
+            self.assertEqual((entry["streak_fail"], entry["last_ts"], entry["runs"]), (1, 4, 4))

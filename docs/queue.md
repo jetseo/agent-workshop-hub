@@ -53,3 +53,11 @@ cloud gates run before the cache, so a cached reply never bypasses them. Entries
 content, so the folder stays outside version control. Each hit appends estimated saved tokens to `cache/hits.jsonl`;
 the orchestrator prints `{"cache": {"hits", "tokens_saved"}}` in its summary (estimates, like all board token counts).
 Not yet shown on the usage page; chat requests are not cached.
+
+## 자동 선택이 기본 (2026-10-21)
+사용자는 서비스를 연결하고 대화만 하면 됩니다. 채팅·압축의 기본 모델은 **자동(로컬·무료 우선)** 입니다.
+- 후보: 연결된 서비스 중 로컬이거나 `-free`/`:free` 모델, 클라우드는 연결할 때 동의한 서비스만. 요금이 날 수 있는 모델은 후보가 아닙니다.
+- 선택: 질문 난이도(길이·위험 키워드)에 따라 쉬우면 가장 작은 모델, 어려우면 큰 모델. 코드 질문은 `coder` 모델 우선. 같은 급이면 최근에 덜 쓴 모델을 골라 무료 한도를 나눠 씁니다.
+- 쿨다운: 방금 실패(예: 429 한도)한 모델은 60초, 연속 실패면 10분 동안 건너뛰고, 최근 30일 실패율이 50%를 넘는 모델도 제외합니다.
+- 실패하면 기존의 자동 전환(다른 무료·로컬 모델로 이어서 답)이 이어서 동작합니다. 답변 아래에 실제로 답한 모델이 표시됩니다.
+- 수동으로 특정 모델을 고르는 것도 계속 가능합니다(모델 선택 메뉴).

@@ -321,7 +321,8 @@ class AutoRoutingTests(Fixture):
         self.assertEqual(summary["done"], ["a"])
         self.assertEqual(seen, ["small:3b"])                      # easy work -> smallest local
         self.assertEqual(board.steps()["a"]["model"], "loc/small:3b")
-        self.assertEqual(self.stats.load()["loc/small:3b"], {"runs": 1, "failures": 0, "seconds": self.stats.load()["loc/small:3b"]["seconds"]})
+        entry = self.stats.load()["loc/small:3b"]
+        self.assertEqual((entry["runs"], entry["failures"], entry["streak_fail"]), (1, 0, 0))
 
     def test_auto_step_never_picks_paid_and_fails_before_any_call(self):
         board = self.board([{"id": "a", "model": "auto"}, {"id": "b", "model": "loc/m", "depends_on": ["a"]}])
@@ -332,20 +333,17 @@ class AutoRoutingTests(Fixture):
         self.assertIn("RoutingError", summary["failed"]["a"])
         self.assertEqual(summary["blocked"], ["b"])
 
-    def test_failures_feed_back_so_a_flaky_model_is_skipped_next_time(self):
+    def test_failures_feed_back_so_a_flaky_model_is_left_alone_next_time(self):
         def boom(provider, model, messages):
             raise RuntimeError("down")
-        for _ in range(2):                                         # 2 attempts per text step -> 1 recorded failure each
-            board = self.board([{"id": "a", "model": "auto"}])
-            run_board(board, self.providers, text_fn=boom, stats=self.stats, auto_models=["loc/small:3b", "loc/big:32b"])
         board = self.board([{"id": "a", "model": "auto"}])
         run_board(board, self.providers, text_fn=boom, stats=self.stats, auto_models=["loc/small:3b", "loc/big:32b"])
-        self.assertEqual(self.stats.load()["loc/small:3b"]["failures"], 3)
+        self.assertEqual(self.stats.load()["loc/small:3b"]["streak_fail"], 1)
         board = self.board([{"id": "a", "model": "auto"}])
         seen = []
         run_board(board, self.providers, text_fn=lambda p, m, msgs: seen.append(m) or "ok", stats=self.stats,
                   auto_models=["loc/small:3b", "loc/big:32b"])
-        self.assertEqual(seen, ["big:32b"])
+        self.assertEqual(seen, ["big:32b"])                      # small is cooling down after its failure
 
     def test_refusals_are_not_counted_as_model_failures(self):
         board = self.board([{"id": "a", "model": "free/m"}])         # cloud not allowed -> PermissionError

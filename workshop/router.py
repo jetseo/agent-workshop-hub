@@ -9,6 +9,7 @@ import argparse
 import json
 import re
 import sys
+import time
 
 from .modelpolicy import classify
 
@@ -42,22 +43,33 @@ def _size_b(model):
     return float(match.group(1)) if match else 0.0
 
 
-def _rank(model, *, kind, difficulty):
+def _rank(model, *, kind, difficulty, runs=0):
     """Lower sorts first. Easy work takes the smallest adequate model; hard work the largest."""
     size = _size_b(model)
     coder_bonus = 0 if (kind == "code" and "coder" in model.lower()) else 1
     size_key = size if difficulty == "easy" else -size
-    return (coder_bonus, size_key, model)
+    return (coder_bonus, size_key, runs, model)      # equal models: the less used one first, spreading free limits
 
 
-def _healthy(model, stats):
+COOLDOWN_AFTER_ONE_FAILURE = 60     # seconds: a rate-limited free model is left alone briefly
+COOLDOWN_AFTER_REPEATED_FAILURES = 600
+
+
+def _healthy(model, stats, now=None):
     entry = (stats or {}).get(model)
-    if not entry or entry.get("runs", 0) < MIN_RUNS_FOR_STATS:
+    if not entry:
+        return True
+    streak, last = entry.get("streak_fail", 0), entry.get("last_ts", 0)
+    if streak and last:
+        wait = COOLDOWN_AFTER_ONE_FAILURE if streak == 1 else COOLDOWN_AFTER_REPEATED_FAILURES
+        if (time.time() if now is None else now) - last < wait:
+            return False                    # cooling down after a failure (e.g. 429): try the others first
+    if entry.get("runs", 0) < MIN_RUNS_FOR_STATS:
         return True
     return entry.get("failures", 0) / entry["runs"] <= MAX_FAILURE_RATE
 
 
-def route(prompt, models, *, kind="text", role="coder", files=0, stats=None, allow_paid=False, tier_fn=None):
+def route(prompt, models, *, kind="text", role="coder", files=0, stats=None, allow_paid=False, tier_fn=None, now=None):
     """Return {model, tier, difficulty, needs_approval, reason}.
 
     models: candidate model ids. stats: optional {model: {"runs": n, "failures": m}} so a model that
@@ -72,20 +84,21 @@ def route(prompt, models, *, kind="text", role="coder", files=0, stats=None, all
         raise ValueError("Unknown kind: " + str(kind))
     difficulty = estimate_difficulty(prompt, kind=kind, role=role, files=files)
     unique = sorted({m for m in models if isinstance(m, str) and "/" in m})
-    healthy = [m for m in unique if _healthy(m, stats)]
+    healthy = [m for m in unique if _healthy(m, stats, now)]
+    used = lambda m: (stats or {}).get(m, {}).get("runs", 0)
     skipped = [m for m in unique if m not in healthy]
     for tier in ("local", "free"):
         pool = [m for m in healthy if classify_model(m) == tier]
         if pool:
-            pick = min(pool, key=lambda m: _rank(m, kind=kind, difficulty=difficulty))
+            pick = min(pool, key=lambda m: _rank(m, kind=kind, difficulty=difficulty, runs=used(m)))
             reason = difficulty + " task -> cheapest adequate " + tier + " model"
             if skipped:
-                reason += " (skipped for high failure rate: " + ", ".join(skipped) + ")"
+                reason += " (skipped, failing or cooling down: " + ", ".join(skipped) + ")"
             return {"model": pick, "tier": tier, "difficulty": difficulty,
                     "needs_approval": False, "reason": reason}
     paid = [m for m in healthy if classify_model(m) == "paid"]
     if paid and allow_paid:
-        pick = min(paid, key=lambda m: _rank(m, kind=kind, difficulty="easy"))
+        pick = min(paid, key=lambda m: _rank(m, kind=kind, difficulty="easy", runs=used(m)))
         return {"model": pick, "tier": "paid", "difficulty": difficulty, "needs_approval": True,
                 "reason": "no local/free model available; paid model suggested, explicit approval required"}
     return {"model": None, "tier": None, "difficulty": difficulty, "needs_approval": bool(paid),
