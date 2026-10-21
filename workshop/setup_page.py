@@ -12,6 +12,7 @@ from urllib.parse import urlparse
 from .adapters import find_opencode
 from .chat import chat, list_models
 from .explain import explain
+from . import pagestyle
 from .providers import NAME, validate, validate_key, mask_key
 
 # Base URLs and key pages are from memory, not verified against each provider's current docs
@@ -193,12 +194,7 @@ def render_page(providers, csrf, *, result=None, models=None, notice="", ollama_
                   + (_esc(", ".join(free[:40])) or "없음") + "</p><details><summary>전체</summary><pre>"
                   + _esc("\n".join(models)) + "</pre></details></section>")
     return ('<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
-            "<title>Setup</title><style>body{font-family:system-ui,sans-serif;background:#111827;color:#e5e7eb;max-width:900px;margin:30px auto;padding:0 14px}"
-            "section{background:#1f2937;border:1px solid #374151;border-radius:12px;padding:16px;margin:14px 0}"
-            "input,select,textarea,button{padding:10px;border-radius:8px;border:1px solid #4b5563;background:#111827;color:#fff;max-width:100%;box-sizing:border-box}"
-            "input[type=text],input[type=password],textarea,select{width:100%;margin:4px 0 10px}button{cursor:pointer;background:#2563eb;border:0}"
-            "code,pre{background:#0b1220;padding:2px 5px;border-radius:4px}pre{white-space:pre-wrap;overflow-wrap:anywhere;padding:10px}"
-            "td,th{padding:6px 10px;text-align:left}small{color:#9ca3af}a{color:#93c5fd}</style></head><body>"
+            "<title>Setup</title><style>" + pagestyle.CSS + "</style></head><body>"
             '<h1>시작하기 / Setup</h1>' + ("" if embedded else '<a href="/">← Tasks</a> · <a href="/boards">Boards</a>')
             + (("<p><b>" + _esc(notice) + "</b></p>") if notice else "")
             + _status_panel(ollama_models or [], opencode_path)
