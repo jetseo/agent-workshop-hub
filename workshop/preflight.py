@@ -19,6 +19,9 @@ def inspect_environment():
     for name in ("git", "opencode", "ollama"):
         checks[name] = {"ok": shutil.which(name) is not None,
                         "detail": shutil.which(name) or "not on PATH"}
+    found = shutil.which("opencode")
+    if found and found.startswith("/mnt/"):
+        checks["opencode"] = {"ok": False, "detail": "Windows binary via WSL interop: " + found}
     checks["sqlite"] = {"ok": True, "detail": "Python standard library"}
     return checks
 

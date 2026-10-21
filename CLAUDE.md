@@ -1,7 +1,12 @@
-# Claude Code handoff: Agent Workshop Hub
+# Claude Code handoff: JetAI Hub (formerly Agent Workshop Hub)
 
 ## Project objective
 Build a reliable, local-first AI agent orchestration platform for a Windows + WSL2 environment. Connect OpenCode, local Ollama models, optional cloud providers, and ComfyUI. The user has explicitly postponed service naming, logo, and branding. Focus exclusively on technical reliability and verification.
+
+## Project scope: two separate projects
+- **JetAI Hub (this repository)** exists to **save development tokens**: route coding and text work to free, local or low-cost models instead of spending paid tokens, with explicit opt-in, approval and cost guards. Judge new features by whether they serve that goal.
+- **Jet Studio is a different project** for **producing Shorts (short-form videos)**. It is not part of this repository. Do not mix the two: do not add shorts-production features, assets or naming here, and do not treat Jet Studio requirements as Hub requirements.
+- If a request is ambiguous about which project it belongs to, ask before changing anything. Existing image/ComfyUI features in the Hub were built earlier; do not delete them, but do not extend them toward video or shorts production.
 
 ## Current repository state
 - Existing prototype: Python local-only dashboard (`workshop/dashboard.py`), SQLite queue (`workshop/queue.py`), opt-in worker (`workshop/worker.py`), OpenCode/ComfyUI adapters, PowerShell + WSL launcher, installer scripts, GitHub Actions tests.
@@ -26,7 +31,7 @@ Build a reliable, local-first AI agent orchestration platform for a Windows + WS
 - Use temporary worktrees and temporary databases for tests.
 - Keep secrets outside version control.
 - Distinguish code committed, tests passed in CI, and tested on user's Windows PC.
-- Keep project name Agent Workshop Hub as a temporary internal name. Do not rename until the user decides.
+- Project name is **JetAI Hub** (decided by the user). The repository, the Python package `workshop` and the data folder `~/.agent-workshop` keep their old names on purpose (renaming them would break existing keys and chats); do not move or delete the data folder.
 
 ## Quick commands
 ```bash

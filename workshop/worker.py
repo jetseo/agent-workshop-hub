@@ -2,6 +2,8 @@
 import argparse
 import json
 import re
+import signal
+import threading
 import time
 from pathlib import Path
 from .queue import Queue
@@ -15,6 +17,16 @@ def _defer(queue, job):
     queue.defer(job["id"])
     return {"job_id": job["id"], "state": "queued", "reason": "executor disabled"}
 
+HEARTBEAT_SECONDS = 10.0
+STALE_AFTER_SECONDS = 120.0
+
+def _beat(queue, job_id, stop):
+    while not stop.wait(HEARTBEAT_SECONDS):
+        try:
+            queue.heartbeat(job_id)
+        except Exception:
+            pass
+
 def process_one(queue, *, allow_opencode=False, allow_comfyui=False):
     if not (allow_opencode or allow_comfyui):
         raise PermissionError("Worker requires an explicit executor opt-in")
@@ -27,6 +39,14 @@ def process_one(queue, *, allow_opencode=False, allow_comfyui=False):
     job = queue.claim(kinds=enabled_kinds)
     if job is None:
         return None
+    stop_beat = threading.Event()
+    threading.Thread(target=_beat, args=(queue, job["id"], stop_beat), daemon=True).start()
+    try:
+        return _execute(queue, job, allow_opencode, allow_comfyui)
+    finally:
+        stop_beat.set()
+
+def _execute(queue, job, allow_opencode, allow_comfyui):
     try:
         payload = json.loads(job["payload"])
         if job["kind"] == "code":
@@ -74,6 +94,15 @@ def process_one(queue, *, allow_opencode=False, allow_comfyui=False):
             return {"job_id": job["id"], "state": "failed", "result": result}
         state = queue.finish(job["id"], result, success=True)
         return {"job_id": job["id"], "state": state, "result": result}
+    except (KeyboardInterrupt, SystemExit):
+        # Interrupted mid-run: the side effects are unknown, so fail the job for
+        # explicit operator review instead of leaving it 'running' or replaying it.
+        try:
+            queue.finish(job["id"], {"error": "Worker interrupted during execution; "
+                                     "review side effects before re-queuing",
+                                     "type": "Interrupted"}, success=False)
+        finally:
+            raise
     except Exception as error:
         # Preserve the original executor failure even if persistence also fails.
         detail = {"error": str(error), "type": type(error).__name__}
@@ -89,7 +118,7 @@ def main():
     parser.add_argument("--allow-opencode", action="store_true")
     parser.add_argument("--allow-comfyui", action="store_true")
     parser.add_argument("--watch", action="store_true", help="Keep polling for new tasks")
-    parser.add_argument("--recover-stale", action="store_true", help="Mark ALL running jobs failed; use only when no other worker is active")
+    parser.add_argument("--recover-stale", action="store_true", help="Mark running jobs failed if their worker stopped heartbeating (>120s); live workers are untouched")
     parser.add_argument("--interval", type=float, default=3.0)
     args = parser.parse_args()
     if not (args.allow_opencode or args.allow_comfyui):
@@ -100,7 +129,9 @@ def main():
     # Startup recovery is operator-controlled to avoid marking another live worker's
     # running tasks failed when multiple processes share the same database.
     if args.recover_stale:
-        print(json.dumps({"marked_failed": queue.recover()}), flush=True)
+        print(json.dumps({"marked_failed": queue.recover(stale_after=STALE_AFTER_SECONDS)}), flush=True)
+    # Treat SIGTERM like Ctrl+C so interrupted jobs are marked failed, not left running.
+    signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))
     try:
         while True:
             outcome = process_one(queue, allow_opencode=args.allow_opencode,

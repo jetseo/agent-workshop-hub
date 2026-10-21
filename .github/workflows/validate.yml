@@ -1,4 +1,4 @@
-name: Validate Agent Workshop Hub
+name: Validate JetAI Hub
 on:
   push:
   pull_request:
@@ -23,7 +23,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          foreach ($file in @("install.ps1", "start.ps1", "scripts/ollama.ps1", "scripts/comfyui-status.ps1", "scripts/install-comfyui.ps1", "scripts/setup-comfyui-env.ps1", "scripts/comfyui-gpu.ps1", "scripts/start-comfyui.ps1", "scripts/install-comfyui-torch.ps1", "scripts/download-comfyui-model.ps1")) {
+          foreach ($file in @("install.ps1", "start.ps1", "scripts/ollama.ps1", "scripts/comfyui-status.ps1", "scripts/install-comfyui.ps1", "scripts/setup-comfyui-env.ps1", "scripts/comfyui-gpu.ps1", "scripts/start-comfyui.ps1", "scripts/install-comfyui-torch.ps1", "scripts/download-comfyui-model.ps1", "scripts/create-shortcut.ps1")) {
             $tokens = $null; $errors = $null
             [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file), [ref]$tokens, [ref]$errors) | Out-Null
             if ($errors.Count -gt 0) { $errors | Out-String | Write-Error; exit 1 }
@@ -57,7 +57,11 @@ jobs:
       - name: Launcher dry run (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        run: ./start.ps1 -DryRun -Port 8787
+        run: |
+          ./start.ps1 -DryRun -Port 8787
+          ./start.ps1 -DryRun -Port 8787 -Terminal
+          ./scripts/create-shortcut.ps1 -DryRun
+          ./scripts/create-shortcut.ps1 -DryRun -NoTerminal -Name "JetAI Hub Test"
       - name: Compile modules
         run: python -m compileall -q workshop tests
       - name: Unit and local HTTP integration tests
@@ -94,12 +98,18 @@ jobs:
           mkdir -p test-results
           python -m workshop.preflight 2>&1 | tee test-results/preflight.log
           exit ${PIPESTATUS[0]}
+      - name: Offline integration diagnostics
+        shell: bash
+        run: |
+          mkdir -p test-results
+          python -m workshop.diagnostics --json --no-services > test-results/diagnostics.json
+          python -m json.tool test-results/diagnostics.json
       - name: Upload preflight diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: preflight-diagnostics-${{ matrix.os }}-py${{ matrix.python }}
-          path: test-results/preflight.log
+          path: test-results/
           if-no-files-found: warn
           retention-days: 14
   linux-bootstrap:

@@ -2,13 +2,19 @@
 # Start the local dashboard and optionally an explicitly approved worker.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+# WSL appends the Windows PATH. Windows binaries (node, npm, opencode.exe) must never be
+# mistaken for Linux ones, so drop /mnt/<drive>/ entries for this script.
+PATH="$(printf '%s' "$PATH" | tr ':' '\n' | grep -v '^/mnt/[a-zA-Z]/' | paste -sd: -)"
+export PATH
 PORT=8787
 ALLOW_OPENCODE=0
 ALLOW_COMFYUI=0
+ENABLE_TERMINAL=0
 for arg in "$@"; do
   case "$arg" in
     --allow-opencode) ALLOW_OPENCODE=1 ;;
     --allow-comfyui) ALLOW_COMFYUI=1 ;;
+    --enable-terminal) ENABLE_TERMINAL=1 ;;
     --port=*) PORT="${arg#--port=}" ;;
     *) echo "Unknown option: $arg" >&2; exit 2 ;;
   esac
@@ -42,4 +48,9 @@ else
   echo "Dashboard-only mode: no AI jobs will be executed."
 fi
 echo "Open http://127.0.0.1:$PORT"
-python3 -m workshop.dashboard --port "$PORT"
+dashboard_flags=(--port "$PORT")
+if (( ENABLE_TERMINAL )); then
+  dashboard_flags+=(--enable-terminal)
+  echo "Terminal enabled: a shell running as your user. Use only the private link printed below."
+fi
+python3 -m workshop.dashboard "${dashboard_flags[@]}"

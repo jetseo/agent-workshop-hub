@@ -7,6 +7,7 @@ No model inference, external network calls, or persistent job mutations.
 import argparse
 import json
 import sqlite3
+import sys
 import tempfile
 from pathlib import Path
 
@@ -45,6 +46,24 @@ def _queue_self_test():
         return {"ok": False, "detail": type(error).__name__ + ": " + str(error)[:250]}
 
 
+# Actionable next steps for failed checks (Korean, with the command to run).
+HINTS = {
+    "git": "git이 필요합니다. Ubuntu(WSL): sudo apt install git",
+    "opencode": "WSL 안에 설치되지 않았거나 Windows용만 보입니다. bash scripts/install-opencode.sh --dry-run 으로 절차를 확인한 뒤 설치하세요.",
+    "ollama": "선택 사항: Windows에서 .\\scripts\\ollama.ps1 -DryRun 으로 확인하세요.",
+    "ollama_api": "Ollama가 꺼져 있습니다. 'ollama serve' 실행 후 다시 확인하세요 (127.0.0.1:11434).",
+    "comfyui_api": "ComfyUI가 꺼져 있습니다. scripts/start-comfyui.ps1 로 시작 후 다시 확인하세요 (127.0.0.1:8188).",
+    "queue_self_test": "임시 SQLite 자체 테스트 실패: 디스크 공간과 임시 폴더 쓰기 권한을 확인하세요.",
+}
+
+
+def _add_hints(checks):
+    for name, item in checks.items():
+        if not item["ok"] and name in HINTS:
+            item["hint"] = HINTS[name]
+    return checks
+
+
 def inspect_runtime(*, check_services=True):
     checks = inspect_environment()
     checks["queue_self_test"] = _queue_self_test()
@@ -53,7 +72,7 @@ def inspect_runtime(*, check_services=True):
             ollama_models, lambda models: str(len(models)) + " local models available")
         checks["comfyui_api"] = _check_service(
             comfyui_health, lambda stats: "Local ComfyUI API reachable")
-    return checks
+    return _add_hints(checks)
 
 
 def main(argv=None):
@@ -64,6 +83,9 @@ def main(argv=None):
     parser.add_argument("--no-services", action="store_true",
                         help="Skip loopback Ollama and ComfyUI connectivity checks")
     args = parser.parse_args(argv)
+    # Korean hints must not crash legacy Windows code pages (cp1252/cp949 pipes).
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
     checks = inspect_runtime(check_services=not args.no_services)
     if args.json:
         print(json.dumps(checks, ensure_ascii=False, indent=2))
@@ -71,6 +93,8 @@ def main(argv=None):
         for name, item in checks.items():
             print(("[OK] " if item["ok"] else "[--] ") +
                   name + ": " + str(item["detail"]))
+            if item.get("hint"):
+                print("     -> " + item["hint"])
         print("Optional services are not required unless --strict is used.")
     mandatory = ("python", "platform", "git", "queue_self_test")
     required = tuple(checks) if args.strict else mandatory
