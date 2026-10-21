@@ -171,7 +171,7 @@ class AuthAndOnboardingTests(ApiBase):
         self.assertIn("openrouter", [c["id"] for c in state["catalog"]])
         status, listing = self.jcall("POST", "/onboard/models", dict(service="custom", custom_name="mock",
                                                                      custom_url=self.mock_url, key=SECRET))
-        self.assertEqual(listing["models"], ["demo-model", "demo-free:free", "other"])
+        self.assertCountEqual(listing["models"], ["demo-model", "demo-free:free", "other"])      # tidied and ranked, nothing lost\n        self.assertEqual(listing["total"], 3)\n        self.assertTrue(set(listing["recommended"]) <= set(listing["models"]))
         self.assertEqual(self.providers.load(), {})                 # listing models saves nothing
         result = self.onboard()
         self.assertTrue(result["ok"] and result["saved"], result)
@@ -789,3 +789,43 @@ class OpenUrlTests(ApiBase):
         for entry in setup_page.CATALOG:
             if entry["key_url"]:
                 self.assertIn(entry["key_url"].split("/")[2], hosts, entry["id"])
+
+class ArbiterChatTests(ApiBase):
+    def setUp(self):
+        super().setUp()
+        from workshop.runstats import RunStats
+        self.onboard()
+        for model in ("tiny-3b", "mid-flash", "big-pro"):
+            self.providers.add_model("mock", model)
+        stats = RunStats(Path(self.tmp.name) / "runstats.jsonl")
+        for _ in range(4):
+            stats.record("mock/demo-model", ok=False, seconds=1, kind="chat")
+
+    def meta(self, events):
+        return events[0][1]
+
+    def test_meta_reports_the_kind_of_work_and_why(self):
+        chat_id = self.new_chat("auto")
+        status, events = self.sse(chat_id, {"content": "안녕 오늘 기분 어때?", "model": "auto"})
+        meta = self.meta(events)
+        self.assertEqual((meta["task"], meta["level"]), ("chat", 1))
+        self.assertIn("일상 질문", meta["why"])
+        self.assertEqual(meta["model"], "mock/tiny-3b")
+
+    def test_research_goes_to_the_strong_model_and_code_is_recognised(self):
+        status, events = self.sse(self.new_chat("auto"), {"content": "전기차 시장 동향을 조사하고 업체를 비교 분석해서 근거와 출처가 있는 보고서로 정리해줘", "model": "auto"})
+        self.assertEqual(self.meta(events)["task"], "research")
+        self.assertEqual(self.meta(events)["model"], "mock/big-pro")
+        status, events = self.sse(self.new_chat("auto"), {"content": "파이썬 함수에서 에러가 나는데 디버그 방법 알려줘", "model": "auto"})
+        self.assertEqual(self.meta(events)["task"], "code")
+
+    def test_a_short_follow_up_keeps_the_conversation_kind(self):
+        chat_id = self.new_chat("auto")
+        self.sse(chat_id, {"content": "Traceback (most recent call last):\n  File \"a.py\", line 1\nValueError: x\n이 에러 고쳐줘", "model": "auto"})
+        status, events = self.sse(chat_id, {"content": "왜 그래?", "model": "auto"})
+        self.assertEqual(self.meta(events)["task"], "code")
+
+    def test_a_fixed_model_choice_skips_the_arbiter(self):
+        status, events = self.sse(self.new_chat("mock/tiny-3b"), {"content": "전기차 시장 동향 비교 분석 보고서", "model": "mock/tiny-3b"})
+        self.assertNotIn("task", self.meta(events))
+        self.assertEqual(self.meta(events)["model"], "mock/tiny-3b")

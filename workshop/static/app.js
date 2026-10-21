@@ -161,6 +161,45 @@
     api("POST", "/open-url", { url: a.href }).catch(function () { window.open(a.href, "_blank", "noopener"); });
   });
 
+
+  /* ---------- help (?) : short design notes for users ---------- */
+  var HELP = {
+    auto: { title: "자동 선택은 어떻게 동작하나요?", body: [
+      ["목적", "여러 AI를 연결해 두면, 질문마다 알맞은 AI를 JetAI가 대신 골라 줍니다. 모델 이름을 몰라도 됩니다."],
+      ["1단계 · 질문 파악(아비터)", "질문의 단어와 길이를 보고 종류를 정합니다: 코드(코드·에러·파일), 일상 질문(짧은 질문·번역), 심층 조사·분석(비교·조사·보고서·여러 항목·긴 글). 난이도(가벼움·보통·높음)도 함께 정합니다. 이 판단은 규칙으로만 하므로 토큰이 들지 않습니다."],
+      ["2단계 · 모델 고르기(라우터)", "모델 이름으로 성능 등급(가벼움·균형·고성능)과 특기(코드·추론)를 짐작해, 질문에 맞는 모델을 고릅니다. 코드 질문에는 코드 모델, 어려운 조사에는 고성능·추론 모델, 가벼운 질문에는 작고 빠른 모델입니다. 비슷하면 내 PC 모델을 먼저, 그다음 덜 쓴 모델을 골라 무료 한도를 나눠 씁니다."],
+      ["3단계 · 막히면 넘기기", "한도(429)나 오류가 나면 그 모델은 잠시(1분, 반복되면 10분) 쉬게 하고 다음으로 맞는 모델이 이어서 답합니다."],
+      ["안전", "요금이 나올 수 있는 모델과 동의하지 않은 서비스는 후보가 아닙니다. 답변 위에 '자동 선택 — 종류 · 난이도 → 모델'이 표시됩니다."],
+      ["한계", "이름으로 성능을 짐작하므로 틀릴 수 있습니다. 마음에 안 들면 모델 선택 메뉴에서 직접 고르거나 '다시 생성'을 누르세요."]] },
+    continuity: { title: "모델이 바뀌어도 이어서 작업하나요?", body: [
+      ["같은 대화 안에서는 이어집니다", "대화 내용은 JetAI가 이 PC에 저장하고, 질문할 때마다 최근 대화(약 24,000자)를 그때 답하는 모델에 함께 보냅니다. 그래서 모델이 바뀌어도 앞의 내용을 알고 답합니다."],
+      ["대화가 아주 길어지면", "오래된 부분은 보내지 못합니다. 대신 '처음 요청'과 생략된 요청 목록을 메모로 붙여 목표를 잃지 않게 합니다. 이전 답변을 요약해 주지는 않습니다."],
+      ["다른 대화와는 공유되지 않습니다", "새 대화를 열면 이전 대화를 기억하지 않습니다. 이어서 할 작업은 같은 대화에서 계속하세요. 여러 모델이 한 문서를 같이 쓰는 '보드'는 문서(.md)를 통해 정보를 공유합니다."],
+      ["참고", "내용은 선택된 서비스로 전송됩니다. 클라우드 서비스는 연결할 때 동의한 곳만 쓰입니다."]] },
+    free: { title: "무료 서비스는 어떻게 구분하나요?", body: [
+      ["무료로 보는 경우", "내 PC 모델, 이름이 -free 또는 :free로 끝나는 모델, 그리고 '무료 키'로 연결한 Gemini·Groq 등 무료 티어 서비스의 모델입니다."],
+      ["주의", "결제 수단(카드)을 연결한 키는 한도를 넘으면 요금이 나올 수 있습니다. 무료로만 쓰려면 결제를 연결하지 않은 키를 쓰세요."],
+      ["한도", "무료 한도는 서비스가 자주 바꿉니다. 한도에 걸리면 자동 선택이 다른 모델로 넘어갑니다."]] }
+  };
+  function openHelp(topic) {
+    var t = HELP[topic]; if (!t) return;
+    var box = $("helpbox"); box.textContent = ""; box.hidden = false;
+    var card = h("div", { class: "card help-card", role: "dialog", "aria-modal": "true", "aria-label": t.title },
+      h("header", {}, h("h2", { text: t.title }), h("button", { class: "icon", "aria-label": "닫기", text: "\u2715", onclick: closeHelp })));
+    t.body.forEach(function (row) { card.appendChild(h("div", { class: "help-row" }, h("b", { text: row[0] }), h("p", { text: row[1] }))); });
+    var tabs = h("div", { class: "help-tabs" }, Object.keys(HELP).map(function (k) {
+      return h("button", { type: "button", class: "btn mini" + (k === topic ? " on" : ""), text: HELP[k].title.replace(/\?$/, ""), onclick: function () { openHelp(k); } }); }));
+    card.appendChild(tabs);
+    box.appendChild(card);
+  }
+  function closeHelp() { $("helpbox").hidden = true; }
+  document.addEventListener("click", function (e) {
+    var b = e.target.closest && e.target.closest("[data-help]");
+    if (b) { e.preventDefault(); openHelp(b.dataset.help); return; }
+    if (e.target === $("helpbox")) closeHelp();
+  });
+  document.addEventListener("keydown", function (e) { if (e.key === "Escape" && !$("helpbox").hidden) closeHelp(); });
+
   /* ---------- state ---------- */
   function modelOptions() {
     var o = [];
@@ -168,9 +207,26 @@
     return o;
   }
   function isFree(m) { return /(-free|:free)$/.test(m); }
+  // Free also when the service was connected as an all-free tier (Gemini/Groq keys without billing) or marks names free.
+  function isFreeIn(p, m) {
+    return isFree(m) || !!(p && p.free_all) || !!(p && (p.free_match || []).some(function (f) { return String(m).toLowerCase().indexOf(f) >= 0; }));
+  }
+  // Same idea as the server's modelpick.capability(): a hint from the name, not a benchmark.
+  function capText(m) {
+    var n = m.toLowerCase(), size = (/(\d+(?:\.\d+)?)b\b/.exec(n) || [])[1], level = 2;
+    if (/(^|[^a-z])(lite|mini|nano|small|instant|haiku|tiny|fast)([^a-z]|$)/.test(n)) level = 1;
+    else if (/(^|[^a-z])(pro|large|opus|sonnet|maverick|ultra|max|plus|thinking|reason)([^a-z]|$)/.test(n) || size >= 60) level = 3;
+    else if (/(^|[^a-z])flash([^a-z]|$)/.test(n)) level = 2;
+    else if (size && size <= 15) level = 1;
+    var parts = [level === 1 ? "가볍고 빠름" : level === 3 ? "고성능" : "균형"];
+    if (/cod(er|estral|ex)|devstral/.test(n)) parts.push("코드");
+    if (/(^|[^a-z])(r1|reason\w*|thinking|qwq|o1|o3)([^a-z]|$)/.test(n)) parts.push("추론");
+    return parts.join(" · ");
+  }
+  function catalogFree(meta) { return { free_all: meta && meta.free === "all", free_match: (meta && meta.free_match) || [] }; }
   var AUTO = "auto";
   function hasAutoModel() {   // 'auto' routes among connected local/free models only (the server enforces it)
-    return modelOptions().some(function (o) { return o.provider.policy === "local" || (o.provider.consented && isFree(o.model)); });
+    return modelOptions().some(function (o) { return o.provider.policy === "local" || (o.provider.consented && isFreeIn(o.provider, o.model)); });
   }
   function modelLabel(ref) {
     if (ref === AUTO) return hasAutoModel() ? "자동 (로컬·무료 우선)" : "";
@@ -366,7 +422,10 @@
         body: JSON.stringify(regenerateMode ? { regenerate: true, model: state.model, fallback: state.fallback } : { content: text, model: state.model, fallback: state.fallback }) });
       if (!res.ok) { var j = {}; try { j = await res.json(); } catch (e) { /* ignore */ } throw new Error(j.error || ("HTTP " + res.status)); }
       for await (var ev of sseEvents(res)) {
-        if (ev.event === "meta") loadChats();            // the chat now has its title: show it in the sidebar right away
+        if (ev.event === "meta") {
+          loadChats();            // the chat now has its title: show it in the sidebar right away
+          if (ev.data.why) node.notices.appendChild(h("div", { class: "notice route", text: "\u2699 자동 선택 \u2014 " + ev.data.why }));
+        }
         else if (ev.event === "delta") { acc += ev.data.t; if (!raf) raf = requestAnimationFrame(paint); }
         else if (ev.event === "notice") node.notices.appendChild(h("div", { class: "notice", text: "\u21AA " + ev.data.message }));
         else if (ev.event === "done") { title = ev.data.title; served = ev.data.model || ""; }
@@ -420,7 +479,7 @@
     if (ref === AUTO) return "free";                // auto only ever picks local/free models
     var o = modelOptions().filter(function (x) { return x.ref === ref; })[0];
     if (!o) return "other";
-    if (o.provider.policy === "local" || isFree(o.model)) return "free";
+    if (o.provider.policy === "local" || isFreeIn(o.provider, o.model)) return "free";
     return "other";
   }
   function digestEstimate() {
@@ -432,7 +491,7 @@
     var sel = $("dg-model"), prev = sel.value;
     sel.textContent = "";
     if (hasAutoModel()) sel.appendChild(h("option", { value: AUTO, text: "자동 (로컬·무료 우선)" }));
-    modelOptions().forEach(function (o) { sel.appendChild(h("option", { value: o.ref, text: o.ref + (o.provider.policy === "local" ? " (로컬)" : isFree(o.model) ? " (무료)" : "") })); });
+    modelOptions().forEach(function (o) { sel.appendChild(h("option", { value: o.ref, text: o.ref + (o.provider.policy === "local" ? " (로컬)" : isFreeIn(o.provider, o.model) ? " (무료)" : "") })); });
     if (prev) sel.value = prev; else if (state.model) sel.value = state.model;
     if (!sel.value && sel.options.length) sel.selectedIndex = 0;   // never leave the select empty (e.g. chat model is "auto")
     digestEstimate();
@@ -501,7 +560,7 @@
       p.models.forEach(function (m) {
         var ref = p.name + "/" + m;
         menu.appendChild(h("button", { type: "button", role: "option", class: ref === state.model ? "sel" : "", "data-ref": ref, onclick: function () { chooseModel(ref); } },
-          h("span", { text: m }), isFree(m) ? h("span", { class: "tag free", text: "무료" }) : null));
+          h("span", { text: m }), isFreeIn(p, m) ? h("span", { class: "tag free", text: "무료" }) : null));
       });
       menu.appendChild(h("button", { type: "button", class: "more", "data-more": p.name, text: "모델 더 보기…", onclick: function (e) { e.stopPropagation(); renderMoreModels(p); } }));
     });
@@ -721,9 +780,12 @@
     var err = h("p", { class: "err", id: "w-err", text: w.error });
     var next = h("button", { class: "btn primary", type: "button", id: "w-next", text: w.busy ? "확인 중…" : "연결 확인", onclick: async function () {
       w.busy = true; w.error = ""; sync();
-      try { w.models = (await api("POST", "/onboard/models", wizPayload())).models; w.modelsError = ""; }
-      catch (e) { w.models = []; w.modelsError = e.message; }
-      w.busy = false; w.step = 3; w.model = w.models[0] || ""; renderWizard();
+      try {
+        var listing = await api("POST", "/onboard/models", wizPayload());
+        w.models = listing.models; w.recommended = listing.recommended || []; w.hidden = listing.hidden || 0; w.total = listing.total || w.models.length; w.modelsError = "";
+      } catch (e) { w.models = []; w.recommended = []; w.hidden = 0; w.total = 0; w.modelsError = e.message; }
+      w.picked = (w.recommended || []).slice();
+      w.busy = false; w.step = 3; w.model = (w.recommended && w.recommended[0]) || w.models[0] || ""; renderWizard();
     } });
     card.appendChild(err);
     card.appendChild(h("div", { class: "foot" }, h("button", { class: "btn", type: "button", text: "뒤로", onclick: function () { w.step = 1; w.error = ""; renderWizard(); } }), next));
@@ -742,7 +804,7 @@
         var ref = w.result.provider + "/" + w.result.model;
         await loadState();
         var prov = state.providers.filter(function (p) { return p.name === w.result.provider; })[0];
-        var cheap = prov && (prov.policy === "local" || isFree(w.result.model));
+        var cheap = prov && (prov.policy === "local" || isFreeIn(prov, w.result.model));
         state.model = (cheap && hasAutoModel()) ? AUTO : ref;     // free/local connections just work through 'auto'
         renderModelBtn();   // update first, then close: no flash of the "connect a service" screen
         closeWizard(); newChat();
@@ -750,6 +812,22 @@
       return;
     }
     if (w.modelsError) card.appendChild(h("p", { class: "note", text: "모델 목록을 불러오지 못했습니다 (" + w.modelsError + "). 모델 이름을 직접 입력해도 됩니다." }));
+    var meta = svc(), freeInfo = catalogFree(meta);
+    var rec = (w.recommended || []).filter(function (m) { return w.models.indexOf(m) >= 0; });
+    var picked = w.picked = (w.picked || rec).filter(function (m) { return w.models.indexOf(m) >= 0; });
+    if (rec.length) {
+      card.appendChild(h("p", { class: "note", id: "w-rec-note" }, h("button", { type: "button", class: "help", "data-help": "auto", "aria-label": "자동 선택 설명", text: "?" }), " 추천 모델입니다. 체크한 모델은 함께 저장되어, 자동 선택이 질문에 맞게 골라 씁니다. 하나만 먼저 테스트합니다."));
+      var recBox = h("div", { class: "recs", id: "w-recs" });
+      rec.forEach(function (m) {
+        recBox.appendChild(h("label", { class: "rec-row" },
+          h("input", { type: "checkbox", "data-model": m, checked: picked.indexOf(m) >= 0 ? "checked" : false, onchange: function (e) {
+            w.picked = w.picked.filter(function (x) { return x !== m; }); if (e.target.checked) w.picked.push(m); } }),
+          h("span", { class: "rec-name", text: m }), h("span", { class: "rec-cap", text: capText(m) }),
+          isFreeIn(freeInfo, m) ? h("span", { class: "tag free", text: "무료" }) : null,
+          h("button", { type: "button", class: "btn mini", text: m === w.model ? "테스트 대상" : "이걸로 테스트", onclick: function () { w.model = m; renderWizard(); } })));
+      });
+      card.appendChild(recBox);
+    }
     var listBox = h("div", { class: "models", id: "w-models" });
     function paintList() {
       listBox.textContent = "";
@@ -757,21 +835,28 @@
       var shown = w.models.filter(function (m) { return !f || m.toLowerCase().indexOf(f) >= 0; }).slice(0, 80);
       shown.forEach(function (m) {
         listBox.appendChild(h("button", { type: "button", class: m === w.model ? "sel" : "", "data-model": m, onclick: function () { w.model = m; manual.value = m; paintList(); } },
-          h("span", { text: m }), isFree(m) ? h("span", { class: "tag free", text: "무료" }) : null));
+          h("span", { text: m }), isFreeIn(freeInfo, m) ? h("span", { class: "tag free", text: "무료" }) : null));
       });
       listBox.hidden = !shown.length;
     }
     var manual = h("input", { type: "text", id: "w-model", maxlength: "200", value: w.model, placeholder: "모델 이름", oninput: function (e) { w.model = e.target.value; paintList(); sync(); } });
-    if (w.models.length) card.appendChild(h("label", { class: "field" }, h("span", { text: "모델 검색 (" + w.models.length + "개)" }),
-      h("input", { type: "search", id: "w-filter", value: w.filter, placeholder: "이름으로 찾기", oninput: function (e) { w.filter = e.target.value; paintList(); } })));
-    card.appendChild(listBox);
-    card.appendChild(h("label", { class: "field" }, h("span", { text: "선택한 모델 (직접 입력 가능)" }), manual));
-    card.appendChild(h("p", { class: "note", text: "이름이 -free 또는 :free로 끝나는 모델이 무료입니다. 그 밖의 모델은 요금이 부과될 수 있으니 서비스의 요금 안내를 확인하세요." }));
+    if (w.models.length) {
+      var all = h("details", { class: "all-models", id: "w-all", open: rec.length ? false : "open" },
+        h("summary", { text: "전체 모델 보기 (" + w.models.length + "개" + (w.hidden ? " · 음성·이미지·임베딩 등 채팅이 안 되는 " + w.hidden + "개는 숨김" : "") + ")" }),
+        h("label", { class: "field" }, h("span", { text: "모델 검색" }),
+          h("input", { type: "search", id: "w-filter", value: w.filter, placeholder: "이름으로 찾기", oninput: function (e) { w.filter = e.target.value; paintList(); } })),
+        listBox);
+      card.appendChild(all);
+    }
+    card.appendChild(h("label", { class: "field" }, h("span", { text: "테스트할 모델 (직접 입력 가능)" }), manual));
+    card.appendChild(h("p", { class: "note", text: freeInfo.free_all
+      ? "이 서비스는 결제 수단을 연결하지 않은 무료 키라면 모든 모델이 무료 한도 안에서 쓰입니다(한도를 넘으면 잠시 막힘). 결제를 연결한 키는 요금이 나올 수 있습니다."
+      : "이름이 -free 또는 :free로 끝나는 모델이 무료입니다. 그 밖의 모델은 요금이 부과될 수 있으니 서비스의 요금 안내를 확인하세요." }));
     var err = h("p", { class: "err", text: w.error });
     var go = h("button", { class: "btn primary", type: "button", id: "w-test", text: w.busy ? "테스트 중…" : "테스트하고 저장", onclick: async function () {
       w.busy = true; w.error = ""; renderWizard();
       try {
-        var r = await api("POST", "/onboard/test", wizPayload({ model: w.model.trim(), prompt: "한 문장으로 짧게 인사해줘.", save: "on" }));
+        var r = await api("POST", "/onboard/test", wizPayload({ model: w.model.trim(), prompt: "한 문장으로 짧게 인사해줘.", save: "on", extra_models: (w.picked || []).filter(function (m) { return m !== w.model.trim(); }).join(",") }));
         if (r.ok) { w.result = r; w.key = ""; } else w.error = r.error;
       } catch (e) { w.error = e.message; }
       w.busy = false; renderWizard();

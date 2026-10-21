@@ -31,6 +31,20 @@ def estimate_tokens(text):
     return max(1, math.ceil(ascii_chars / 4 + (len(text) - ascii_chars) / 1.5))
 
 
+def tier_for(entry, model):
+    """local / free / other for a model of a registered service. Free means: runs on this PC, the name ends in
+    -free/:free, the service was connected as an all-free tier (catalog `free: all`, e.g. Gemini/Groq keys without
+    a payment method), or the name contains a fragment the service marks free (`free_match`)."""
+    if entry.get("data_policy") == "local":
+        return "local"
+    name = str(model).lower()
+    if name.endswith(("-free", ":free")) or entry.get("free_all"):
+        return "free"
+    if any(fragment in name for fragment in entry.get("free_match") or []):
+        return "free"
+    return "other"
+
+
 def tier_of(data_policy, model):
     if data_policy == "local":
         return "local"

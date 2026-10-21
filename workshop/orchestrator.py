@@ -21,7 +21,7 @@ from . import worktree
 from .providers import Providers
 from .router import ROLES, route
 from .runstats import RunStats
-from .usage import UsageLedger, estimate_tokens, tier_of
+from .usage import UsageLedger, estimate_tokens, tier_for
 
 OPENCODE_PROVIDERS = ("opencode", "openai")  # served by the OpenCode CLI, not a chat endpoint
 CODE_NOTE = ("Make only the requested change inside the current working directory. Do not commit, push, "
@@ -200,7 +200,7 @@ def _run_step(board, sid, step, providers, flags, text_fn, code_fn):
     for _ in range(TEXT_ATTEMPTS):
         try:
             reply = text_fn(provider, model, [{"role": "user", "content": prompt}])
-            _record(flags, step, tier_of(policy, model), prompt, reply)     # only the attempt that succeeded
+            _record(flags, step, tier_for(provider, model), prompt, reply)     # only the attempt that succeeded
             if cache is not None:
                 try:
                     cache.put(step["model"], prompt, reply)
@@ -234,7 +234,7 @@ def _tier_fn(providers):
         name, _, short = model.partition("/")
         entry = providers.get(name)
         if entry is not None:
-            return {"local": "local", "free": "free"}.get(tier_of(entry["data_policy"], short), "paid")
+            return {"local": "local", "free": "free"}.get(tier_for(entry, short), "paid")
         return classify(model)
     return tier
 
