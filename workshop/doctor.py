@@ -1,5 +1,6 @@
 """Run read-only checks: python -m workshop.doctor."""
 import json
+from .preflight import describe_error
 from .adapters import capabilities, ollama_models, comfyui_health
 
 def diagnose():
@@ -9,7 +10,7 @@ def diagnose():
             value = fn()
             result["services"][name] = {"available": True, "details": value}
         except Exception as error:
-            result["services"][name] = {"available": False, "reason": str(error)}
+            result["services"][name] = {"available": False, "reason": describe_error(error)}
     return result
 
 if __name__ == "__main__":

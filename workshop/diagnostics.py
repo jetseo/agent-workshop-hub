@@ -12,7 +12,7 @@ import tempfile
 from pathlib import Path
 
 from .adapters import comfyui_health, ollama_models
-from .preflight import inspect_environment
+from .preflight import describe_error, inspect_environment
 from .queue import Queue
 
 
@@ -21,7 +21,7 @@ def _check_service(fn, label):
         value = fn()
         return {"ok": True, "detail": label(value)}
     except (OSError, ValueError, KeyError, TypeError, TimeoutError) as error:
-        return {"ok": False, "detail": type(error).__name__ + ": " + str(error)[:250]}
+        return {"ok": False, "detail": describe_error(error)}
 
 
 def _queue_self_test():
@@ -48,6 +48,8 @@ def _queue_self_test():
 
 # Actionable next steps for failed checks (Korean, with the command to run).
 HINTS = {
+    "python": "Python 3.9 이상이 필요합니다. WSL: sudo apt install python3 / Windows: python.org 설치 후 새 터미널에서 다시 실행하세요.",
+    "platform": "Linux(WSL2)와 Windows만 지원합니다. macOS는 아직 검증되지 않았습니다.",
     "git": "git이 필요합니다. Ubuntu(WSL): sudo apt install git",
     "opencode": "WSL 안에 설치되지 않았거나 Windows용만 보입니다. bash scripts/install-opencode.sh --dry-run 으로 절차를 확인한 뒤 설치하세요.",
     "ollama": "선택 사항: Windows에서 .\\scripts\\ollama.ps1 -DryRun 으로 확인하세요.",
