@@ -56,7 +56,7 @@ def _free_port():
 
 class ServerLifecycleTests(unittest.TestCase):
     def start(self, port, home):
-        env = {**os.environ, "HOME": home, "USERPROFILE": home, "PYTHONIOENCODING": "utf-8"}
+        env = {**os.environ, "HOME": home, "USERPROFILE": home, "PYTHONIOENCODING": "utf-8", "JETAI_NO_BACKGROUND_CHECK": "1"}
         return subprocess.Popen([sys.executable, "-m", "workshop.dashboard", "--port", str(port), "--db", str(Path(home) / "j.db")],
                                 cwd=ROOT, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8")
 

@@ -386,6 +386,11 @@ def main():
             raise SystemExit(2)
         raise
     applog.write("start port=%d terminal=%s" % (args.port, "on" if terminal_key else "off"))
+    # Everything that runs before the "Dashboard:" line below must finish first: a stop request can arrive the moment
+    # that line is printed, and it is only handled cleanly once serve_forever() is inside its try block.
+    modelinfo.install(api_ctx.info)                  # routing may use the public catalog's benchmark data from now on
+    if not os.environ.get("JETAI_NO_BACKGROUND_CHECK"):      # tests and offline setups can opt out
+        api_ctx.watch.start_in_background()          # refresh that catalog and look for new free/local models, off the main thread
     # A termination request (closing the window, `kill`) should stop the server cleanly like Ctrl+C does.
     def _stop(*_):
         raise KeyboardInterrupt
@@ -403,8 +408,6 @@ def main():
               "(do not share it):", flush=True)
         print(f"  http://127.0.0.1:{args.port}/app?key={terminal_key}", flush=True)
     print("Loopback only. Stop with Ctrl+C.", flush=True)
-    modelinfo.install(api_ctx.info)                  # routing may use the public catalog's benchmark data from now on
-    api_ctx.watch.start_in_background()              # refresh that catalog and look for new free/local models, off the main thread
     try:
         server.serve_forever()
     except KeyboardInterrupt:
