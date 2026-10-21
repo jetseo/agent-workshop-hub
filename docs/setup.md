@@ -177,7 +177,7 @@ GitHub Actions의 `JetAI-portable` 산출물(또는 `.\scripts\build-package.ps1
 
 ## 더블클릭으로 실행하는 `JetAI.exe`
 폴더에서 `JetAI.exe`를 더블클릭하면 서버가 시작되고 앱 창이 열립니다(이미 실행 중이면 창만 다시 열림).
-- 만들기(한 번): PowerShell에서 `.\scriptsuild-exe.ps1` — Windows에 들어 있는 C# 컴파일러를 쓰므로 설치할 것이 없습니다. 결과 `JetAI.exe`(약 22KB)는 저장소에 올리지 않고 직접 만듭니다.
+- 만들기(한 번): PowerShell에서 `.\scripts\build-exe.ps1` — Windows에 들어 있는 C# 컴파일러를 쓰므로 설치할 것이 없습니다. 결과 `JetAI.exe`(약 22KB)는 저장소에 올리지 않고 직접 만듭니다.
 - 이 파일은 같은 폴더의 `jetai.ps1`을 실행하는 런처입니다. 폴더 밖으로 옮기면 동작하지 않으니, 바로가기를 만들어 쓰세요(우클릭 → 바로 가기 만들기).
 - 파이썬 3.10 이상이 필요합니다(없으면 안내 창이 뜸). 파이썬 없이 쓰려면 휴대용 패키지(`JetAI.cmd`)를 쓰세요.
 - 종료: 최소화된 PowerShell 창(서버)을 닫으면 JetAI가 멈춥니다.
