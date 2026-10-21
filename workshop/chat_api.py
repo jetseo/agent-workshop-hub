@@ -14,6 +14,8 @@ from .explain import explain
 from .chat import chat, chat_stream, list_models
 from .chat_store import DEFAULT_TITLE, CHAT_ID, ChatStore
 from . import arbiter, router
+from .modelinfo import ModelInfo
+from .modelwatch import ModelWatch
 from .router import route_task
 from .runstats import RunStats
 from .usage import UsageLedger
@@ -50,6 +52,10 @@ class Context:
         self.chat_fn, self.stream_fn, self.list_fn = chat_fn, stream_fn, list_fn
         self.env_fn = env_fn
         self.open_url_fn = open_url_fn
+        # Public model catalog (read from a local cache; downloaded in the background by the app) and the watcher
+        # that adds new free/local models. Both keep their files next to providers.json.
+        self.info = ModelInfo(providers.path.parent / "modelinfo.json")
+        self.watch = ModelWatch(providers, list_fn, info=self.info)
         self.active = set()
         self._active_lock = threading.Lock()
 
@@ -101,7 +107,8 @@ def _provider_view(ctx, name, entry):
 def _state(ctx):
     providers = [_provider_view(ctx, n, e) for n, e in ctx.providers.load().items()]
     return {"providers": providers, "catalog": setup_page.public_catalog(),
-            "onboarded": any(p["models"] for p in providers)}
+            "onboarded": any(p["models"] for p in providers),
+            "news": ctx.watch.news(), "settings": ctx.watch.settings()}
 
 
 def _history(chat_obj):
@@ -365,6 +372,16 @@ def dispatch(ctx, method, path, body):
                 candidates=lambda ref, enabled: fallback_candidates(ctx, ref, enabled),
                 chat_fn=ctx.chat_fn, ledger=ctx.ledger, body=body,
                 claim=lambda: ctx.claim("digest"), release=lambda: ctx.release("digest")))
+        if parts == ["settings"] and method == "POST":
+            if not isinstance(body.get("auto_add_models"), bool):
+                raise ApiError(400, "잘못된 설정입니다.")
+            return Json(200, {"settings": ctx.watch.set_setting("auto_add_models", body["auto_add_models"])})
+        if parts == ["models", "check"] and method == "POST":
+            ctx.info.refresh()                                   # the public catalog, at most once a day
+            return Json(200, ctx.watch.check(force=True))
+        if parts == ["news", "ack"] and method == "POST":
+            ctx.watch.ack()
+            return Json(200, {"ok": True})
         if parts == ["open-url"] and method == "POST":
             return Json(200, open_external(ctx, body.get("url")))
         if parts == ["usage"] and method == "GET":
@@ -398,7 +415,10 @@ def dispatch(ctx, method, path, body):
             if parts[2:] == ["send"] and method == "POST":
                 return _send(ctx, chat_id, body)
         if parts == ["onboard", "models"] and method == "POST":
-            return Json(200, modelpick.curate(setup_page.models_for_form(ctx.providers, _form(body), ctx.list_fn)))
+            listing = modelpick.curate(setup_page.models_for_form(ctx.providers, _form(body), ctx.list_fn))
+            # what each recommended model is and what it is good at, from the public catalog (when it knows the model)
+            listing["info"] = {m: d for m in listing["recommended"] for d in [ctx.info.describe(m)] if d}
+            return Json(200, listing)
         if parts == ["onboard", "test"] and method == "POST":
             return Json(200, setup_page.run_test(ctx.providers, _form(body), ctx.chat_fn))
         if parts == ["providers", "models"] and method == "POST":

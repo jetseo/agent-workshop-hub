@@ -18,6 +18,7 @@ CODER = re.compile(r"cod(?:er|estral|ex)|devstral", re.I)
 MAX_RECOMMENDED = 5
 
 
+INFO_LOOKUP = None      # set by modelinfo.install(): name -> {"level", "code", "reasoning", "ctx", "vision"} or None
 LIGHT_MODEL = re.compile(r"(?<![a-z])(lite|mini|nano|small|instant|haiku|tiny|fast)(?![a-z])", re.I)
 FLASH_MODEL = re.compile(r"(?<![a-z])flash(?![a-z])", re.I)
 REASONING = re.compile(r"(?<![a-z])(r1|reason\w*|thinking|think|qwq|o1|o3|o4|deepseek-r)(?![a-z])", re.I)
@@ -38,7 +39,15 @@ def capability(model):
         level = 1
     else:
         level = 2
-    return {"level": level, "coder": bool(CODER.search(name)), "reasoning": bool(REASONING.search(name))}
+    cap = {"level": level, "coder": bool(CODER.search(name)), "reasoning": bool(REASONING.search(name)), "evidence": False}
+    facts = INFO_LOOKUP(model) if INFO_LOOKUP else None      # public catalog data beats a guess from the name
+    if facts:
+        cap["evidence"] = True
+        measured = facts.get("level")           # benchmark percentile, blended with the name-based guess (a "70b" can mislead)
+        cap["level"] = int((level + measured) / 2 + 0.5) if measured else level
+        cap["coder"] = cap["coder"] or bool(facts.get("code"))
+        cap["reasoning"] = cap["reasoning"] or bool(facts.get("reasoning"))
+    return cap
 
 
 def clean_name(model):

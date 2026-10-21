@@ -176,6 +176,11 @@
       ["대화가 아주 길어지면", "오래된 부분은 보내지 못합니다. 대신 '처음 요청'과 생략된 요청 목록을 메모로 붙여 목표를 잃지 않게 합니다. 이전 답변을 요약해 주지는 않습니다."],
       ["다른 대화와는 공유되지 않습니다", "새 대화를 열면 이전 대화를 기억하지 않습니다. 이어서 할 작업은 같은 대화에서 계속하세요. 여러 모델이 한 문서를 같이 쓰는 '보드'는 문서(.md)를 통해 정보를 공유합니다."],
       ["참고", "내용은 선택된 서비스로 전송됩니다. 클라우드 서비스는 연결할 때 동의한 곳만 쓰입니다."]] },
+    newmodels: { title: "새 모델은 어떻게 추가되나요?", body: [
+      ["언제", "JetAI를 실행할 때마다(10분에 한 번까지) 연결한 서비스의 모델 목록을 다시 가져와 지난번과 비교합니다. 설정에서 '지금 확인'으로 바로 해 볼 수도 있습니다."],
+      ["무엇을 추가하나요", "새로 생긴 모델 중 무료·로컬이고 채팅이 되는 모델만, 서비스마다 최대 2개(서로 다른 종류 우선)를 등록합니다. 요금이 날 수 있는 모델, 음성·이미지·임베딩·미리보기 모델은 추가하지 않습니다. 처음 확인할 때는 목록만 기억하고 추가하지 않습니다."],
+      ["어떤 모델인지는 어떻게 아나요", "OpenRouter의 공개 모델 목록(키 불필요, 하루에 한 번만 받음)에서 같은 이름의 모델을 찾아 벤치마크 순위·추론 지원·문맥 길이·설명을 가져옵니다. 목록에 없는 모델은 이름으로 짐작합니다. 어떤 정보도 내 PC 밖으로 보내지 않습니다(목록을 받기만 함)."],
+      ["다운로드는 하지 않습니다", "내 PC에 모델 파일을 받지 않습니다. 서비스가 이미 제공하는 이름을 등록할 뿐입니다. 끄려면 설정에서 체크를 해제하세요."]] },
     free: { title: "무료 서비스는 어떻게 구분하나요?", body: [
       ["무료로 보는 경우", "내 PC 모델, 이름이 -free 또는 :free로 끝나는 모델, 그리고 '무료 키'로 연결한 Gemini·Groq 등 무료 티어 서비스의 모델입니다."],
       ["주의", "결제 수단(카드)을 연결한 키는 한도를 넘으면 요금이 나올 수 있습니다. 무료로만 쓰려면 결제를 연결하지 않은 키를 쓰세요."],
@@ -243,8 +248,17 @@
   async function loadState() {
     var s = await api("GET", "/state");
     state.providers = s.providers; state.catalog = s.catalog; state.onboarded = s.onboarded;
+    state.settings = s.settings || { auto_add_models: true };
     pickDefaultModel(); renderModelBtn(); renderWelcome();
+    if ((s.news || []).length) {                       // new free/local models were added at start-up: say so once
+      var lines = [];
+      s.news.forEach(function (n) { n.added.forEach(function (m) { lines.push(n.service + "/" + m); }); });
+      state.news = s.news;
+      toastLong("새 무료·로컬 모델을 추가했습니다: " + lines.slice(0, 4).join(", ") + (lines.length > 4 ? " 외 " + (lines.length - 4) + "개" : ""));
+      api("POST", "/news/ack", {}).catch(function () { /* shown again next time */ });
+    }
   }
+  function toastLong(message) { toast(message); clearTimeout(toast.timer); toast.timer = setTimeout(function () { $("toast").hidden = true; }, 7000); }
   async function loadChats() { state.chats = (await api("GET", "/chats")).chats; pickDefaultModel(); renderChats(); renderModelBtn(); }
 
   /* ---------- usage chip ---------- */
@@ -573,6 +587,25 @@
   /* ---------- settings view (native; replaces the old framed setup page) ---------- */
   async function renderSettings() {
     var list = $("set-list");
+    var auto = $("set-auto");
+    if (auto) {
+      auto.checked = !state.settings || state.settings.auto_add_models !== false;
+      auto.onchange = async function () {
+        try { state.settings = (await api("POST", "/settings", { auto_add_models: auto.checked })).settings; toast(auto.checked ? "새 모델을 자동으로 추가합니다" : "새 모델 자동 추가를 껐습니다"); }
+        catch (e) { toast(e.message); auto.checked = !auto.checked; }
+      };
+      $("set-check").onclick = async function () {
+        var btn = $("set-check"), msg = $("set-check-msg"); btn.disabled = true; msg.textContent = "확인하는 중…";
+        try {
+          var r = await api("POST", "/models/check", {});
+          var added = []; Object.keys(r.added || {}).forEach(function (k) { r.added[k].forEach(function (m) { added.push(k + "/" + m); }); });
+          var fresh = 0; Object.keys(r.new || {}).forEach(function (k) { fresh += r.new[k]; });
+          msg.textContent = r.skipped ? "방금 확인했습니다." : (added.length ? "추가: " + added.join(", ") : (fresh ? "새 모델 " + fresh + "개가 있지만 무료·채팅용이 아니거나 이미 있어 추가하지 않았습니다." : "새 모델이 없습니다.")) + " (서비스 " + r.checked + "곳 확인)";
+          if (added.length) { await loadState(); renderSettings(); }
+        } catch (e) { msg.textContent = e.message; }
+        btn.disabled = false;
+      };
+    }
     loadEnv().then(function (env) {
       var node = $("set-env-text");
       if (!node) return;
@@ -782,7 +815,7 @@
       w.busy = true; w.error = ""; sync();
       try {
         var listing = await api("POST", "/onboard/models", wizPayload());
-        w.models = listing.models; w.recommended = listing.recommended || []; w.hidden = listing.hidden || 0; w.total = listing.total || w.models.length; w.modelsError = "";
+        w.models = listing.models; w.info = listing.info || {}; w.recommended = listing.recommended || []; w.hidden = listing.hidden || 0; w.total = listing.total || w.models.length; w.modelsError = "";
       } catch (e) { w.models = []; w.recommended = []; w.hidden = 0; w.total = 0; w.modelsError = e.message; }
       w.picked = (w.recommended || []).slice();
       w.busy = false; w.step = 3; w.model = (w.recommended && w.recommended[0]) || w.models[0] || ""; renderWizard();
@@ -822,7 +855,9 @@
         recBox.appendChild(h("label", { class: "rec-row" },
           h("input", { type: "checkbox", "data-model": m, checked: picked.indexOf(m) >= 0 ? "checked" : false, onchange: function (e) {
             w.picked = w.picked.filter(function (x) { return x !== m; }); if (e.target.checked) w.picked.push(m); } }),
-          h("span", { class: "rec-name", text: m }), h("span", { class: "rec-cap", text: capText(m) }),
+          h("span", { class: "rec-name", text: m }),
+          h("span", { class: "rec-cap", title: (w.info && w.info[m] ? w.info[m].desc + " (출처: " + w.info[m].source + ")" : ""),
+            text: w.info && w.info[m] && w.info[m].tags.length ? w.info[m].tags.join(" · ") : capText(m) }),
           isFreeIn(freeInfo, m) ? h("span", { class: "tag free", text: "무료" }) : null,
           h("button", { type: "button", class: "btn mini", text: m === w.model ? "테스트 대상" : "이걸로 테스트", onclick: function () { w.model = m; renderWizard(); } })));
       });

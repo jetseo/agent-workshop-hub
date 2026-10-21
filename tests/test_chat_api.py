@@ -829,3 +829,38 @@ class ArbiterChatTests(ApiBase):
         status, events = self.sse(self.new_chat("mock/tiny-3b"), {"content": "전기차 시장 동향 비교 분석 보고서", "model": "mock/tiny-3b"})
         self.assertNotIn("task", self.meta(events))
         self.assertEqual(self.meta(events)["model"], "mock/tiny-3b")
+
+class ModelNewsApiTests(ApiBase):
+    def test_state_carries_news_and_settings_and_ack_clears_the_news(self):
+        self.onboard()
+        self.ctx.watch._push({"ts": 1, "service": "mock", "added": ["x-free"], "about": []})
+        status, state = self.jcall("GET", "/state")
+        self.assertEqual(state["news"][0]["added"], ["x-free"])
+        self.assertTrue(state["settings"]["auto_add_models"])
+        self.assertEqual(self.jcall("POST", "/news/ack", {})[0], 200)
+        self.assertEqual(self.jcall("GET", "/state")[1]["news"], [])
+
+    def test_settings_switch_and_validation(self):
+        status, body = self.jcall("POST", "/settings", {"auto_add_models": False})
+        self.assertEqual((status, body["settings"]["auto_add_models"]), (200, False))
+        self.assertFalse(self.jcall("GET", "/state")[1]["settings"]["auto_add_models"])
+        for bad in ({"auto_add_models": "yes"}, {}, {"other": True}):
+            self.assertEqual(self.jcall("POST", "/settings", bad)[0], 400)
+
+    def test_check_endpoint_runs_the_watcher_without_touching_the_network_for_the_catalog(self):
+        self.onboard()
+        self.ctx.info.fetch = lambda: {"data": []}                     # junk download is ignored, nothing real is fetched
+        status, result = self.jcall("POST", "/models/check", {})
+        self.assertEqual(status, 200)
+        self.assertGreaterEqual(result["checked"], 1)
+        self.providers.add_model("mock", "tmp")                        # first look only remembers; a second check adds nothing new
+        self.assertEqual(self.jcall("POST", "/models/check", {})[1]["added"], {})
+
+    def test_onboard_listing_carries_catalog_info_when_it_knows_the_model(self):
+        from workshop.modelinfo import ModelInfo
+        self.ctx.info = ModelInfo(Path(self.tmp.name) / "mi.json", fetch=lambda: {"data": [
+            {"id": "x/demo-model", "context_length": 300000, "reasoning": True, "description": "A demo.", "pricing": {"prompt": "0", "completion": "0"}}
+            ] + [{"id": "f/m%d" % i, "pricing": {}} for i in range(30)]})
+        self.ctx.info.refresh()
+        status, listing = self.jcall("POST", "/onboard/models", dict(service="custom", custom_name="mock", custom_url=self.mock_url, key=SECRET))
+        self.assertIn("추론", listing["info"].get("demo-model", {}).get("tags", []))

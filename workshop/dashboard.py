@@ -367,9 +367,16 @@ def main():
             handle.write(terminal_key)
         os.chmod(key_file, 0o600)
     applog.setup()
+    from . import modelinfo, setup_page
+    from .chat_api import Context
+    from .chat_store import ChatStore
+    from .providers import Providers
+    registry = Providers()
+    api_ctx = Context(registry, ChatStore(None), chat_fn=setup_page.chat, list_fn=setup_page.list_models)
     try:
         server = ThreadingHTTPServer(("127.0.0.1", args.port), make_handler(
-            Queue(args.db), token, terminal_key=terminal_key, terminal_cwd=str(Path(__file__).resolve().parent.parent)))
+            Queue(args.db), token, providers=registry, api_ctx=api_ctx, terminal_key=terminal_key,
+            terminal_cwd=str(Path(__file__).resolve().parent.parent)))
     except OSError as error:
         if error.errno in (98, 10048, 10013, 48) or getattr(error, "winerror", None) in (10048, 10013) \
                 or "Address already in use" in str(error):
@@ -396,6 +403,8 @@ def main():
               "(do not share it):", flush=True)
         print(f"  http://127.0.0.1:{args.port}/app?key={terminal_key}", flush=True)
     print("Loopback only. Stop with Ctrl+C.", flush=True)
+    modelinfo.install(api_ctx.info)                  # routing may use the public catalog's benchmark data from now on
+    api_ctx.watch.start_in_background()              # refresh that catalog and look for new free/local models, off the main thread
     try:
         server.serve_forever()
     except KeyboardInterrupt:

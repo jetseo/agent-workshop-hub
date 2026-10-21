@@ -71,7 +71,7 @@ class CurationTests(unittest.TestCase):
         self.assertEqual(modelpick.capability("gemini-2.5-flash-lite")["level"], 1)
 
     def test_capability_levels_and_flags(self):
-        self.assertEqual(modelpick.capability("qwen2.5-coder:7b"), {"level": 1, "coder": True, "reasoning": False})
+        self.assertEqual(modelpick.capability("qwen2.5-coder:7b"), {"level": 1, "coder": True, "reasoning": False, "evidence": False})
         self.assertEqual(modelpick.capability("llama-3.3-70b-versatile")["level"], 3)
         self.assertEqual(modelpick.capability("llama-3.1-8b-instant")["level"], 1)
         self.assertTrue(modelpick.capability("deepseek-r1")["reasoning"])
