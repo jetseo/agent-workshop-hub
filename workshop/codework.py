@@ -25,8 +25,9 @@ import time
 import uuid
 from pathlib import Path
 
-from . import adapters, cmdguard, codereport, modelpick, projectmap, usage, worktree
+from . import adapters, checks, cmdguard, codereport, modelpick, projectmap, usage, worktree
 
+CHECK_TIMEOUT = 300                                             # seconds per build/test command
 MAX_PROMPT = 8000
 MAX_RUNTIME = 20 * 60
 MAX_EVENTS_FILE = 20_000_000
@@ -137,7 +138,7 @@ def summarise(event):
 
 class CodeRuns:
     def __init__(self, providers, *, find_binary=adapters.find_opencode, popen=subprocess.Popen, clock=time.time, max_runtime=MAX_RUNTIME,
-                 worktree_base=None, info=None, command_fn=opencode_command):
+                 worktree_base=None, info=None, command_fn=opencode_command, check_timeout=CHECK_TIMEOUT):
         self.providers = providers
         self.command_fn = command_fn
         self.home = home_dir(providers)
@@ -146,6 +147,7 @@ class CodeRuns:
         self.worktree_base = Path(worktree_base) if worktree_base else self.home / "worktrees"
         self.find_binary, self.popen, self.clock, self.max_runtime = find_binary, popen, clock, max_runtime
         self.info = info
+        self.check_timeout = check_timeout
         self.rules = cmdguard.ProjectRules(self.home / "command-rules.json")
         self._lock = threading.RLock()
         self._procs = {}
@@ -205,7 +207,7 @@ class CodeRuns:
 
     @staticmethod
     def _summary(run):
-        keys = ("id", "repo", "prompt", "model", "status", "started", "finished", "error", "files", "stat", "applied_at", "undone_at", "tier", "repo_was_dirty", "project", "blocked", "approvals")
+        keys = ("id", "repo", "prompt", "model", "status", "started", "finished", "error", "files", "stat", "applied_at", "undone_at", "tier", "repo_was_dirty", "project", "blocked", "approvals", "checks")
         return {k: run.get(k) for k in keys}
 
     @staticmethod
@@ -535,6 +537,38 @@ class CodeRuns:
             thread = threading.Thread(target=self._run, args=(run, command, env), name="code-" + run_id, daemon=True)
             self._threads[run_id] = thread
             thread.start()
+
+    # -- build/test checks ---------------------------------------------------------------------------------------
+    def check(self, run_id):
+        """Run the detected build/test commands in the agent's copy (only on request; one job at a time)."""
+        with self._lock:
+            run = self._read(run_id)
+            if run["status"] in ("running", "discarded", "applied", "undone") or not Path(run.get("worktree", "")).exists():
+                raise CodeWorkError("이 작업의 복사본에서는 지금 검사를 실행할 수 없습니다(실행 중이거나 이미 정리됨).")
+            if any(t.is_alive() for t in self._threads.values()):
+                raise CodeWorkError("다른 작업이 실행 중입니다. 끝난 뒤 다시 누르세요.")
+            items = checks.plan(run["worktree"])
+            run["checks"] = {"state": "running", "started": self.clock(), "items": [], "verdict": "", "planned": [i["command"] for i in items]}
+            self._save(run)
+            thread = threading.Thread(target=self._run_checks, args=(run, items), name="check-" + run_id, daemon=True)
+            self._threads[run_id] = thread
+            thread.start()
+
+    def _run_checks(self, run, items):
+        env = {k: v for k, v in os.environ.items() if k in WINDOWS_ENV_KEEP}
+        env.update({"CI": "1", "PYTHONDONTWRITEBYTECODE": "1", "PYTHONUTF8": "1"})
+        done = []
+        try:
+            for item in items:
+                if self._cancel_flags.get(run["id"]):
+                    break
+                done.append(checks.run_one(item, run["worktree"], env, self.check_timeout, self.popen, kill_tree))
+                run["checks"]["items"] = list(done)
+                self._save(run)
+        except Exception as error:                                     # the UI must always get an end state
+            done.append({"kind": "?", "command": "(검사 실행)", "status": "failed", "exit": None, "seconds": 0, "output": str(error)[:200]})
+        run["checks"].update({"state": "done", "items": done, "verdict": checks.verdict(done), "finished": self.clock()})
+        self._save(run)
 
     def _resume_command(self, binary, model_arg, prompt, session):
         return self.command_fn(binary, model_arg, prompt, session=session) if session else self.command_fn(binary, model_arg, prompt)
