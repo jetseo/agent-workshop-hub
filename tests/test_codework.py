@@ -265,6 +265,38 @@ class ApplyTests(Base):
         with self.assertRaises(CodeWorkError):
             self.runs.apply(run_id, True)                                                  # cannot apply twice
 
+    def test_undo_takes_the_applied_change_out_again(self):
+        run_id = self.reviewed()
+        original = (self.repo / "calc.py").read_text(encoding="utf-8")
+        head = git(self.repo, "rev-parse", "HEAD").strip()
+        with self.assertRaises(CodeWorkError):
+            self.runs.undo(run_id, True)                                                   # not applied yet
+        self.runs.apply(run_id, True)
+        with self.assertRaises(CodeWorkError):
+            self.runs.undo(run_id, False)                                                  # needs confirmation
+        self.runs.undo(run_id, True)
+        self.assertEqual((self.repo / "calc.py").read_text(encoding="utf-8"), original)
+        self.assertEqual(git(self.repo, "status", "--porcelain").strip(), "")
+        self.assertEqual(git(self.repo, "rev-parse", "HEAD").strip(), head)
+        self.assertEqual(self.runs.get(run_id)["status"], "undone")
+        self.assertTrue(self.runs.get(run_id)["undone_at"])
+        with self.assertRaises(CodeWorkError):
+            self.runs.undo(run_id, True)                                                   # cannot undo twice
+
+    def test_undo_removes_new_files_and_refuses_when_the_user_edited_afterwards(self):
+        run_id = self.wait(self.start("NEWFILE"), "review")["id"]
+        self.runs.apply(run_id, True)
+        self.runs.undo(run_id, True)
+        self.assertFalse((self.repo / "notes.txt").exists())
+        run_id = self.reviewed()
+        self.runs.apply(run_id, True)
+        (self.repo / "calc.py").write_text("def add(a, b):\n    return a * b\n", encoding="utf-8")       # edited after applying
+        with self.assertRaises(CodeWorkError) as caught:
+            self.runs.undo(run_id, True)
+        self.assertIn("되돌릴 수 없습니다", str(caught.exception))
+        self.assertIn("a * b", (self.repo / "calc.py").read_text(encoding="utf-8"))
+        self.assertEqual(self.runs.get(run_id)["status"], "applied")
+
     def test_a_conflicting_working_folder_is_not_touched(self):
         run_id = self.reviewed()
         (self.repo / "calc.py").write_text("def add(a, b):\n    return a * b\n", encoding="utf-8")        # the user changed the same line
