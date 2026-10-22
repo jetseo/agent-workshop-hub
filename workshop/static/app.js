@@ -682,6 +682,7 @@
     box.textContent = "";
     var card = h("div", { class: "code-card" }, h("h3", {}, codeBadge(r.status), " " + r.prompt.slice(0, 120)),
       h("p", { class: "sub", text: r.repo + " · " + r.model + (r.repo_was_dirty ? " · ⚠ 폴더에 저장하지 않은 변경이 있었습니다(복사본에는 없음)" : "") }));
+    if (r.project) card.appendChild(h("details", {}, h("summary", { text: "JetAI가 미리 읽은 프로젝트 요약(에이전트에 함께 전달됨)" }), h("pre", { class: "sub", text: r.project })));
     if (r.error) card.appendChild(h("p", { class: r.status === "failed" ? "err" : "sub", text: r.error }));
     if (r.activity && r.activity.length) card.appendChild(h("div", { class: "code-activity" }, r.activity.slice(-14).map(function (l) { return h("div", { text: l }); })));
     if (r.files && r.files.length) {

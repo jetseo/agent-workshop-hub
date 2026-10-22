@@ -25,7 +25,7 @@ import time
 import uuid
 from pathlib import Path
 
-from . import adapters, modelpick, usage, worktree
+from . import adapters, modelpick, projectmap, usage, worktree
 
 MAX_PROMPT = 8000
 MAX_RUNTIME = 20 * 60
@@ -200,7 +200,7 @@ class CodeRuns:
 
     @staticmethod
     def _summary(run):
-        keys = ("id", "repo", "prompt", "model", "status", "started", "finished", "error", "files", "stat", "applied_at", "tier", "repo_was_dirty")
+        keys = ("id", "repo", "prompt", "model", "status", "started", "finished", "error", "files", "stat", "applied_at", "tier", "repo_was_dirty", "project")
         return {k: run.get(k) for k in keys}
 
     def get(self, run_id):
@@ -313,7 +313,13 @@ class CodeRuns:
             self._save(run)
             config = build_config(model_ref, provider)
             env = clean_environment(os.environ, self.opencode_home, config, key=(provider or {}).get("api_key"))
-            command = self.command_fn(binary, model_arg, run["prompt"])
+            try:
+                run["project"] = projectmap.render(projectmap.read_project(path))
+            except Exception:                                   # reading is a help, never a reason to refuse the work
+                run["project"] = ""
+            self._save(run)
+            request = run["prompt"] + ("\n\n" + run["project"] if run["project"] else "")
+            command = self.command_fn(binary, model_arg, request)
             thread = threading.Thread(target=self._run, args=(run, command, env), name="code-" + run_id, daemon=True)
             self._threads[run_id] = thread
             thread.start()
