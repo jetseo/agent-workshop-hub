@@ -65,6 +65,8 @@ body.side-closed #side-open{display:inline-flex}
 .code-card{margin-top:12px;padding:12px;border:1px solid var(--border);border-radius:14px}.code-activity{font:12.5px/1.5 ui-monospace,Consolas,monospace;background:var(--bg3);border-radius:8px;padding:8px;margin:8px 0;max-height:170px;overflow:auto}
 .code-files{margin:6px 0 10px 18px;padding:0;font:13px ui-monospace,Consolas,monospace}
 .diff{font:12.5px/1.45 ui-monospace,Consolas,monospace;background:var(--bg3);border-radius:8px;padding:6px 0;max-height:60vh;overflow:auto;white-space:pre}.dl{padding:0 10px}.dl-add{background:rgba(48,164,108,.18)}.dl-del{background:rgba(229,72,77,.18)}.dl-hunk{color:var(--muted)}.dl-file{font-weight:700;margin-top:6px}
+.rem-steps{margin:6px 0 10px 18px;padding:0;font-size:13.5px;color:var(--muted)}.rem-code{font:600 22px/1.4 ui-monospace,Consolas,monospace;letter-spacing:.06em;background:var(--bg3);border-radius:10px;padding:8px 12px;display:inline-block}
+#set-remote .warn{font-size:13px}
 .eng-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:7px 0;border-bottom:1px solid var(--border)}.eng-row .sub{flex:1;min-width:160px;font-size:12.5px}
 .eng-bar{height:8px;background:var(--bg3);border-radius:4px;overflow:hidden;margin:6px 0}.eng-bar i{display:block;height:100%;background:var(--accent)}
 #eng-job{margin:10px 0;padding:10px;border:1px solid var(--border);border-radius:10px}

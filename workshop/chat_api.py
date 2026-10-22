@@ -18,6 +18,7 @@ from .codework import CodeRuns, CodeWorkError
 from .engine import Engine, EngineError
 from .modelinfo import ModelInfo
 from .modelwatch import ModelWatch
+from .remote import RemoteControl, TelegramError
 from .servicefeed import ServiceFeed
 from .router import route_task
 from .runstats import RunStats
@@ -62,6 +63,9 @@ class Context:
         self.feed = ServiceFeed(providers.path.parent / "service-feed.json", builtin=setup_page.CATALOG)
         setup_page.set_extra(self.feed.catalog_entries())             # services found earlier by the daily list
         self.code = CodeRuns(providers)                              # coding agent (OpenCode) in throw-away worktrees
+
+
+        self.remote = RemoteControl(self)                            # phone control; the server attaches the job queue and starts it
         self.engine = Engine(providers.path.parent / "engine", providers)      # built-in local engine (llama.cpp), off until installed
         self.active = set()
         self._active_lock = threading.Lock()
@@ -133,6 +137,27 @@ def _code_api(ctx, method, rest, body):
     except CodeWorkError as error:
         raise ApiError(400, str(error))
     raise LookupError("Unknown code route")
+
+
+def _remote_api(ctx, method, rest, body):
+    """Phone control through Telegram. The token is only ever stored in its own private file, never returned."""
+    remote = ctx.remote
+    try:
+        if not rest and method == "GET":
+            return remote.status()
+        if method == "POST" and rest == ["telegram"]:
+            token = body.get("token")
+            if not isinstance(token, str):
+                raise ApiError(400, "봇 토큰을 붙여 넣으세요.")
+            return remote.setup_telegram(token)
+        if method == "POST" and rest == ["repair"]:
+            return remote.repair()
+        if method == "POST" and rest == ["disconnect"]:
+            remote.disconnect()
+            return {"ok": True}
+    except TelegramError as error:
+        raise ApiError(400, str(error))
+    raise LookupError("Unknown remote route")
 
 
 def _engine_api(ctx, method, rest, body):
@@ -457,6 +482,10 @@ def dispatch(ctx, method, path, body):
             return Json(200, {"settings": ctx.watch.set_setting(keys[0], body[keys[0]])})
         if parts and parts[0] == "code":
             return Json(200, _code_api(ctx, method, parts[1:], body))
+
+
+        if parts and parts[0] == "remote":
+            return Json(200, _remote_api(ctx, method, parts[1:], body))
         if parts and parts[0] == "engine":
             return Json(200, _engine_api(ctx, method, parts[1:], body))
         if parts == ["catalog", "refresh"] and method == "POST":

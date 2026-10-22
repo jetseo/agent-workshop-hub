@@ -182,6 +182,12 @@
       ["권한", "에이전트는 복사본 안에서 읽기·검색·수정만 하고, 셸 명령은 허용 목록(git 상태·diff, 테스트 실행 등)만 됩니다. 인터넷 가져오기와 복사본 밖 폴더 접근은 막혀 있고, 내 PC의 OpenCode 설정·플러그인·유료 계정 키는 전달되지 않습니다(JetAI 전용 빈 설정으로 실행)."],
       ["모델과 비용", "무료·로컬 모델만 기본 허용이고, 요금이 나올 수 있는 모델은 비용 확인 체크가 필요합니다. OpenCode 자체 모델은 이름이 -free인 것만 됩니다. 자동은 코드 작업에 충분한 성능의 모델만 고릅니다."],
       ["한계", "작은 로컬 모델(약 15B 이하)은 파일을 고치는 도구 호출을 자주 틀려 작업이 실패합니다(이 PC에서 확인). 어려운 작업은 큰 모델이나 클라우드 무료 모델을 고르세요. 한 번에 작업 하나만 실행하고 20분이 넘으면 중단합니다."]] },
+    remote: { title: "폰으로 원격 제어하면 어떻게 되나요?", body: [
+      ["무엇", "폰의 텔레그램에서 JetAI 봇에게 글을 보내면 PC의 JetAI가 자동 선택으로 답하고, 작업 목록·상태·사용량을 보여 주고, 작업을 승인·취소·재실행할 수 있습니다."],
+      ["안전", "PC가 텔레그램 서버로 밖으로만 연결해서 포트를 열지 않습니다. 처음 코드를 보낸 내 계정 하나만 주인이 되고, 다른 사람과 그룹 대화에는 아무 답도 하지 않습니다. 봇 토큰은 저장소 밖의 비공개 파일에만 저장합니다."],
+      ["실행 승인", "작업 승인·재실행은 /yes 로 한 번 더 확인해야 하고, 코드 작업은 파일을 바꿀 수 있다는 경고가 붙습니다. JetAI를 켜기 전에 보낸 명령이나 2분 넘은 메시지는 실행하지 않습니다."],
+      ["알림", "새로 승인·검토가 필요하거나 실패한 작업은 1분에 한 번 묶어서 알려 줍니다."],
+      ["주의", "대화가 텔레그램 서버를 거치며 종단간 암호화가 아닙니다. 민감한 내용은 보내지 마세요. 끄려면 설정에서 '연결 해제'를 누르면 토큰도 지워집니다."]] },
     engine: { title: "내장 로컬 엔진이 뭔가요?", body: [
       ["무엇", "Ollama 같은 별도 프로그램 없이, JetAI가 직접 AI 모델 파일을 받아 이 PC에서 돌립니다. 인터넷 서비스가 아니므로 한도·요금이 없고 내용이 PC 밖으로 나가지 않습니다."],
       ["무엇을 받나요", "① 실행 엔진 llama.cpp(약 25~40MB, 그래픽 카드가 있으면 Vulkan 빌드) ② 모델 파일 1개(0.4~9GB). 출처는 GitHub(ggml-org/llama.cpp)와 Hugging Face뿐이고, 받기 전에 정확한 크기를 보여 드리며 확인을 눌러야만 시작합니다."],
@@ -695,6 +701,42 @@
     card.appendChild(row); box.appendChild(card);
   }
 
+  /* ---------- phone control (settings) ---------- */
+  var remoteTimer = null;
+  async function renderRemote() {
+    var box = $("rem-body"); if (!box) return;
+    var s; try { s = await api("GET", "/remote"); } catch (e) { box.textContent = e.message; return; }
+    box.textContent = "";
+    clearInterval(remoteTimer); remoteTimer = null;
+    if (!s.configured) {
+      var tok = h("input", { type: "password", id: "rem-token", maxlength: "100", autocomplete: "off", spellcheck: "false", placeholder: "BotFather가 준 토큰 붙여넣기 (예: 123456789:AA…)" });
+      box.appendChild(h("ol", { class: "rem-steps" },
+        h("li", { text: "폰의 텔레그램에서 @BotFather를 열고 /newbot 으로 봇을 만듭니다." }),
+        h("li", { text: "받은 토큰을 아래에 붙여 넣고 연결합니다." }),
+        h("li", { text: "표시되는 6자리 코드를 만든 봇에게 /start 코드 로 보냅니다. 처음 보낸 계정만 주인이 됩니다." })));
+      box.appendChild(h("div", { class: "row" }, tok, h("button", { type: "button", class: "btn primary", id: "rem-connect", text: "연결", onclick: async function () {
+        var b = this; b.disabled = true;
+        try { var r = await api("POST", "/remote/telegram", { token: tok.value.trim() }); tok.value = ""; toast("봇 " + r.bot + " 연결됨. 코드를 봇에게 보내세요."); state.remoteCode = r.code; renderRemote(); }
+        catch (e) { toast(e.message); b.disabled = false; } } })));
+      return;
+    }
+    if (s.paired) {
+      box.appendChild(h("p", { text: "연결됨: 봇 " + s.bot + " · 주인 " + (s.owner || "") + (s.running ? " · 실행 중" : " · 멈춤") + (s.last_error ? " · " + s.last_error : "") }));
+      box.appendChild(h("p", { class: "sub", text: "폰에서 /help 를 보내 보세요. 글을 그냥 보내면 자동 선택으로 답합니다." }));
+    } else {
+      box.appendChild(h("p", { text: "봇 " + s.bot + " 에게 아래 코드를 보내 주세요:" }));
+      box.appendChild(h("p", { class: "rem-code", text: s.pairing ? "/start " + (state.remoteCode || "(코드 다시 만들기를 누르세요)") : "코드가 만료되었습니다. 다시 만드세요." }));
+      remoteTimer = setInterval(renderRemote, 3000);                // wait until the phone has paired
+    }
+    var actions = h("div", { class: "row" });
+    if (!s.paired) actions.appendChild(h("button", { type: "button", class: "btn", text: "코드 다시 만들기", onclick: async function () {
+      try { var r = await api("POST", "/remote/repair", {}); state.remoteCode = r.code; renderRemote(); } catch (e) { toast(e.message); } } }));
+    actions.appendChild(h("button", { type: "button", class: "btn", text: "연결 해제(토큰 삭제)", onclick: async function () {
+      if (!confirm("원격 제어를 끄고 봇 토큰을 지울까요?")) return;
+      try { await api("POST", "/remote/disconnect", {}); state.remoteCode = ""; renderRemote(); } catch (e) { toast(e.message); } } }));
+    box.appendChild(actions);
+  }
+
   /* ---------- built-in local engine (settings) ---------- */
   var engineTimer = null;
   function fmtBytes(n) { return n >= 1e9 ? (n / 1e9).toFixed(2) + " GB" : (n / 1e6).toFixed(0) + " MB"; }
@@ -782,7 +824,7 @@
   /* ---------- settings view (native; replaces the old framed setup page) ---------- */
   async function renderSettings() {
     var list = $("set-list");
-    renderEngine();
+    renderEngine(); renderRemote();
     var auto = $("set-auto");
     if (auto) {
       auto.checked = !state.settings || state.settings.auto_add_models !== false;

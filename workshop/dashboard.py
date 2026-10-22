@@ -375,8 +375,10 @@ def main():
     registry = Providers()
     api_ctx = Context(registry, ChatStore(None), chat_fn=setup_page.chat, list_fn=setup_page.list_models)
     try:
+        queue = Queue(args.db)
+        api_ctx.remote.queue = queue                  # phone control reads and approves jobs in the same queue
         server = ThreadingHTTPServer(("127.0.0.1", args.port), make_handler(
-            Queue(args.db), token, providers=registry, api_ctx=api_ctx, terminal_key=terminal_key,
+            queue, token, providers=registry, api_ctx=api_ctx, terminal_key=terminal_key,
             terminal_cwd=str(Path(__file__).resolve().parent.parent)))
     except OSError as error:
         if error.errno in (98, 10048, 10013, 48) or getattr(error, "winerror", None) in (10048, 10013) \
@@ -392,6 +394,7 @@ def main():
     modelinfo.install(api_ctx.info)                  # routing may use the public catalog's benchmark data from now on
     if not os.environ.get("JETAI_NO_BACKGROUND_CHECK"):      # tests and offline setups can opt out
         api_ctx.watch.start_in_background()          # refresh that catalog and look for new free/local models, off the main thread
+        api_ctx.remote.start()                       # only does anything after the user connected a bot in settings
         threading.Thread(target=api_ctx.refresh_catalog, name="service-feed", daemon=True).start()   # new free services, off the main thread
         if api_ctx.watch.settings()["engine_autostart"]:
             threading.Thread(target=api_ctx.engine.autostart, name="engine-autostart", daemon=True).start()   # only if installed
@@ -418,6 +421,7 @@ def main():
         pass
     finally:
         api_ctx.code.shutdown()                       # a coding agent must not keep running after the app is closed
+        api_ctx.remote.stop()
         api_ctx.engine.stop()                         # the built-in engine must not outlive the app
         server.server_close()
         applog.write("stop")
