@@ -549,9 +549,12 @@ class CodeRuns:
                         runner = agentloop.run
                         extra = {"limits": run.get("limits"), "allowed_commands": self._loop_allowed(run, path), "audit": self._audit_writer(audit_file, number),
                                  "popen": self.popen, "kill": kill_tree, "env": self._check_env(), "on_blocked": lambda command: self._record_blocked(run, command)}
+                    if run.get("mode") != "loop":
+                        extra = dict(extra, context_for=lambda existing, path=path, files=files: directmode.related_tests(path, files, exclude=existing, limit=self._context_chars(run), targets=existing))
                     trial["result"] = runner(ask, run["prompt"], path, files, run.get("project", ""), test_fn, emit,
                                              cancelled=lambda: bool(self._cancel_flags.get(run_id)), validate=validate,
-                                             context=directmode.related_tests(path, files, limit=self._context_chars(run)), temperature=temperature if number > 1 else None, **extra)
+                                             context=directmode.related_tests(path, files, limit=self._context_chars(run)), temperature=temperature if number > 1 else None,
+                                             **extra)
                 except Exception as error:
                     trial["result"]["error"] = "실행 중 오류: " + str(error)[:200]
                 trial["verdict"] = (trial["checks"] or {}).get("verdict", "skipped")

@@ -201,6 +201,50 @@ class PipelineTests(unittest.TestCase):
         self.assertIn("너무 커서", result["error"])
 
 
+class ContextHygieneTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.dir = Path(self.tmp.name)
+        (self.dir / "tests").mkdir()
+        (self.dir / "calc.py").write_text(BUG, encoding="utf-8")
+        (self.dir / "tests" / "test_calc.py").write_text("from calc import add\n# calc tests\n", encoding="utf-8")
+        (self.dir / "tests" / "test_other.py").write_text("from other import thing\n# unrelated tests\n", encoding="utf-8")
+        self.files = ["calc.py", "tests/test_calc.py", "tests/test_other.py"]
+
+    def test_only_tests_that_import_the_edited_module_are_sent(self):
+        everything = directmode.related_tests(self.dir, self.files)
+        focused = directmode.related_tests(self.dir, self.files, targets=["calc.py"])
+        self.assertIn("test_other.py", everything)
+        self.assertIn("test_calc.py", focused)
+        self.assertNotIn("test_other.py", focused)
+        self.assertLess(len(focused), len(everything))
+
+    def test_when_no_test_mentions_the_module_all_are_kept_as_a_fallback(self):
+        text = directmode.related_tests(self.dir, self.files, targets=["unknown.py"])
+        self.assertIn("test_calc.py", text)
+        self.assertIn("test_other.py", text)
+
+    def test_context_is_chosen_after_localization_and_failure_output_is_reduced(self):
+        script = Script(edits=[blocks("    return a - b", "    return a * b"), blocks("    return a * b", "    return a + b")])
+        seen = []
+
+        def context_for(existing):
+            seen.append(list(existing))
+            return directmode.related_tests(self.dir, self.files, exclude=existing, targets=existing)
+        noisy = "\n".join('  File "x.py", line %d, in test' % i for i in range(300)) + "\nAssertionError: 5 != 6"
+        results = [("failed", noisy), ("passed", "")]
+        result = directmode.run(script, "고쳐줘", self.dir, self.files, "", lambda: results.pop(0), lambda *a: None, context_for=context_for)
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(seen, [["calc.py"]])
+        edit_prompt = script.calls[1][1]
+        self.assertIn("test_calc.py", edit_prompt)
+        self.assertNotIn("test_other.py", edit_prompt)
+        repair_prompt = script.calls[-1][1]
+        self.assertIn("AssertionError: 5 != 6", repair_prompt)
+        self.assertLess(len(repair_prompt), len(noisy))                                  # the 300-line trace was reduced
+
+
 class RunsIntegrationTests(Base):
     def make(self, script):
         self.runs.shutdown()
