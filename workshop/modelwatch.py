@@ -23,7 +23,7 @@ SAFE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,199}")      # what we a
 MAX_ADDED_PER_SERVICE = 2
 MIN_SECONDS_BETWEEN_CHECKS = 600
 MAX_NEWS = 20
-DEFAULT_SETTINGS = {"auto_add_models": True, "engine_autostart": True}
+DEFAULT_SETTINGS = {"auto_add_models": True, "engine_autostart": True, "code_guidance": True}
 
 
 def _read(path, default):

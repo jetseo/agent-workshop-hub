@@ -62,7 +62,7 @@ class Context:
         self.watch = ModelWatch(providers, list_fn, info=self.info)
         self.feed = ServiceFeed(providers.path.parent / "service-feed.json", builtin=setup_page.CATALOG)
         setup_page.set_extra(self.feed.catalog_entries())             # services found earlier by the daily list
-        self.code = CodeRuns(providers)                              # coding agent (OpenCode) in throw-away worktrees
+        self.code = CodeRuns(providers, use_guidance=lambda: self.watch.settings().get("code_guidance", True))                             # coding agent (OpenCode) in throw-away worktrees
 
 
         self.remote = RemoteControl(self)                            # phone control; the server attaches the job queue and starts it
@@ -120,7 +120,8 @@ def _code_api(ctx, method, rest, body):
                     repos.append(run["repo"])
             return {"environment": code.environment(), "models": code.model_options(), "runs": runs, "repos": repos[:8]}
         if rest == ["start"] and method == "POST":
-            return code.start(body.get("repo"), body.get("prompt"), body.get("model") or "auto", body.get("confirm_cost") is True)
+            return code.start(body.get("repo"), body.get("prompt"), body.get("model") or "auto", body.get("confirm_cost") is True,
+                              body["guidance"] if isinstance(body.get("guidance"), bool) else None)
         if rest == ["rules", "remove"] and method == "POST":
             repo = code.check_repo(body.get("repo"))
             code.rules.remove(repo, str(body.get("command") or ""))

@@ -124,10 +124,10 @@ def score(task, run):
     return {"ok": not notes, "reason": "; ".join(notes) or detail, "changed": sorted(changed)}
 
 
-def run_task(runs, task, model, workdir, wait=1200, sleep=time.sleep, clock=time.time):
+def run_task(runs, task, model, workdir, wait=1200, sleep=time.sleep, clock=time.time, guidance=None, label=None):
     repo = build_repo(task, workdir)
     began = clock()
-    run_id = runs.start(str(repo), task.prompt, model)["id"]
+    run_id = runs.start(str(repo), task.prompt, model, False, guidance)["id"]
     cancelled = False
     while runs.get(run_id)["status"] == "running":
         if not cancelled and clock() - began > wait:
@@ -145,18 +145,24 @@ def run_task(runs, task, model, workdir, wait=1200, sleep=time.sleep, clock=time
         runs.discard(run_id)
     except Exception:
         pass
-    result.update({"task": task.id, "model": model, "seconds": round(clock() - began, 1), "status": run["status"],
+    result.update({"task": task.id, "model": label or model, "seconds": round(clock() - began, 1), "status": run["status"],
                    "tokens": metrics.get("tokens"), "tool_calls": metrics.get("tool_calls")})
     return result
 
 
-def evaluate(runs, models, task_ids=None, **kwargs):
+GUIDANCE_VARIANTS = {"default": [("", None)], "on": [(" [지침 있음]", True)], "off": [(" [지침 없음]", False)],
+                     "both": [(" [지침 없음]", False), (" [지침 있음]", True)]}
+
+
+def evaluate(runs, models, task_ids=None, guidance="default", **kwargs):
     chosen = [t for t in TASKS if not task_ids or t.id in task_ids]
     results = []
     with tempfile.TemporaryDirectory(prefix="jetai-eval-") as tmp:
         for number, model in enumerate(models):
-            for task in chosen:
-                results.append(run_task(runs, task, model, Path(tmp) / ("m%d-%s" % (number, task.id)), **kwargs))
+            for suffix, flag in GUIDANCE_VARIANTS[guidance]:
+                for task in chosen:
+                    results.append(run_task(runs, task, model, Path(tmp) / ("m%d%s-%s" % (number, "g" if flag else "n" if flag is False else "", task.id)),
+                                            guidance=flag, label=model + suffix, **kwargs))
     return results
 
 
@@ -178,13 +184,15 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description="코드 작업 에이전트 평가(작은 작업을 자동 채점). 무료·로컬 모델만 쓸 수 있습니다.")
     parser.add_argument("--model", action="append", required=True, help="예: opencode/xxx-free 또는 서비스/모델 (여러 번 가능)")
     parser.add_argument("--tasks", help="쉼표로 구분한 작업 id (기본: 전부). 가능: " + ", ".join(TASK_IDS))
+    parser.add_argument("--guidance", choices=sorted(GUIDANCE_VARIANTS), default="default",
+                        help="작업 지침: on/off, both는 같은 모델·작업을 지침 없음/있음으로 둘 다 실행해 비교, default는 설정을 따름")
     parser.add_argument("--out", help="결과 표를 쓸 Markdown 파일")
     args = parser.parse_args(argv)
     from .codework import CodeRuns
     from .providers import Providers
     runs = CodeRuns(Providers())
     try:
-        results = evaluate(runs, args.model, args.tasks.split(",") if args.tasks else None)
+        results = evaluate(runs, args.model, args.tasks.split(",") if args.tasks else None, guidance=args.guidance)
     finally:
         runs.shutdown()
     text = table(results)

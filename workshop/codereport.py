@@ -78,7 +78,8 @@ def build(run, events_path):
         lines.append("- 사용자가 내 폴더에 적용함: " + _stamp(run["applied_at"]) + " (커밋은 하지 않음)")
     if run.get("undone_at"):
         lines.append("- 적용을 되돌림: " + _stamp(run["undone_at"]))
-    lines += ["", "## 모델·비용", "- 모델: `%s` (구분: %s, %s)" % (run.get("model"), run.get("tier"), metrics["cost"])]
+    lines += ["", "## 모델·비용", "- 모델: `%s` (구분: %s, %s)" % (run.get("model"), run.get("tier"), metrics["cost"]),
+             "- 작업 지침: " + {"off": "사용 안 함", "short": "짧은 지침", "full": "전체 지침"}.get(run.get("guidance") or "off", "사용 안 함")]
     t = events["tokens"]
     lines.append("- 토큰: " + ("입력 %d / 출력 %d" % (t["input"], t["output"]) if t else "실행기가 알려 주지 않음(기록 없음)"))
     lines += ["", "## 프로젝트 요약(JetAI가 미리 읽음)", mask(run.get("project") or "(없음)"), "",

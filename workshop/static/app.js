@@ -632,6 +632,9 @@
       var go = h("button", { type: "button", class: "btn primary", id: "code-start", text: "시작", onclick: codeStart });
       form.append(list, h("label", { class: "field" }, h("span", { text: "프로젝트 폴더" }), repo), h("label", { class: "field" }, h("span", { text: "할 일" }), prompt),
         h("label", { class: "field" }, h("span", { text: "모델" }), model), note, cost,
+        h("label", { class: "check" }, h("input", { type: "checkbox", id: "code-guidance", checked: !state.settings || state.settings.code_guidance !== false,
+          onchange: async function (e) { try { state.settings = (await api("POST", "/settings", { code_guidance: e.target.checked })).settings; } catch (err) { toast(err.message); } } }),
+          h("span", { text: " 작업 지침 붙이기(먼저 읽기 · 테스트로 확인 · 범위 지키기 · 실제로 돌려 보고하기)" })),
         h("p", { class: "sub", text: "커밋된 상태(HEAD)를 복사해 작업하므로 저장하지 않은 변경은 반영되지 않습니다. 에이전트는 복사본 안에서만 파일을 고치고, 허용된 명령(테스트 실행 등)만 쓸 수 있으며, 인터넷 접근·내 계정의 유료 키는 쓰지 못합니다." }),
         h("div", { class: "row" }, go));
       model.onchange = codeModelNote;
@@ -663,7 +666,7 @@
     var b = $("code-start"); b.disabled = true;
     try {
       store("code-repo", $("code-repo").value.trim());
-      var r = await api("POST", "/code/start", { repo: $("code-repo").value.trim(), prompt: $("code-prompt").value, model: $("code-model").value, confirm_cost: $("code-cost").checked });
+      var r = await api("POST", "/code/start", { repo: $("code-repo").value.trim(), prompt: $("code-prompt").value, model: $("code-model").value, confirm_cost: $("code-cost").checked, guidance: $("code-guidance").checked });
       codeOpen = r.id; $("code-prompt").value = ""; toast("작업을 시작했습니다."); renderCode();
     } catch (e) { toast(e.message); }
     b.disabled = false;
