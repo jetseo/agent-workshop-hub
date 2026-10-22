@@ -25,7 +25,7 @@ import time
 import uuid
 from pathlib import Path
 
-from . import adapters, checks, cmdguard, codereport, codereview, modelpick, projectmap, usage, worktree
+from . import adapters, checks, cmdguard, codereport, codereview, guidance, modelpick, projectmap, usage, worktree
 
 CHECK_TIMEOUT = 300                                             # seconds per build/test command
 MAX_PROMPT = 8000
@@ -138,7 +138,7 @@ def summarise(event):
 
 class CodeRuns:
     def __init__(self, providers, *, find_binary=adapters.find_opencode, popen=subprocess.Popen, clock=time.time, max_runtime=MAX_RUNTIME,
-                 worktree_base=None, info=None, command_fn=opencode_command, check_timeout=CHECK_TIMEOUT):
+                 worktree_base=None, info=None, command_fn=opencode_command, check_timeout=CHECK_TIMEOUT, use_guidance=lambda: True):
         self.providers = providers
         self.command_fn = command_fn
         self.home = home_dir(providers)
@@ -148,6 +148,7 @@ class CodeRuns:
         self.find_binary, self.popen, self.clock, self.max_runtime = find_binary, popen, clock, max_runtime
         self.info = info
         self.check_timeout = check_timeout
+        self.use_guidance = use_guidance
         self.review_fn = codereview.review
         self.rules = cmdguard.ProjectRules(self.home / "command-rules.json")
         self._lock = threading.RLock()
@@ -208,7 +209,7 @@ class CodeRuns:
 
     @staticmethod
     def _summary(run):
-        keys = ("id", "repo", "prompt", "model", "status", "started", "finished", "error", "files", "stat", "applied_at", "undone_at", "tier", "repo_was_dirty", "project", "blocked", "approvals", "checks", "review")
+        keys = ("id", "repo", "prompt", "model", "status", "started", "finished", "error", "files", "stat", "applied_at", "undone_at", "tier", "repo_was_dirty", "project", "blocked", "approvals", "checks", "review", "guidance")
         return {k: run.get(k) for k in keys}
 
     @staticmethod
@@ -310,7 +311,7 @@ class CodeRuns:
             raise CodeWorkError("시스템 폴더는 쓸 수 없습니다.")
         return repo
 
-    def start(self, repo_path, prompt, model_ref="auto", confirm_cost=False):
+    def start(self, repo_path, prompt, model_ref="auto", confirm_cost=False, guidance_on=None):
         with self._lock:
             if any(t.is_alive() for t in self._threads.values()):
                 raise CodeWorkError("다른 코드 작업이 실행 중입니다. 끝나거나 취소한 뒤 시작하세요.")
@@ -343,6 +344,15 @@ class CodeRuns:
                 run["project"] = ""
             self._save(run)
             request = run["prompt"] + ("\n\n" + run["project"] if run["project"] else "")
+            run["guidance"] = "off"
+            if self.use_guidance() if guidance_on is None else guidance_on is True:
+                try:
+                    commands = projectmap.detect_commands(path, projectmap.list_files(path))
+                except Exception:
+                    commands = []
+                text, run["guidance"] = guidance.build(modelpick.capability(model_ref.partition("/")[2])["level"], commands)
+                request += "\n\n" + text
+            self._save(run)
             command = self.command_fn(binary, model_arg, request)
             thread = threading.Thread(target=self._run, args=(run, command, env), name="code-" + run_id, daemon=True)
             self._threads[run_id] = thread
