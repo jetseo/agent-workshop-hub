@@ -691,6 +691,7 @@
     }
     if (r.patch) card.appendChild(diffView(r.patch));
     if (r.patch_truncated) card.appendChild(h("p", { class: "sub", text: "(diff가 길어 앞부분만 보입니다. 적용하면 전체가 적용됩니다.)" }));
+    if (r.report) card.appendChild(h("details", {}, h("summary", { text: "작업 보고서(Markdown)" }), h("pre", { class: "sub", text: r.report })));
     var row = h("div", { class: "row" });
     if (r.status === "running") row.appendChild(h("button", { type: "button", class: "btn", text: "취소", onclick: async function () { try { await api("POST", "/code/runs/" + id + "/cancel", {}); renderCode(); } catch (e) { toast(e.message); } } }));
     if (r.status === "review") row.appendChild(h("button", { type: "button", class: "btn primary", text: "변경을 내 폴더에 적용", onclick: async function () {
