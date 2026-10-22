@@ -636,7 +636,7 @@
     var settingsBtn = h("button", { type: "button", class: "btn", id: "code-project-settings", text: "⚙", title: "프로젝트 설정", "aria-label": "프로젝트 설정", onclick: function () { if ($("code-project").value) renderProjectSettings($("code-project").value); } });
     var model = h("select", { id: "code-model", "aria-label": "모델" });
     var mode = h("select", { id: "code-mode", "aria-label": "방식", title: "에이전트: OpenCode가 도구를 써서 직접 고칩니다. 직접 모드: JetAI가 단계를 진행하고 모델은 글로 수정안만 씁니다(약한 모델에 적합)." },
-      h("option", { value: "agent", text: "에이전트(OpenCode)" }), h("option", { value: "direct", text: "직접 모드(JetAI가 진행)" }));
+      h("option", { value: "agent", text: "에이전트(OpenCode)" }), h("option", { value: "direct", text: "직접 모드(JetAI가 진행)" }), h("option", { value: "loop", text: "액션 루프(실험)" }));
     var mix = h("label", { class: "check cw-guide", id: "code-mix-row", hidden: true, title: "모델마다 잘 푸는 작업이 다릅니다. 첫 모델이 실패하면 다음 시도는 다른 무료·로컬 모델이 맡습니다." },
       h("input", { type: "checkbox", id: "code-mix" }), h("span", { text: " 다른 모델도 번갈아" }));
     var validate = h("label", { class: "check cw-guide", id: "code-validate-row", hidden: true }, h("input", { type: "checkbox", id: "code-validate", checked: true }), h("span", { text: " 테스트로 확인" }));
@@ -684,7 +684,7 @@
     d.models.forEach(function (m) { sel.appendChild(h("option", { value: m.ref, "data-warn": m.warn || "", "data-tier": m.tier, text: m.ref + (m.tier === "local" ? " (내 PC)" : m.tier === "free" ? " (무료)" : " (유료 가능)") + (m.warn ? " ⚠" : "") })); });
     d.environment.opencode && sel.appendChild(h("option", { value: "opencode/deepseek-v4.1-flash-free", "data-warn": "OpenCode의 무료 서비스입니다. 코드가 그 서비스로 전송됩니다.", "data-tier": "free", text: "opencode/deepseek-v4.1-flash-free (OpenCode 무료)" }));
     if (prev) sel.value = prev; codeModeChanged();
-    $("code-start").disabled = (!d.environment.opencode && $("code-mode").value !== "direct") || codeBusy;
+    $("code-start").disabled = (!d.environment.opencode && $("code-mode").value === "agent") || codeBusy;
     var box = $("code-runs"); box.textContent = "";
     if (!d.runs.length) box.appendChild(h("p", { class: "sub", text: "아직 작업이 없습니다." }));
     d.runs.forEach(function (r) {
@@ -754,7 +754,7 @@
     s.appendChild(card);
   }
   function codeModeChanged() {
-    var direct = $("code-mode").value === "direct";
+    var direct = $("code-mode").value === "direct" || $("code-mode").value === "loop";
     $("code-validate-row").hidden = !direct;
     $("code-attempts").hidden = !direct;
     $("code-mix-row").hidden = !direct || parseInt($("code-attempts").value, 10) < 2;
@@ -796,8 +796,8 @@
     codeBusy = true; $("code-start").disabled = true;
     try {
       store("code-repo", $("code-repo").value.trim()); store("code-project", $("code-project").value);
-      var r = await api("POST", "/code/start", { project: $("code-project").value || undefined, repo: $("code-repo").value.trim(), prompt: text, model: $("code-model").value, confirm_cost: $("code-cost").checked, guidance: $("code-guidance").checked, mode: $("code-mode").value, validate: $("code-validate").checked, attempts: $("code-mode").value === "direct" && $("code-validate").checked ? parseInt($("code-attempts").value, 10) : 1,
-        models: $("code-mode").value === "direct" && $("code-mix").checked && !$("code-mix-row").hidden ? ["auto"] : null });
+      var r = await api("POST", "/code/start", { project: $("code-project").value || undefined, repo: $("code-repo").value.trim(), prompt: text, model: $("code-model").value, confirm_cost: $("code-cost").checked, guidance: $("code-guidance").checked, mode: $("code-mode").value, validate: $("code-validate").checked, attempts: $("code-mode").value !== "agent" && $("code-validate").checked ? parseInt($("code-attempts").value, 10) : 1,
+        models: $("code-mode").value !== "agent" && $("code-mix").checked && !$("code-mix-row").hidden ? ["auto"] : null });
       codeOpen = r.id; codeStick = true; input.value = ""; toast("작업을 시작했습니다.");
     } catch (e) { toast(e.message); }
     codeBusy = false; renderCode();
@@ -840,7 +840,7 @@
   function toolLine(text) {
     var m = /^(✓|✗|…)\s+(\S+)\s*(.*)$/.exec(text);
     if (!m) return null;
-    var icons = { attempt: "🔁", localize: "🔎", create: "✏️", test: "🧪", repair: "🔧", read: "📄", edit: "✏️", write: "✏️", bash: "⌨️", grep: "🔎", glob: "🔎", list: "📁", patch: "✏️" };
+    var icons = { search: "🔎", list: "📁", run: "▶️", finish: "🏁", plan: "🗒️", attempt: "🔁", localize: "🔎", create: "✏️", test: "🧪", repair: "🔧", read: "📄", edit: "✏️", write: "✏️", bash: "⌨️", grep: "🔎", glob: "🔎", list: "📁", patch: "✏️" };
     return h("div", { class: "cw-tool " + (m[1] === "✗" ? "bad" : m[1] === "…" ? "wait" : "ok") },
       h("span", { class: "cw-ico", text: icons[m[2]] || "🛠" }), h("b", { text: m[2] }), h("span", { class: "cw-target", text: m[3] }), h("span", { class: "cw-mark", text: m[1] }));
   }
@@ -865,7 +865,7 @@
       h("p", { class: "sub", text: (r.project_name ? r.project_name + " · " : "") + r.repo + " · " + r.model + " · 작업 지침: " + ({ off: "없음", short: "짧게", full: "전체" }[r.guidance] || "없음") + (r.repo_was_dirty ? " · ⚠ 폴더에 저장하지 않은 변경이 있었습니다(복사본에는 없음)" : "") }));
     if (r.project) you.appendChild(h("details", { class: "cw-fold" }, h("summary", { text: "JetAI가 미리 읽은 프로젝트 요약(에이전트에 함께 전달됨)" }), h("pre", { class: "sub", text: r.project })));
     box.appendChild(you);
-    var agent = h("div", { class: "cw-msg agent" }, h("div", { class: "cw-who" }, (r.mode === "direct" ? "직접 모드 " : "에이전트 "), codeBadge(r.status)));
+    var agent = h("div", { class: "cw-msg agent" }, h("div", { class: "cw-who" }, (r.mode === "direct" ? "직접 모드 " : r.mode === "loop" ? "액션 루프 " : "에이전트 "), codeBadge(r.status)));
     var lines = r.activity || [];
     lines.forEach(function (l, at) {
       if (/^…\s/.test(l) && lines.slice(at + 1).some(function (x) { return x.slice(1).trim() === l.slice(1).trim(); })) return;   // finished later: show only the result

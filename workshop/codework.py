@@ -25,7 +25,7 @@ import time
 import uuid
 from pathlib import Path
 
-from . import adapters, checks, cmdguard, codereport, codereview, directmode, guidance, modelpick, projectmap, usage, worktree
+from . import adapters, agentloop, checks, cmdguard, codereport, codereview, directmode, guidance, modelpick, projectmap, usage, worktree
 
 MAX_MIX = 3                                                    # direct mode: models that take turns across the tries
 MAX_ATTEMPTS = 5                                               # direct mode: tries per task (each in its own copy)
@@ -218,7 +218,7 @@ class CodeRuns:
 
     @staticmethod
     def _summary(run):
-        keys = ("id", "repo", "prompt", "model", "status", "started", "finished", "error", "files", "stat", "applied_at", "undone_at", "tier", "repo_was_dirty", "project", "blocked", "approvals", "checks", "review", "guidance", "mode", "attempts", "attempts_log", "models", "project_id", "project_name")
+        keys = ("id", "repo", "prompt", "model", "status", "started", "finished", "error", "files", "stat", "applied_at", "undone_at", "tier", "repo_was_dirty", "project", "blocked", "approvals", "checks", "review", "guidance", "mode", "attempts", "attempts_log", "models", "project_id", "project_name", "limits", "stats")
         return {k: run.get(k) for k in keys}
 
     @staticmethod
@@ -338,9 +338,9 @@ class CodeRuns:
         run["project_id"], run["project_name"] = project["id"], project["name"]
         self.projects.touch(project["id"], run["id"])
 
-    def start(self, repo_path, prompt, model_ref="auto", confirm_cost=False, guidance_on=None, mode="agent", validate=True, attempts=1, models=None):
-        if mode == "direct":
-            return self._start_direct(repo_path, prompt, model_ref, confirm_cost, validate, attempts, models)
+    def start(self, repo_path, prompt, model_ref="auto", confirm_cost=False, guidance_on=None, mode="agent", validate=True, attempts=1, models=None, limits=None):
+        if mode in ("direct", "loop"):
+            return self._start_direct(repo_path, prompt, model_ref, confirm_cost, validate, attempts, models, mode, limits)
         if mode != "agent":
             raise CodeWorkError("알 수 없는 방식입니다.")
         with self._lock:
@@ -424,7 +424,11 @@ class CodeRuns:
             raise CodeWorkError("요금이 나올 수 있거나 무료 한도 보호가 닫혀 있는 모델입니다. 비용을 확인하고 체크해야 실행됩니다.")
         return provider, model, tier
 
-    def _start_direct(self, repo_path, prompt, model_ref, confirm_cost, validate, attempts=1, models=None):
+    def _start_direct(self, repo_path, prompt, model_ref, confirm_cost, validate, attempts=1, models=None, mode="direct", limits=None):
+        try:
+            limits = agentloop.normalize_limits(limits) if mode == "loop" else None
+        except ValueError as error:
+            raise CodeWorkError(str(error)) from None
         if not isinstance(attempts, int) or isinstance(attempts, bool) or not 1 <= attempts <= MAX_ATTEMPTS:
             raise CodeWorkError("시도 횟수는 1~%d 사이로 정하세요." % MAX_ATTEMPTS)
         if attempts > 1 and not validate:
@@ -460,7 +464,7 @@ class CodeRuns:
             except (RuntimeError, ValueError) as error:
                 raise CodeWorkError("작업용 폴더를 만들지 못했습니다: " + str(error)[:200]) from None
             dirty = bool(worktree._git("status", "--porcelain", cwd=repo, check=False).strip())
-            run = {"id": run_id, "repo": str(repo), "prompt": prompt.strip(), "model": model_ref, "tier": tier, "status": "running", "mode": "direct",
+            run = {"id": run_id, "repo": str(repo), "prompt": prompt.strip(), "model": model_ref, "tier": tier, "status": "running", "mode": mode, "limits": limits,
                    "started": self.clock(), "finished": None, "error": "", "worktree": str(path), "branch": branch, "base": base_commit,
                    "files": [], "stat": "", "activity": [], "repo_was_dirty": dirty, "cost_ok": confirm_cost is True, "session": "",
                    "once_allow": [], "blocked": [], "approvals": [], "guidance": "off", "validate": bool(validate), "attempts": attempts, "models": refs if len(refs) > 1 else None}
@@ -480,7 +484,9 @@ class CodeRuns:
         run_id, directory = run["id"], self._path(run["id"])
         tail = self._tails.setdefault(run_id, [])
         events = open(directory / "events.jsonl", "ab")
+        audit_file = open(directory / "audit.jsonl", "ab") if run.get("mode") == "loop" else None
         total = max(1, int(run.get("attempts", 1)))
+        meter = {"calls": 0, "tokens_est": 0}
         validate = run.get("validate", True)
         trials = []
 
@@ -510,7 +516,10 @@ class CodeRuns:
                 temperature = None if number == 1 else min(1.0, 0.5 + 0.15 * number)       # later tries need some variety to differ from the first
 
                 def ask(messages, max_tokens, temperature=temperature, provider=provider, model=model, timeout=timeout):
-                    return self.direct_chat(provider, model, messages, timeout=timeout, max_tokens=max_tokens, temperature=temperature)
+                    reply = self.direct_chat(provider, model, messages, timeout=timeout, max_tokens=max_tokens, temperature=temperature)
+                    meter["calls"] += 1                                    # rough size of what was sent and received (about 2 characters per token)
+                    meter["tokens_est"] += sum(len(m["content"]) for m in messages) // 2 + len(reply or "") // 2
+                    return reply
 
                 def test_fn(path=path, trial=trial):
                     verdict, output, items = self._direct_tests(path, run)
@@ -519,9 +528,15 @@ class CodeRuns:
                     return verdict, output
                 try:
                     files = projectmap.list_files(path)
-                    trial["result"] = directmode.run(ask, run["prompt"], path, files, run.get("project", ""), test_fn, emit,
-                                                     cancelled=lambda: bool(self._cancel_flags.get(run_id)), validate=validate,
-                                                     context=directmode.related_tests(path, files), temperature=temperature if number > 1 else None)
+                    extra = {}
+                    runner = directmode.run
+                    if run.get("mode") == "loop":
+                        runner = agentloop.run
+                        extra = {"limits": run.get("limits"), "allowed_commands": self._loop_allowed(run, path), "audit": self._audit_writer(audit_file, number),
+                                 "popen": self.popen, "kill": kill_tree, "env": self._check_env(), "on_blocked": lambda command: self._record_blocked(run, command)}
+                    trial["result"] = runner(ask, run["prompt"], path, files, run.get("project", ""), test_fn, emit,
+                                             cancelled=lambda: bool(self._cancel_flags.get(run_id)), validate=validate,
+                                             context=directmode.related_tests(path, files), temperature=temperature if number > 1 else None, **extra)
                 except Exception as error:
                     trial["result"]["error"] = "실행 중 오류: " + str(error)[:200]
                 trial["verdict"] = (trial["checks"] or {}).get("verdict", "skipped")
@@ -537,12 +552,15 @@ class CodeRuns:
                                "result": {"ok": False, "error": "실행 중 오류: " + str(error)[:200], "changed": []}})
         finally:
             events.close()
+            if audit_file:
+                audit_file.close()
         best = max(trials, key=self._trial_score) if trials else None
         if best is not None:
             self._adopt_trial(run, best, trials)
             result = best["result"]
         else:
             result = {"ok": False, "error": "시도하지 못했습니다.", "changed": []}
+        run["stats"] = {**meter, **({k: result.get(k) for k in ("steps", "tool_calls", "stop")} if run.get("mode") == "loop" else {})}
         if total > 1:
             run["attempts_log"] = [{"n": t["n"], "verdict": t["verdict"], "ok": t["result"]["ok"], "lines": t["lines"], "error": t["result"]["error"], "chosen": t is best, "model": t.get("model")} for t in trials]
         run["finished"] = self.clock()
@@ -591,6 +609,39 @@ class CodeRuns:
         run["worktree"], run["branch"] = str(best["path"]), best["branch"]
         if original != run["worktree"] and best["n"] != 1:
             run["note_adopted_from"] = best["n"]
+
+    def _check_env(self):
+        env = {k: v for k, v in os.environ.items() if k in WINDOWS_ENV_KEEP}
+        env.update({"CI": "1", "PYTHONDONTWRITEBYTECODE": "1", "PYTHONUTF8": "1"})
+        return env
+
+    def _loop_allowed(self, run, path):
+        """Commands the loop may run: the safe fixed list, the project's detected and own commands, and what the user allowed for this project."""
+        allowed = [*BASH_ALLOW, *self.rules.get(run["repo"]), *run.get("once_allow", [])]
+        try:
+            allowed += [c["command"] for c in projectmap.detect_commands(Path(path), projectmap.list_files(Path(path)))]
+        except Exception:
+            pass
+        if self.projects is not None:
+            allowed += list(self.projects.command_overrides(run["repo"]).values())
+        return allowed
+
+    @staticmethod
+    def _audit_writer(handle, attempt):
+        """One masked JSON line per tool decision (what was asked, decided, done), kept next to the run."""
+        def write(entry):
+            if handle is None:
+                return
+            line = codereport.mask(json.dumps({"attempt": attempt, **entry}, ensure_ascii=False, default=str))
+            handle.write((line + "\n").encode("utf-8"))
+            handle.flush()
+        return write
+
+    def _record_blocked(self, run, command):
+        if not command or any(b["command"] == command for b in run.get("blocked", [])):
+            return
+        level, note = cmdguard.classify(command)
+        run.setdefault("blocked", []).append({"id": len(run.get("blocked", [])) + 1, "command": command[:cmdguard.MAX_COMMAND], "level": level, "note": note, "state": "open"})
 
     def _direct_tests(self, path, run=None):
         """Run the detected build/test commands in the copy (the same fixed, shell-free runner as the manual check)."""
@@ -774,6 +825,9 @@ class CodeRuns:
                 run.setdefault("once_allow", []).append(item["command"])
             item["state"] = decision
             run["approvals"].append({"command": item["command"], "decision": decision, "at": self.clock()})
+            if run.get("mode") == "loop":            # a loop run has no session to resume: the allowance applies to the next run
+                self._save(run)
+                return
             binary = self.find_binary()
             if not binary:
                 raise CodeWorkError("OpenCode를 찾지 못했습니다.")
