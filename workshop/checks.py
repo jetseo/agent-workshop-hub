@@ -19,10 +19,14 @@ OUTPUT_TAIL = 1500
 MAX_OUTPUT = 400_000
 
 
-def plan(directory):
-    """Detected build/test commands for a folder: [{kind, command, argv}] (argv is None when the tool is not installed)."""
+def plan(directory, overrides=None):
+    """Build/test commands for a folder: [{kind, command, argv}] (argv is None when the tool is not installed).
+
+    Detected from the project files; a command the user set for the project (`overrides`, per kind) replaces the detected ones of that kind."""
     root = Path(directory)
     detected = projectmap.detect_commands(root, projectmap.list_files(root))
+    overrides = {k: v for k, v in (overrides or {}).items() if k in KINDS and v}
+    detected = [d for d in detected if d["kind"] not in overrides] + [{"kind": k, "command": v, "source": "프로젝트 설정"} for k, v in overrides.items()]
     items = []
     for entry in detected:
         if entry["kind"] not in KINDS:

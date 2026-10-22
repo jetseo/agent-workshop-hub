@@ -15,6 +15,7 @@ from .chat import chat, chat_stream, list_models
 from .chat_store import DEFAULT_TITLE, CHAT_ID, ChatStore
 from . import arbiter, router
 from .codework import CodeRuns, CodeWorkError
+from .projects import ProjectError, ProjectRegistry
 from .engine import Engine, EngineError
 from .modelinfo import ModelInfo
 from .modelwatch import ModelWatch
@@ -66,6 +67,8 @@ class Context:
         self.code = CodeRuns(providers, use_guidance=lambda: self.watch.settings().get("code_guidance", False))                             # coding agent (OpenCode) in throw-away worktrees
 
 
+        self.projects = ProjectRegistry(providers.path.parent / "projects.json", check_repo=CodeRuns.check_repo)   # the projects JetAI may work on
+        self.code.projects = self.projects
         self.remote = RemoteControl(self)                            # phone control; the server attaches the job queue and starts it
         self.engine = Engine(providers.path.parent / "engine", providers)      # built-in local engine (llama.cpp), off until installed
         self.active = set()
@@ -121,7 +124,13 @@ def _code_api(ctx, method, rest, body):
                     repos.append(run["repo"])
             return {"environment": code.environment(), "models": code.model_options(), "runs": runs, "repos": repos[:8]}
         if rest == ["start"] and method == "POST":
-            return code.start(body.get("repo"), body.get("prompt"), body.get("model") or "auto", body.get("confirm_cost") is True,
+            repo = body.get("repo")
+            if isinstance(body.get("project"), str) and body["project"]:        # a registered project wins over a typed path
+                try:
+                    repo = ctx.projects.get(body["project"])["path"]
+                except ProjectError as error:
+                    raise ApiError(400, str(error))
+            return code.start(repo, body.get("prompt"), body.get("model") or "auto", body.get("confirm_cost") is True,
                               body["guidance"] if isinstance(body.get("guidance"), bool) else None,
                               "direct" if body.get("mode") == "direct" else "agent", body.get("validate") is not False,
                               body["attempts"] if isinstance(body.get("attempts"), int) else 1,
@@ -175,6 +184,28 @@ def _quota_action(ctx, body):
     except ValueError as error:
         raise ApiError(400, str(error))
     return ctx.quota.status(gid)
+
+
+def _projects_api(ctx, method, rest, body):
+    """Project registry: register a git folder, edit its commands and policy, forget it (files are never touched)."""
+    registry = ctx.projects
+    try:
+        if not rest and method == "GET":
+            return {"projects": registry.list()}
+        if not rest and method == "POST":
+            return registry.add(body.get("path"), body.get("name") or None)
+        if len(rest) == 1 and method == "GET":
+            return registry.get(rest[0])
+        if len(rest) == 1 and method == "POST":
+            return registry.update(rest[0], **{k: v for k, v in body.items() if k != "id"})
+        if len(rest) == 2 and rest[1] == "refresh" and method == "POST":
+            return registry.refresh(rest[0])
+        if len(rest) == 2 and rest[1] == "remove" and method == "POST":
+            registry.remove(rest[0])
+            return {"ok": True}
+    except ProjectError as error:
+        raise ApiError(400, str(error))
+    raise LookupError("Unknown projects route")
 
 
 def _remote_api(ctx, method, rest, body):
@@ -523,6 +554,8 @@ def dispatch(ctx, method, path, body):
             if len(keys) != 1 or not isinstance(body[keys[0]], bool):
                 raise ApiError(400, "잘못된 설정입니다.")
             return Json(200, {"settings": ctx.watch.set_setting(keys[0], body[keys[0]])})
+        if parts and parts[0] == "projects":
+            return Json(200, _projects_api(ctx, method, parts[1:], body))
         if parts and parts[0] == "code":
             return Json(200, _code_api(ctx, method, parts[1:], body))
 
