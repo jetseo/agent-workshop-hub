@@ -75,6 +75,10 @@ CATALOG = [
     {"id": "cohere", "free": "all", "label": "Cohere (체험 키)", "base_url": "https://api.cohere.ai/compatibility/v1",
      "policy": "cloud-may-train", "key_url": "https://dashboard.cohere.com/api-keys", "model": "", "needs_key": True, "group": "more",
      "limits": "분당 20회·월 1,000회 안팎(체험 키, 상업 사용 불가)", "note": "OpenAI 호환 모드를 씁니다. 체험 키는 상업적 사용이 금지됩니다."},
+    {"id": "mercury", "free": "guard", "guard": "inception", "label": "Mercury 3 (Inception, 무료 한도 보호)", "base_url": "https://api.inceptionlabs.ai/v1",
+     "policy": "cloud-may-train", "key_url": "https://platform.inceptionlabs.ai", "model": "mercury-3", "needs_key": True, "group": "more",
+     "limits": "새 계정에 무료 토큰 1억 개(결제수단 없이). 소진 후엔 결제 등록이 필요 — JetAI는 확인된 잔액이 있을 때만 호출",
+     "note": "결제수단을 등록하지 마세요(등록하면 요금이 나올 수 있어 JetAI가 호출하지 않습니다). 무료 잔액은 공급자 화면에서 확인해 설정에 직접 입력해야 켜집니다. 데이터 보관·학습 정책은 확인되지 않아 학습에 쓰일 수 있다고 가정합니다."},
     {"id": "zhipu", "free": "match", "free_match": ["flash"], "label": "Zhipu AI (GLM Flash, 중국 서비스)", "base_url": "https://open.bigmodel.cn/api/paas/v4",
      "policy": "cloud-may-train", "key_url": "https://open.bigmodel.cn/usercenter/apikeys", "model": "", "needs_key": True, "group": "more",
      "limits": "Flash 모델은 한도 비공개", "note": "중국 서비스라 가입에 중국 휴대전화 번호가 필요할 수 있고, 데이터가 중국 서버로 전송됩니다."},
@@ -118,7 +122,7 @@ def resolve_service(form, providers=None):
         # A discovered service is free only if the user says THEIR key has no payment method attached.
         free_all = (_field(form, "free_confirmed") == "on") if c.get("discovered") else c.get("free") == "all"
         return c["id"], {"base_url": c["base_url"], "data_policy": c["policy"], "needs_key": c["needs_key"],
-                         "default_model": c["model"], "free_all": free_all, "free_match": c.get("free_match", [])}
+                         "default_model": c["model"], "free_all": free_all, "free_match": c.get("free_match", []), "guard": c.get("guard")}
     if service != "custom":
         stored = providers.get(service) if providers is not None and NAME.fullmatch(service) else None
         if not stored:
@@ -182,7 +186,7 @@ def run_test(providers, form, chat_fn=chat):
             providers.add(name, base_url=entry["base_url"], key_env=stored.get("key_env"),
                           data_policy=entry["data_policy"], rpm=stored.get("rpm", 0),
                           free_all=entry.get("free_all") or stored.get("free_all"),
-                          free_match=entry.get("free_match") or stored.get("free_match"))
+                          free_match=entry.get("free_match") or stored.get("free_match"), guard=entry.get("guard") or stored.get("guard"))
             if key:
                 providers.set_key(name, key)
             for extra in reversed(_extra_models(form, model)):    # recommended models, saved so 'auto' has a choice

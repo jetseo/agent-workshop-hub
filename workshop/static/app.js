@@ -635,7 +635,7 @@
     var prompt = h("textarea", { id: "code-prompt", rows: "2", maxlength: "8000", "aria-label": "할 일", placeholder: "할 일을 적으세요. / 를 입력하면 명령이 나옵니다. (Ctrl+Enter로 보내기)" });
     var send = h("button", { type: "submit", class: "btn primary", id: "code-start", "aria-label": "시작", text: "시작" });
     var cost = h("label", { class: "check", id: "code-cost-row", hidden: true }, h("input", { type: "checkbox", id: "code-cost" }), h("span", { text: " 요금이 나올 수 있는 모델임을 확인했고 감수합니다" }));
-    var guide = h("label", { class: "check cw-guide" }, h("input", { type: "checkbox", id: "code-guidance", checked: !state.settings || state.settings.code_guidance !== false,
+    var guide = h("label", { class: "check cw-guide" }, h("input", { type: "checkbox", id: "code-guidance", checked: !!(state.settings && state.settings.code_guidance === true),
       onchange: async function (e) { try { state.settings = (await api("POST", "/settings", { code_guidance: e.target.checked })).settings; } catch (err) { toast(err.message); } } }),
       h("span", { text: " 작업 지침" }));
     var menu = h("div", { id: "code-slash", class: "cw-slash", role: "listbox", hidden: true });
@@ -971,9 +971,49 @@
   }
 
   /* ---------- settings view (native; replaces the old framed setup page) ---------- */
+  /* ---------- free-quota guard (services whose free allowance cannot be read from an API) ---------- */
+  async function renderQuota() {
+    var box = $("quota-body"); if (!box) return;
+    var d; try { d = await api("GET", "/quota"); } catch (e) { box.textContent = e.message; return; }
+    box.textContent = "";
+    function when(t) { return t ? new Date(t * 1000).toLocaleString() : "—"; }
+    function post(body, done) { return async function () { try { await api("POST", "/quota", body()); if (done) toast(done); } catch (e) { toast(e.message); } renderQuota(); }; }
+    d.guards.forEach(function (g) {
+      var s = g.settings, card = h("div", { class: "cw-card" });
+      var state = g.open ? "✅ 사용 가능" : g.enabled ? "⛔ 차단됨" : "⏸ 꺼짐";
+      card.appendChild(h("p", {}, h("b", { text: g.label + " — " + state })));
+      if (!g.open) card.appendChild(h("p", { class: "sub", text: "이유: " + g.reason }));
+      card.appendChild(h("p", { class: "sub", text: g.registered.length ? "연결됨: " + g.registered.join(", ") + " · 모델 mercury-3" : "아직 연결되지 않았습니다. 서비스 연결에서 'Mercury 3'를 고르고 키를 넣으세요." }));
+      var rows = [
+        ["확인된 무료 잔액", g.balance_label + (g.balance_checked_at ? " · 마지막 확인 " + when(g.balance_checked_at) : "")],
+        ["누적 사용(JetAI 기준)", g.total_tokens + " 토큰 · 이번 세션 " + g.session_tokens],
+        ["오늘 / 이번 달", g.day_tokens + " / " + s.daily_soft_limit_tokens + " · " + g.month_tokens + " / " + s.monthly_soft_limit_tokens + " (내부 한도)"],
+        ["소진 예상", g.balance_known ? (g.may_run_out_today ? "오늘 내부 한도의 80%를 넘었습니다" : "여유 있음") : "확인 불가"],
+        ["크레딧 기한", g.valid_until ? when(g.valid_until) : "입력 안 함"]];
+      rows.forEach(function (r) { card.appendChild(h("p", { class: "sub" }, h("b", { text: r[0] + ": " }), r[1])); });
+      if (g.last_error) card.appendChild(h("p", { class: "sub", text: "마지막 오류: " + g.last_error }));
+      card.appendChild(h("p", { class: "sub", text: "JetAI가 세는 사용량은 공급자의 실제 잔액이 아닙니다. 같은 키를 다른 곳에서 쓰면 달라지므로, 잔액은 정기적으로 공급자 화면에서 다시 확인해 입력하세요(만료되면 차단)." }));
+      var attest = h("input", { type: "checkbox", id: "q-attest-" + g.id, checked: !!g.attested_no_payment_at });
+      attest.onchange = post(function () { return { guard: g.id, action: "attest", confirmed: attest.checked }; });
+      card.appendChild(h("label", { class: "check" }, attest, h("span", { text: " 공급자 계정에 결제수단(카드)이 등록되어 있지 않음을 직접 확인했습니다" + (g.attested_no_payment_at ? " (" + when(g.attested_no_payment_at) + ")" : "") })));
+      var bal = h("input", { type: "number", min: "0", step: "1", id: "q-bal-" + g.id, placeholder: "공급자 화면의 남은 무료 토큰 수" });
+      var until = h("input", { type: "date", id: "q-until-" + g.id, "aria-label": "무료 크레딧 사용 기한(알면)" });
+      card.appendChild(h("div", { class: "row" }, bal, until, h("button", { type: "button", class: "btn", text: "잔액 저장", onclick: post(function () {
+        return { guard: g.id, action: "balance", tokens: parseInt(bal.value, 10), valid_until: until.value ? Math.floor(new Date(until.value + "T23:59:59").getTime() / 1000) : 0 };
+      }, "잔액을 저장했습니다.") })));
+      card.appendChild(h("div", { class: "row" }, h("button", { type: "button", class: "btn" + (g.enabled ? "" : " primary"), text: g.enabled ? "끄기" : "켜기",
+        onclick: post(function () { return { guard: g.id, action: "enable", enabled: !g.enabled }; }, g.enabled ? "껐습니다." : "켰습니다.") })));
+      var names = [["max_concurrent_requests", "동시 요청"], ["max_request_output_tokens", "요청당 최대 출력"], ["daily_soft_limit_tokens", "일일 내부 한도"], ["monthly_soft_limit_tokens", "월간 내부 한도"], ["safety_margin_percent", "여유분 %"], ["timeout_seconds", "제한 시간(초)"]];
+      var inputs = names.map(function (n) { return h("label", { class: "field" }, h("span", { text: n[1] }), h("input", { type: "number", id: "q-" + n[0] + "-" + g.id, value: s[n[0]] })); });
+      card.appendChild(h("details", { class: "cw-fold" }, h("summary", { text: "내부 한도 설정" }), inputs, h("button", { type: "button", class: "btn", text: "저장", onclick: post(function () {
+        var values = {}; names.forEach(function (n) { values[n[0]] = parseInt($("q-" + n[0] + "-" + g.id).value, 10); }); return { guard: g.id, action: "limits", values: values };
+      }, "저장했습니다.") })));
+      box.appendChild(card);
+    });
+  }
   async function renderSettings() {
     var list = $("set-list");
-    renderEngine(); renderRemote();
+    renderEngine(); renderRemote(); renderQuota();
     var auto = $("set-auto");
     if (auto) {
       auto.checked = !state.settings || state.settings.auto_add_models !== false;

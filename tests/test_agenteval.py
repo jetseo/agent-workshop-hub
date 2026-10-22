@@ -64,6 +64,16 @@ class AgentEvalTests(Base):
         self.assertFalse(verdict["ok"])
         self.assertIn("변경하면 안 되는", verdict["reason"])
 
+    def test_added_test_files_are_not_scope_creep_but_other_files_are(self):
+        task = [t for t in agenteval.TASKS if t.id == "fix-bug"][0]
+        run = {"status": "review", "worktree": str(self.dir), "files": [{"path": "calc.py"}, {"path": "test_calc.py"}]}
+        (self.dir / "calc.py").write_text("def add(a, b):\n    return a + b\n", encoding="utf-8")
+        verdict = agenteval.score(task, run)
+        self.assertTrue(verdict["ok"], verdict)
+        self.assertEqual(verdict["extra_tests"], ["test_calc.py"])
+        run["files"].append({"path": "extra.txt"})
+        self.assertFalse(agenteval.score(task, run)["ok"])
+
     def test_table_has_a_row_per_model_and_lists_failures(self):
         results = agenteval.evaluate(self.runs, ["loc/qwen2.5-coder:32b", "loc/tiny-3b"], ["fix-bug", "korean-bom"])
         text = agenteval.table(results)

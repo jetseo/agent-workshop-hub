@@ -9,7 +9,7 @@ import time
 import webbrowser
 from urllib.parse import urlparse
 
-from . import digest, envcheck, modelpick, setup_page, usage
+from . import digest, envcheck, modelpick, quotaguard, setup_page, usage
 from .explain import explain
 from .chat import chat, chat_stream, list_models
 from .chat_store import DEFAULT_TITLE, CHAT_ID, ChatStore
@@ -62,7 +62,8 @@ class Context:
         self.watch = ModelWatch(providers, list_fn, info=self.info)
         self.feed = ServiceFeed(providers.path.parent / "service-feed.json", builtin=setup_page.CATALOG)
         setup_page.set_extra(self.feed.catalog_entries())             # services found earlier by the daily list
-        self.code = CodeRuns(providers, use_guidance=lambda: self.watch.settings().get("code_guidance", True))                             # coding agent (OpenCode) in throw-away worktrees
+        self.quota = quotaguard.install(quotaguard.FreeQuotaGuard(providers.path.parent / "quota-guard.json"))   # fail-closed gate for guarded free services
+        self.code = CodeRuns(providers, use_guidance=lambda: self.watch.settings().get("code_guidance", False))                             # coding agent (OpenCode) in throw-away worktrees
 
 
         self.remote = RemoteControl(self)                            # phone control; the server attaches the job queue and starts it
@@ -150,6 +151,27 @@ def _code_api(ctx, method, rest, body):
     except CodeWorkError as error:
         raise ApiError(400, str(error))
     raise LookupError("Unknown code route")
+
+
+def _quota_action(ctx, body):
+    """Free-quota guard controls. Every change is an explicit user action; turning on needs the dated confirmations."""
+    gid = body.get("guard")
+    action = body.get("action")
+    try:
+        if action == "attest":
+            ctx.quota.attest_no_payment(gid, body.get("confirmed") is True)
+        elif action == "balance":
+            until = body.get("valid_until") or 0
+            ctx.quota.set_balance(gid, body.get("tokens"), until if isinstance(until, int) and not isinstance(until, bool) else 0)
+        elif action == "enable":
+            ctx.quota.set_enabled(gid, body.get("enabled") is True)
+        elif action == "limits":
+            ctx.quota.set_limits(gid, **{k: v for k, v in (body.get("values") or {}).items()})
+        else:
+            raise ApiError(400, "알 수 없는 동작입니다.")
+    except ValueError as error:
+        raise ApiError(400, str(error))
+    return ctx.quota.status(gid)
 
 
 def _remote_api(ctx, method, rest, body):
@@ -488,6 +510,11 @@ def dispatch(ctx, method, path, body):
                 candidates=lambda ref, enabled: fallback_candidates(ctx, ref, enabled),
                 chat_fn=ctx.chat_fn, ledger=ctx.ledger, body=body,
                 claim=lambda: ctx.claim("digest"), release=lambda: ctx.release("digest")))
+        if parts == ["quota"] and method == "GET":
+            return Json(200, {"guards": [{**ctx.quota.status(gid), "registered": [n for n, e in ctx.providers.load().items() if e.get("guard") == gid]}
+                                         for gid in quotaguard.GUARDS]})
+        if parts == ["quota"] and method == "POST":
+            return Json(200, _quota_action(ctx, body))
         if parts == ["settings"] and method == "POST":
             keys = [k for k in body if k in ctx.watch.settings()]
             if len(keys) != 1 or not isinstance(body[keys[0]], bool):
