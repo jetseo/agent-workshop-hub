@@ -101,7 +101,8 @@ def _guard_begin(provider, messages, max_tokens, timeout):
     return ticket, guard.timeout_for(gid, timeout)
 
 
-def chat(provider, model, messages, *, timeout=120, max_tokens=2000, temperature=None):
+def chat(provider, model, messages, *, timeout=120, max_tokens=2000, temperature=None, usage=None):
+    """Plain reply text. If `usage` (a dict) is given it is filled with prompt_tokens/completion_tokens when the service reports them."""
     ticket, timeout = _guard_begin(provider, messages, max_tokens, timeout)
 
     def attempt(view):
@@ -113,6 +114,10 @@ def chat(provider, model, messages, *, timeout=120, max_tokens=2000, temperature
         quotaguard.get().fail(ticket, error)
         raise
     reported = data.get("usage") if isinstance(data, dict) else None
+    if usage is not None and isinstance(reported, dict):
+        for key in ("prompt_tokens", "completion_tokens"):
+            if isinstance(reported.get(key), int) and reported[key] >= 0:
+                usage[key] = reported[key]
     if isinstance(reported, dict):
         quotaguard.get().settle(ticket, reported.get("prompt_tokens"), reported.get("completion_tokens"))
     else:

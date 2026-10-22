@@ -291,6 +291,9 @@
 | 발견·수정한 결함 | | | 취소를 시작 직후에 누르면 에이전트가 계속 실행됨, 한글 소스의 패치가 코드페이지 때문에 바뀜, 상태 파일 읽기·쓰기 경합, 캐시 파일이 변경에 섞임, WSL 규칙 테스트와의 충돌 |
 | 내 실제 프로젝트에서의 작업, 큰 로컬 모델(내장 엔진 7B+)·클라우드 무료 키 모델로의 작업, 장시간(10분+) 작업, Codex·Claude Code 실행기 | 사용자 PC | **미검증** | |
 
+## E0·E1 입력 토큰 계량·문맥 한도 진단 (2026-10-22)
+- `chat(usage=…)`, 코드 작업 `stats`(실제 입력·출력 토큰, 잘림 의심 호출 수)·보고서·화면 경고, `ctxprobe.py`(probe·ContextLimits), `diagnostics --context`, `POST /code/context-probe`, 화면 버튼, 한도에 맞춘 테스트 문맥 축소. **테스트 9개**(`tests/test_ctxprobe.py`: 잘림 판정 경계, probe 결과·조언, 결과 기억, 로컬 가짜 서버로 usage 채움, 실제 토큰 기록·잘림 표시·미보고 서비스는 추측 안 함, 문맥 축소, API는 로컬 서비스만·클라우드에 시험 글 안 보냄, CLI). 이 PC의 실제 Ollama 점검 결과는 `docs/llm-efficiency-plan.md` F6.
+
 ## LLM 효율 조사 (2026-10-22)
 - 실측: Ollama가 이 PC 기본 설정에서 입력을 **2050토큰**에서 조용히 자름(7B·12B 모두, 서비스가 돌려준 `prompt_tokens`로 확인). 문맥 16K 변체로 직접·루프를 다시 쟀지만 결론 불변(직접 8/21·루프 1/21). 후보 모델 5종은 Hugging Face 공개 API로 존재·라이선스·GGUF 크기를 확인(다운로드 안 함, 도구 호출 지원은 UNVERIFIED). 문서: `docs/llm-efficiency-plan.md`. 구현은 없음.
 

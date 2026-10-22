@@ -81,6 +81,9 @@ def build(run, events_path):
     lines += ["", "## 모델·비용", "- 모델: `%s` (구분: %s, %s)" % (run.get("model"), run.get("tier"), metrics["cost"]),
              "- 방식: " + (("액션 루프" if run.get("mode") == "loop" else "직접 모드") + (" (시도 %d회 중 선택)" % run["attempts"] if (run.get("attempts") or 1) > 1 else "") + (" · 모델 번갈아: " + ", ".join(run["models"]) if run.get("models") else "") if run.get("mode") in ("direct", "loop") else "에이전트(OpenCode)"),
              "- 모델 호출 %d회, 추정 토큰 %d%s" % (stats.get("calls", 0), stats.get("tokens_est", 0), (" · 단계 %s, 도구 호출 %s, 끝난 이유 %s" % (stats.get("steps"), stats.get("tool_calls"), stats.get("stop"))) if stats.get("steps") is not None else "") if (stats := run.get("stats")) else "- 모델 호출 수·토큰: 기록 없음(에이전트 방식은 실행기가 알려 주지 않음)",
+             ("- 서비스가 센 토큰: 입력 %d, 출력 %d%s" % (stats["prompt_tokens"], stats.get("completion_tokens", 0),
+                                                   " · ⚠ 입력이 잘렸을 수 있는 호출 %d회(문맥 한도 점검 필요)" % stats["cut_calls"] if stats.get("cut_calls") else ""))
+             if (stats := run.get("stats") or {}).get("prompt_tokens") else "- 서비스가 센 토큰: 알 수 없음(서비스가 알려 주지 않음)",
              "- 작업 지침: " + {"off": "사용 안 함", "short": "짧은 지침", "full": "전체 지침"}.get(run.get("guidance") or "off", "사용 안 함")]
     t = events["tokens"]
     lines.append("- 토큰: " + ("입력 %d / 출력 %d" % (t["input"], t["output"]) if t else "실행기가 알려 주지 않음(기록 없음)"))
