@@ -611,65 +611,141 @@
   }
 
 
-  /* ---------- code work (OpenCode in a throw-away worktree) ---------- */
-  var codeTimer = null, codeOpen = "";
+  /* ---------- code work: agent session screen (timeline + diff + composer) ---------- */
+  var codeTimer = null, codeOpen = "", codeStick = true, codeBusy = false;
+  var CODE_STATUS = { running: "실행 중", review: "검토 대기", nochange: "변경 없음", failed: "실패", cancelled: "취소됨", applied: "적용됨", undone: "되돌림", discarded: "버림" };
+  var CODE_COMMANDS = [
+    { name: "apply", alias: "적용", help: "변경을 내 폴더에 적용(커밋 안 함)" },
+    { name: "undo", alias: "되돌리기", help: "적용했던 변경을 되돌리기" },
+    { name: "check", alias: "검사", help: "빌드·테스트 실행" },
+    { name: "review", alias: "리뷰", help: "다른 모델에게 코드 리뷰 받기" },
+    { name: "cancel", alias: "취소", help: "실행 중인 작업 멈추기" },
+    { name: "discard", alias: "버리기", help: "복사본과 변경 버리기" },
+    { name: "new", alias: "새작업", help: "새 작업 입력으로 돌아가기" }
+  ];
   function codeBadge(status) {
-    var label = { running: "실행 중", review: "검토 대기", nochange: "변경 없음", failed: "실패", cancelled: "취소됨", applied: "적용됨", undone: "되돌림", discarded: "버림" }[status] || status;
-    return h("span", { class: "code-badge st-" + status, text: label });
+    return h("span", { class: "code-badge st-" + status, text: CODE_STATUS[status] || status });
+  }
+  function codeBuildShell() {
+    var root = $("code-root"); if (!root || root.dataset.built) return;
+    root.dataset.built = "1"; root.textContent = "";
+    var datalist = h("datalist", { id: "code-repos" });
+    var repo = h("input", { type: "text", id: "code-repo", list: "code-repos", "aria-label": "프로젝트 폴더", placeholder: "프로젝트 폴더 (git 저장소)  예: D:\\projects\\myapp", value: store("code-repo") || "" });
+    var model = h("select", { id: "code-model", "aria-label": "모델" });
+    var prompt = h("textarea", { id: "code-prompt", rows: "2", maxlength: "8000", "aria-label": "할 일", placeholder: "할 일을 적으세요. / 를 입력하면 명령이 나옵니다. (Ctrl+Enter로 보내기)" });
+    var send = h("button", { type: "submit", class: "btn primary", id: "code-start", "aria-label": "시작", text: "시작" });
+    var cost = h("label", { class: "check", id: "code-cost-row", hidden: true }, h("input", { type: "checkbox", id: "code-cost" }), h("span", { text: " 요금이 나올 수 있는 모델임을 확인했고 감수합니다" }));
+    var guide = h("label", { class: "check cw-guide" }, h("input", { type: "checkbox", id: "code-guidance", checked: !state.settings || state.settings.code_guidance !== false,
+      onchange: async function (e) { try { state.settings = (await api("POST", "/settings", { code_guidance: e.target.checked })).settings; } catch (err) { toast(err.message); } } }),
+      h("span", { text: " 작업 지침" }));
+    var menu = h("div", { id: "code-slash", class: "cw-slash", role: "listbox", hidden: true });
+    var form = h("form", { id: "code-composer", class: "cw-composer", autocomplete: "off", onsubmit: function (e) { e.preventDefault(); codeSubmit(); } },
+      h("div", { class: "cw-opts" }, repo, model, guide), h("p", { class: "sub", id: "code-model-note" }), cost, menu,
+      h("div", { class: "cw-box" }, prompt, send));
+    prompt.addEventListener("keydown", function (e) {
+      if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); codeSubmit(); }
+      else if (e.key === "Escape") menu.hidden = true;
+    });
+    prompt.addEventListener("input", codeSlashMenu);
+    model.onchange = codeModelNote;
+    var stream = h("div", { id: "code-stream", class: "cw-stream", onscroll: function () { codeStick = stream.scrollTop + stream.clientHeight >= stream.scrollHeight - 40; } });
+    root.append(datalist,
+      h("aside", { class: "cw-side" }, h("button", { type: "button", class: "btn primary cw-new", text: "＋ 새 작업", onclick: function () { codeOpen = ""; renderCode(); } }), h("div", { id: "code-runs", class: "cw-list" })),
+      h("section", { class: "cw-main" }, h("div", { id: "code-env", class: "sub cw-env" }), stream, form));
   }
   async function renderCode() {
-    var form = $("code-form"); if (!form) return;
-    var d; try { d = await api("GET", "/code"); } catch (e) { form.textContent = e.message; return; }
-    $("code-env").textContent = d.environment.opencode ? "OpenCode 사용 가능: " + d.environment.opencode_path : "OpenCode를 찾지 못했습니다. 먼저 설치하세요(npm i -g opencode-ai).";
-    if (!form.dataset.built || !$("code-repo")) {
-      form.dataset.built = "1"; form.textContent = "";
-      var list = h("datalist", { id: "code-repos" }, d.repos.map(function (r) { return h("option", { value: r }); }));
-      var repo = h("input", { type: "text", id: "code-repo", list: "code-repos", placeholder: "프로젝트 폴더 경로 (예: D:\\projects\\myapp, git 저장소)", value: store("code-repo") || d.repos[0] || "" });
-      var prompt = h("textarea", { id: "code-prompt", rows: "5", maxlength: "8000", placeholder: "할 일을 자세히 적으세요. 예: calc.py의 add 함수 버그를 고치고, 테스트가 통과하게 해줘." });
-      var model = h("select", { id: "code-model" });
-      var cost = h("label", { class: "check", id: "code-cost-row", hidden: true }, h("input", { type: "checkbox", id: "code-cost" }), h("span", { text: " 이 모델은 요금이 나올 수 있음을 확인했고 비용을 감수합니다" }));
-      var note = h("p", { class: "sub", id: "code-model-note" });
-      var go = h("button", { type: "button", class: "btn primary", id: "code-start", text: "시작", onclick: codeStart });
-      form.append(list, h("label", { class: "field" }, h("span", { text: "프로젝트 폴더" }), repo), h("label", { class: "field" }, h("span", { text: "할 일" }), prompt),
-        h("label", { class: "field" }, h("span", { text: "모델" }), model), note, cost,
-        h("label", { class: "check" }, h("input", { type: "checkbox", id: "code-guidance", checked: !state.settings || state.settings.code_guidance !== false,
-          onchange: async function (e) { try { state.settings = (await api("POST", "/settings", { code_guidance: e.target.checked })).settings; } catch (err) { toast(err.message); } } }),
-          h("span", { text: " 작업 지침 붙이기(먼저 읽기 · 테스트로 확인 · 범위 지키기 · 실제로 돌려 보고하기)" })),
-        h("p", { class: "sub", text: "커밋된 상태(HEAD)를 복사해 작업하므로 저장하지 않은 변경은 반영되지 않습니다. 에이전트는 복사본 안에서만 파일을 고치고, 허용된 명령(테스트 실행 등)만 쓸 수 있으며, 인터넷 접근·내 계정의 유료 키는 쓰지 못합니다." }),
-        h("div", { class: "row" }, go));
-      model.onchange = codeModelNote;
-    }
+    codeBuildShell();
+    var d; try { d = await api("GET", "/code"); } catch (e) { var s0 = $("code-stream"); if (s0) s0.textContent = e.message; return; }
+    $("code-env").textContent = d.environment.opencode ? "" : "OpenCode를 찾지 못했습니다. 먼저 설치하세요(npm i -g opencode-ai).";
+    var repos = $("code-repos"); repos.textContent = "";
+    d.repos.forEach(function (r) { repos.appendChild(h("option", { value: r })); });
+    if (!$("code-repo").value && d.repos[0]) $("code-repo").value = d.repos[0];
     var sel = $("code-model"), prev = sel.value; sel.textContent = "";
     sel.appendChild(h("option", { value: "auto", text: "자동 (무료·로컬 중 코드 작업에 충분한 모델)" }));
     d.models.forEach(function (m) { sel.appendChild(h("option", { value: m.ref, "data-warn": m.warn || "", "data-tier": m.tier, text: m.ref + (m.tier === "local" ? " (내 PC)" : m.tier === "free" ? " (무료)" : " (유료 가능)") + (m.warn ? " ⚠" : "") })); });
     d.environment.opencode && sel.appendChild(h("option", { value: "opencode/deepseek-v4.1-flash-free", "data-warn": "OpenCode의 무료 서비스입니다. 코드가 그 서비스로 전송됩니다.", "data-tier": "free", text: "opencode/deepseek-v4.1-flash-free (OpenCode 무료)" }));
     if (prev) sel.value = prev; codeModelNote();
-    $("code-start").disabled = !d.environment.opencode;
+    $("code-start").disabled = !d.environment.opencode || codeBusy;
     var box = $("code-runs"); box.textContent = "";
     if (!d.runs.length) box.appendChild(h("p", { class: "sub", text: "아직 작업이 없습니다." }));
     d.runs.forEach(function (r) {
-      box.appendChild(h("div", { class: "code-run" + (r.id === codeOpen ? " open" : ""), onclick: function () { codeOpen = r.id; renderCode(); } },
-        h("b", { text: r.prompt.slice(0, 80) }), codeBadge(r.status),
-        h("span", { class: "sub", text: " " + r.model + " · " + (r.stat || "") + " · " + new Date((r.started || 0) * 1000).toLocaleString() })));
+      box.appendChild(h("button", { type: "button", class: "cw-run" + (r.id === codeOpen ? " open" : ""), onclick: function () { codeOpen = r.id; codeStick = true; renderCode(); } },
+        h("span", { class: "cw-run-t", text: r.prompt.slice(0, 60) }), codeBadge(r.status),
+        h("span", { class: "sub", text: (r.stat || "") + " · " + new Date((r.started || 0) * 1000).toLocaleString() })));
     });
-    if (codeOpen) renderCodeDetail(codeOpen); else $("code-detail").textContent = "";
+    if (codeOpen && !d.runs.some(function (r) { return r.id === codeOpen; })) codeOpen = "";
+    if (codeOpen) await renderCodeDetail(codeOpen); else codeWelcome();
     var running = d.runs.some(function (r) { return r.status === "running" || (r.checks && r.checks.state === "running") || (r.review && r.review.state === "running"); });
-    if (running && !codeTimer) codeTimer = setInterval(function () { if ($("view-code").hidden) return; renderCode(); }, 2000);
+    if (running && !codeTimer) codeTimer = setInterval(function () { if ($("view-code").hidden) return; renderCode(); }, 1500);
     if (!running && codeTimer) { clearInterval(codeTimer); codeTimer = null; }
   }
+  function codeWelcome() {
+    var s = $("code-stream"); s.textContent = "";
+    s.appendChild(h("div", { class: "cw-welcome" }, h("h2", { text: "무엇을 고칠까요?" }),
+      h("p", { class: "sub", text: "아래에 프로젝트 폴더와 할 일을 적으면, 일회용 복사본(git worktree)에서 코딩 에이전트가 고치고 진행 과정을 여기에 보여 줍니다. 바뀐 내용을 보고 마음에 들 때만 내 폴더에 적용합니다. 커밋·푸시는 하지 않습니다." }),
+      h("ul", { class: "sub" },
+        h("li", { text: "예) calc.py의 add 함수 버그를 고치고 테스트가 통과하게 해줘" }),
+        h("li", { text: "예) README에 설치 방법을 정리해 줘" }),
+        h("li", { text: "/ 를 입력하면 적용·되돌리기·검사·리뷰 같은 명령이 나옵니다." }))));
+  }
+  /* (welcome end) */
   function codeModelNote() {
     var o = $("code-model").selectedOptions[0]; if (!o) return;
     $("code-model-note").textContent = o.dataset.warn || "";
     $("code-cost-row").hidden = o.dataset.tier !== "other";
   }
-  async function codeStart() {
-    var b = $("code-start"); b.disabled = true;
+  function codeSlashMenu() {
+    var input = $("code-prompt"), menu = $("code-slash"), text = input.value;
+    if (text.charAt(0) !== "/" || text.indexOf("\n") >= 0) { menu.hidden = true; return; }
+    var word = text.slice(1).toLowerCase();
+    var hits = CODE_COMMANDS.filter(function (c) { return c.name.indexOf(word) === 0 || c.alias.indexOf(word) === 0; });
+    menu.textContent = "";
+    if (!hits.length) { menu.hidden = true; return; }
+    hits.forEach(function (c) {
+      menu.appendChild(h("button", { type: "button", role: "option", onclick: function () { input.value = "/" + c.name; menu.hidden = true; codeSubmit(); } },
+        h("b", { text: "/" + c.name }), h("span", { class: "sub", text: "  " + c.alias + " — " + c.help })));
+    });
+    menu.hidden = false;
+  }
+  async function codeSubmit() {
+    var input = $("code-prompt"), text = input.value.trim();
+    if (!text || codeBusy) return;
+    $("code-slash").hidden = true;
+    if (text.charAt(0) === "/") {
+      var word = text.slice(1).split(/\s+/)[0].toLowerCase();
+      var cmd = CODE_COMMANDS.filter(function (c) { return c.name === word || c.alias === word; })[0];
+      if (!cmd) { toast("알 수 없는 명령입니다. / 를 입력해 목록을 보세요."); return; }
+      input.value = "";
+      if (cmd.name === "new") { codeOpen = ""; renderCode(); return; }
+      if (!codeOpen) { toast("먼저 왼쪽에서 작업을 고르세요."); return; }
+      return codeAction(codeOpen, cmd.name);
+    }
+    codeBusy = true; $("code-start").disabled = true;
     try {
       store("code-repo", $("code-repo").value.trim());
-      var r = await api("POST", "/code/start", { repo: $("code-repo").value.trim(), prompt: $("code-prompt").value, model: $("code-model").value, confirm_cost: $("code-cost").checked, guidance: $("code-guidance").checked });
-      codeOpen = r.id; $("code-prompt").value = ""; toast("작업을 시작했습니다."); renderCode();
+      var r = await api("POST", "/code/start", { repo: $("code-repo").value.trim(), prompt: text, model: $("code-model").value, confirm_cost: $("code-cost").checked, guidance: $("code-guidance").checked });
+      codeOpen = r.id; codeStick = true; input.value = ""; toast("작업을 시작했습니다.");
     } catch (e) { toast(e.message); }
-    b.disabled = false;
+    codeBusy = false; renderCode();
+  }
+  var CODE_ACTIONS = {
+    apply: { path: "apply", body: { confirm: true }, ask: "위 변경을 내 프로젝트 폴더에 적용할까요?\n(커밋은 하지 않습니다. 적용 후 직접 확인하고 커밋하세요.)", done: "적용했습니다. 폴더에서 변경을 확인하세요." },
+    undo: { path: "undo", body: { confirm: true }, ask: "적용했던 변경을 내 폴더에서 다시 빼낼까요?\n(적용 뒤에 같은 부분을 또 고쳤다면 되돌릴 수 없습니다.)", done: "되돌렸습니다." },
+    check: { path: "check", body: {}, ask: "이 작업의 복사본에서 프로젝트의 빌드·테스트 명령을 실행합니다(에이전트가 쓴 코드도 실행됩니다). 계속할까요?", done: "실행합니다." },
+    review: { path: "review", body: {}, ask: "수정한 모델과 다른 무료·로컬 모델이 변경 내용(diff)을 읽고 의견을 냅니다. 클라우드 서비스라면 diff가 그 서비스로 전송됩니다. 계속할까요?", done: "리뷰를 시작했습니다." },
+    cancel: { path: "cancel", body: {}, ask: "", done: "멈추는 중입니다." },
+    discard: { path: "discard", body: {}, ask: "이 작업의 복사본과 변경을 지울까요?", done: "정리했습니다." }
+  };
+  async function codeAction(id, name) {
+    var a = CODE_ACTIONS[name]; if (!a) return;
+    if (a.ask && !confirm(a.ask)) return;
+    try { await api("POST", "/code/runs/" + id + "/" + a.path, a.body); toast(a.done); } catch (e) { toast(e.message); }
+    codeStick = true; renderCode();
+  }
+  async function codeDecide(id, item, decision, ask) {
+    if (ask && !confirm(ask)) return;
+    try { await api("POST", "/code/runs/" + id + "/command", { id: item.id, decision: decision }); toast(decision === "decline" ? "거절했습니다." : "허용하고 이어서 실행합니다."); } catch (e) { toast(e.message); }
+    codeStick = true; renderCode();
   }
   function diffView(patch) {
     var out = h("div", { class: "diff" }), lines = String(patch || "").split("\n").slice(0, 3000);
@@ -679,72 +755,99 @@
     });
     return out;
   }
+  function splitPatch(patch) {
+    var files = {}, current = null;
+    String(patch || "").split("\n").forEach(function (l) {
+      if (l.indexOf("diff --git ") === 0) { var m = / b\/(.+)$/.exec(l); current = m ? m[1] : l; files[current] = []; }
+      if (current) files[current].push(l);
+    });
+    return files;
+  }
+  function toolLine(text) {
+    var m = /^(✓|✗|…)\s+(\S+)\s*(.*)$/.exec(text);
+    if (!m) return null;
+    var icons = { read: "📄", edit: "✏️", write: "✏️", bash: "⌨️", grep: "🔎", glob: "🔎", list: "📁", patch: "✏️" };
+    return h("div", { class: "cw-tool " + (m[1] === "✗" ? "bad" : m[1] === "…" ? "wait" : "ok") },
+      h("span", { class: "cw-ico", text: icons[m[2]] || "🛠" }), h("b", { text: m[2] }), h("span", { class: "cw-target", text: m[3] }), h("span", { class: "cw-mark", text: m[1] }));
+  }
+  function codeActions(r) {
+    var id = r.id, row = h("div", { class: "cw-actions" });
+    function btn(label, name, primary) { row.appendChild(h("button", { type: "button", class: "btn" + (primary ? " primary" : ""), text: label, onclick: function () { codeAction(id, name); } })); }
+    var checking = r.checks && r.checks.state === "running", reviewing = r.review && r.review.state === "running";
+    if (r.status === "running") btn("취소", "cancel");
+    if (r.status === "review") btn("변경을 내 폴더에 적용", "apply", true);
+    if (["review", "nochange", "failed"].indexOf(r.status) >= 0 && !checking) btn(r.checks ? "빌드·테스트 다시" : "빌드·테스트", "check");
+    if (r.files && r.files.length && r.status !== "running" && !reviewing) btn(r.review ? "코드 리뷰 다시" : "코드 리뷰", "review");
+    if (r.status === "applied") btn("적용 되돌리기", "undo");
+    if (r.status !== "running" && r.status !== "discarded") btn(r.status === "applied" ? "기록만 정리" : "버리기", "discard");
+    return row;
+  }
   async function renderCodeDetail(id) {
-    var box = $("code-detail"), r;
+    var box = $("code-stream"), r;
     try { r = await api("GET", "/code/runs/" + id); } catch (e) { box.textContent = e.message; return; }
+    var keep = box.scrollTop;
     box.textContent = "";
-    var card = h("div", { class: "code-card" }, h("h3", {}, codeBadge(r.status), " " + r.prompt.slice(0, 120)),
-      h("p", { class: "sub", text: r.repo + " · " + r.model + (r.repo_was_dirty ? " · ⚠ 폴더에 저장하지 않은 변경이 있었습니다(복사본에는 없음)" : "") }));
-    if (r.project) card.appendChild(h("details", {}, h("summary", { text: "JetAI가 미리 읽은 프로젝트 요약(에이전트에 함께 전달됨)" }), h("pre", { class: "sub", text: r.project })));
-    if (r.error) card.appendChild(h("p", { class: r.status === "failed" ? "err" : "sub", text: r.error }));
-    if (r.activity && r.activity.length) card.appendChild(h("div", { class: "code-activity" }, r.activity.slice(-14).map(function (l) { return h("div", { text: l }); })));
-    if (r.files && r.files.length) {
-      card.appendChild(h("p", { text: "바뀐 파일 " + r.stat }));
-      card.appendChild(h("ul", { class: "code-files" }, r.files.map(function (f) { return h("li", { text: ({ A: "추가", M: "수정", D: "삭제", R: "이름변경" }[f.status] || f.status) + "  " + f.path + (f.binary ? " (바이너리)" : "  +" + f.added + " −" + f.deleted) }); })));
-    }
-    if (r.patch) card.appendChild(diffView(r.patch));
-    if (r.patch_truncated) card.appendChild(h("p", { class: "sub", text: "(diff가 길어 앞부분만 보입니다. 적용하면 전체가 적용됩니다.)" }));
+    var you = h("div", { class: "cw-msg you" }, h("div", { class: "cw-who", text: "나" }), h("div", { class: "cw-text", text: r.prompt }),
+      h("p", { class: "sub", text: r.repo + " · " + r.model + " · 작업 지침: " + ({ off: "없음", short: "짧게", full: "전체" }[r.guidance] || "없음") + (r.repo_was_dirty ? " · ⚠ 폴더에 저장하지 않은 변경이 있었습니다(복사본에는 없음)" : "") }));
+    if (r.project) you.appendChild(h("details", { class: "cw-fold" }, h("summary", { text: "JetAI가 미리 읽은 프로젝트 요약(에이전트에 함께 전달됨)" }), h("pre", { class: "sub", text: r.project })));
+    box.appendChild(you);
+    var agent = h("div", { class: "cw-msg agent" }, h("div", { class: "cw-who" }, "에이전트 ", codeBadge(r.status)));
+    var lines = r.activity || [];
+    lines.forEach(function (l, at) {
+      if (/^…\s/.test(l) && lines.slice(at + 1).some(function (x) { return x.slice(1).trim() === l.slice(1).trim(); })) return;   // finished later: show only the result
+      var tool = toolLine(l);
+      if (tool) agent.appendChild(tool);
+      else agent.appendChild(h("div", { class: "cw-text", text: l.replace(/^💬\s*/, "") }));
+    });
+    if (r.status === "running" && !(r.activity || []).length) agent.appendChild(h("div", { class: "sub", text: "시작하는 중…" }));
+    if (r.status === "running") agent.appendChild(h("div", { class: "cw-typing", "aria-label": "작업 중" }, h("i"), h("i"), h("i")));
+    if (r.error) agent.appendChild(h("p", { class: r.status === "failed" ? "err" : "sub", text: r.error }));
+    box.appendChild(agent);
     (r.blocked || []).forEach(function (b) {
-      var box2 = h("div", { class: "code-blocked" }, h("p", {}, "🚫 막힌 명령: ", h("code", { text: b.command })),
+      var card = h("div", { class: "cw-card warn" }, h("p", {}, "🚫 막힌 명령: ", h("code", { text: b.command })),
         h("p", { class: "sub", text: b.state !== "open" ? ({ once: "이번만 허용함", always: "이 프로젝트에서 항상 허용함", declined: "거절함" }[b.state] || b.state) : (b.level === "never" ? "허용할 수 없는 명령입니다: " + b.note : b.level === "once" ? b.note : "이 명령을 허용하면 같은 복사본에서 이어서 작업합니다.") }));
       if (b.state === "open" && b.level !== "never" && r.status !== "running") {
-        var answer = function (decision, ask) { return async function () {
-          if (ask && !confirm(ask)) return;
-          try { await api("POST", "/code/runs/" + id + "/command", { id: b.id, decision: decision }); toast(decision === "decline" ? "거절했습니다." : "허용하고 이어서 실행합니다."); renderCode(); } catch (e) { toast(e.message); } }; };
-        var actions = h("div", { class: "row" }, h("button", { type: "button", class: "btn", text: "이번만 허용", onclick: answer("once", "이 명령을 이번 한 번만 허용하고 이어서 실행할까요?\n" + b.command) }));
-        if (b.level === "normal") actions.appendChild(h("button", { type: "button", class: "btn", text: "이 프로젝트에서 항상 허용", onclick: answer("always", "이 프로젝트에서 이 명령을 항상 허용할까요?\n" + b.command) }));
-        actions.appendChild(h("button", { type: "button", class: "btn", text: "거절", onclick: answer("decline") }));
-        box2.appendChild(actions);
+        var acts = h("div", { class: "cw-actions" }, h("button", { type: "button", class: "btn", text: "이번만 허용", onclick: function () { codeDecide(id, b, "once", "이 명령을 이번 한 번만 허용하고 이어서 실행할까요?\n" + b.command); } }));
+        if (b.level === "normal") acts.appendChild(h("button", { type: "button", class: "btn", text: "이 프로젝트에서 항상 허용", onclick: function () { codeDecide(id, b, "always", "이 프로젝트에서 이 명령을 항상 허용할까요?\n" + b.command); } }));
+        acts.appendChild(h("button", { type: "button", class: "btn", text: "거절", onclick: function () { codeDecide(id, b, "decline"); } }));
+        card.appendChild(acts);
       }
-      card.appendChild(box2);
+      box.appendChild(card);
     });
+    if (r.files && r.files.length) {
+      var per = splitPatch(r.patch);
+      var panel = h("div", { class: "cw-card" }, h("p", {}, h("b", { text: "바뀐 파일 " }), h("span", { class: "sub", text: r.stat })));
+      r.files.forEach(function (f) {
+        var kind = { A: "추가", M: "수정", D: "삭제", R: "이름변경" }[f.status] || f.status;
+        var det = h("details", { class: "cw-file" }, h("summary", {}, h("span", { class: "cw-fk", text: kind }), " " + f.path, h("span", { class: "sub", text: f.binary ? " (바이너리)" : "  +" + f.added + " −" + f.deleted })));
+        if (per[f.path]) det.appendChild(diffView(per[f.path].join("\n")));
+        if (r.files.length <= 3) det.open = true;
+        panel.appendChild(det);
+      });
+      if (r.patch_truncated) panel.appendChild(h("p", { class: "sub", text: "(diff가 길어 앞부분만 보입니다. 적용하면 전체가 적용됩니다.)" }));
+      box.appendChild(panel);
+    }
     var ck = r.checks;
     if (ck) {
       var verdictText = { passed: "✅ 통과", failed: "❌ 실패", none: "검사할 명령이 감지되지 않았습니다", unavailable: "실행 도구가 없어 못 했습니다", notests: "실행된 테스트가 없습니다(통과로 보지 않음)", "": "진행 중…" }[ck.verdict || ""] || ck.verdict;
-      card.appendChild(h("div", { class: "code-checks" }, h("p", {}, "빌드·테스트(JetAI가 복사본에서 직접 실행): ", h("b", { text: ck.state === "running" ? "실행 중…" : verdictText })),
-        (ck.items || []).map(function (c) { return h("details", {}, h("summary", { text: ({ passed: "✓", failed: "✗", timeout: "⏱", unavailable: "—", notests: "∅" }[c.status] || "?") + " " + c.kind + " · " + c.command + " (" + c.seconds + "초)" }), h("pre", { class: "sub", text: c.output || "(출력 없음)" })); })));
+      box.appendChild(h("div", { class: "cw-card" }, h("p", {}, "빌드·테스트(JetAI가 복사본에서 직접 실행): ", h("b", { text: ck.state === "running" ? "실행 중…" : verdictText })),
+        (ck.items || []).map(function (c) { return h("details", { class: "cw-fold" }, h("summary", { text: ({ passed: "✓", failed: "✗", timeout: "⏱", unavailable: "—", notests: "∅" }[c.status] || "?") + " " + c.kind + " · " + c.command + " (" + c.seconds + "초)" }), h("pre", { class: "sub", text: c.output || "(출력 없음)" })); })));
     }
     var rv = r.review;
     if (rv) {
       var rvName = { ok: "✅ 문제 없어 보임", caution: "⚠ 주의", problem: "❌ 문제 있음", unknown: "판단 불가(답을 읽지 못함)" }[rv.verdict] || "";
-      var rvBox = h("div", { class: "code-review" }, h("p", {}, "코드 리뷰(" + rv.model + "): ", h("b", { text: rv.state === "running" ? "리뷰 중…" : rv.state === "failed" ? "실패: " + (rv.error || "") : rvName })));
+      var rvBox = h("div", { class: "cw-card" }, h("p", {}, "코드 리뷰(" + rv.model + "): ", h("b", { text: rv.state === "running" ? "리뷰 중…" : rv.state === "failed" ? "실패: " + (rv.error || "") : rvName })));
       if (rv.state === "done") {
         if (rv.summary) rvBox.appendChild(h("p", { class: "sub", text: rv.summary }));
         (rv.issues || []).forEach(function (i) { rvBox.appendChild(h("p", { class: "sub", text: "[" + i.severity + "] " + i.where + ": " + i.text })); });
         (rv.missing || []).forEach(function (m) { rvBox.appendChild(h("p", { class: "sub", text: "빠진 것: " + m })); });
         rvBox.appendChild(h("p", { class: "sub", text: "리뷰는 참고용입니다. 자동으로 고치거나 막지 않습니다." }));
       }
-      card.appendChild(rvBox);
+      box.appendChild(rvBox);
     }
-    if (r.report) card.appendChild(h("details", {}, h("summary", { text: "작업 보고서(Markdown)" }), h("pre", { class: "sub", text: r.report })));
-    var row = h("div", { class: "row" });
-    if (r.status === "running") row.appendChild(h("button", { type: "button", class: "btn", text: "취소", onclick: async function () { try { await api("POST", "/code/runs/" + id + "/cancel", {}); renderCode(); } catch (e) { toast(e.message); } } }));
-    if (r.status === "review") row.appendChild(h("button", { type: "button", class: "btn primary", text: "변경을 내 폴더에 적용", onclick: async function () {
-      if (!confirm("위 변경을 내 프로젝트 폴더에 적용할까요?\n(커밋은 하지 않습니다. 적용 후 직접 확인하고 커밋하세요.)")) return;
-      try { await api("POST", "/code/runs/" + id + "/apply", { confirm: true }); toast("적용했습니다. 폴더에서 변경을 확인하세요."); renderCode(); } catch (e) { toast(e.message); } } }));
-    if (["review", "nochange", "failed"].indexOf(r.status) >= 0 && !(r.checks && r.checks.state === "running")) row.appendChild(h("button", { type: "button", class: "btn", text: r.checks ? "빌드·테스트 다시 실행" : "빌드·테스트 실행", onclick: async function () {
-      if (!confirm("이 작업의 복사본에서 프로젝트의 빌드·테스트 명령을 실행합니다(에이전트가 쓴 코드도 실행됩니다). 계속할까요?")) return;
-      try { await api("POST", "/code/runs/" + id + "/check", {}); toast("실행합니다."); renderCode(); } catch (e) { toast(e.message); } } }));
-    if (r.files && r.files.length && r.status !== "running" && !(r.review && r.review.state === "running")) row.appendChild(h("button", { type: "button", class: "btn", text: r.review ? "코드 리뷰 다시" : "코드 리뷰(다른 모델)", onclick: async function () {
-      if (!confirm("수정한 모델과 다른 무료·로컬 모델이 변경 내용(diff)을 읽고 의견을 냅니다. 클라우드 서비스라면 diff가 그 서비스로 전송됩니다. 계속할까요?")) return;
-      try { await api("POST", "/code/runs/" + id + "/review", {}); toast("리뷰를 시작했습니다."); renderCode(); } catch (e) { toast(e.message); } } }));
-    if (r.status === "applied") row.appendChild(h("button", { type: "button", class: "btn", text: "적용 되돌리기", onclick: async function () {
-      if (!confirm("적용했던 변경을 내 폴더에서 다시 빼낼까요?\n(적용 뒤에 같은 부분을 또 고쳤다면 되돌릴 수 없습니다.)")) return;
-      try { await api("POST", "/code/runs/" + id + "/undo", { confirm: true }); toast("되돌렸습니다."); renderCode(); } catch (e) { toast(e.message); } } }));
-    if (r.status !== "running" && r.status !== "discarded") row.appendChild(h("button", { type: "button", class: "btn", text: r.status === "applied" ? "기록만 정리" : "버리기", onclick: async function () {
-      if (r.status !== "applied" && !confirm("이 작업의 복사본과 변경을 지울까요?")) return;
-      try { await api("POST", "/code/runs/" + id + "/discard", {}); renderCode(); } catch (e) { toast(e.message); } } }));
-    card.appendChild(row); box.appendChild(card);
+    if (r.report) box.appendChild(h("details", { class: "cw-fold" }, h("summary", { text: "작업 보고서(Markdown)" }), h("pre", { class: "sub", text: r.report })));
+    box.appendChild(codeActions(r));
+    box.scrollTop = codeStick ? box.scrollHeight : keep;
   }
 
   /* ---------- phone control (settings) ---------- */
