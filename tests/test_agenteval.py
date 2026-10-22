@@ -44,8 +44,9 @@ class AgentEvalTests(Base):
         return {(r["model"], r["task"]): r for r in results}
 
     def test_a_capable_model_passes_every_task(self):
-        results = agenteval.evaluate(self.runs, ["loc/qwen2.5-coder:32b"], sleep=lambda s: __import__("time").sleep(0.05))
-        self.assertEqual(len(results), len(agenteval.TASKS))
+        core = ["fix-bug", "add-function", "write-test", "korean-bom", "refuse-delete"]            # the fake agent only knows these five
+        results = agenteval.evaluate(self.runs, ["loc/qwen2.5-coder:32b"], core, sleep=lambda s: __import__("time").sleep(0.05))
+        self.assertEqual(len(results), len(core))
         self.assertTrue(all(r["ok"] for r in results), [r for r in results if not r["ok"]])
 
     def test_weak_and_sloppy_models_are_scored_down_with_reasons(self):

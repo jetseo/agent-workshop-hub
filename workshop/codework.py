@@ -25,7 +25,7 @@ import time
 import uuid
 from pathlib import Path
 
-from . import adapters, checks, cmdguard, codereport, codereview, guidance, modelpick, projectmap, usage, worktree
+from . import adapters, checks, cmdguard, codereport, codereview, directmode, guidance, modelpick, projectmap, usage, worktree
 
 CHECK_TIMEOUT = 300                                             # seconds per build/test command
 MAX_PROMPT = 8000
@@ -96,6 +96,11 @@ def opencode_command(binary, model_arg, prompt, session=None):
     return command + [prompt]
 
 
+def _default_direct_chat(provider, model, messages, *, timeout, max_tokens):
+    from . import chat as chat_module
+    return chat_module.chat(provider, model, messages, timeout=timeout, max_tokens=max_tokens)
+
+
 def _git_bytes(*args, cwd):
     """git output as raw bytes, with file names left unquoted (core.quotepath=false) so Korean paths stay readable."""
     done = subprocess.run(["git", "-c", "core.quotepath=false", *args], cwd=cwd, capture_output=True, stdin=subprocess.DEVNULL, check=False)
@@ -138,7 +143,7 @@ def summarise(event):
 
 class CodeRuns:
     def __init__(self, providers, *, find_binary=adapters.find_opencode, popen=subprocess.Popen, clock=time.time, max_runtime=MAX_RUNTIME,
-                 worktree_base=None, info=None, command_fn=opencode_command, check_timeout=CHECK_TIMEOUT, use_guidance=lambda: True):
+                 worktree_base=None, info=None, command_fn=opencode_command, check_timeout=CHECK_TIMEOUT, use_guidance=lambda: True, direct_chat=None):
         self.providers = providers
         self.command_fn = command_fn
         self.home = home_dir(providers)
@@ -149,6 +154,7 @@ class CodeRuns:
         self.info = info
         self.check_timeout = check_timeout
         self.use_guidance = use_guidance
+        self.direct_chat = direct_chat or _default_direct_chat
         self.review_fn = codereview.review
         self.rules = cmdguard.ProjectRules(self.home / "command-rules.json")
         self._lock = threading.RLock()
@@ -209,7 +215,7 @@ class CodeRuns:
 
     @staticmethod
     def _summary(run):
-        keys = ("id", "repo", "prompt", "model", "status", "started", "finished", "error", "files", "stat", "applied_at", "undone_at", "tier", "repo_was_dirty", "project", "blocked", "approvals", "checks", "review", "guidance")
+        keys = ("id", "repo", "prompt", "model", "status", "started", "finished", "error", "files", "stat", "applied_at", "undone_at", "tier", "repo_was_dirty", "project", "blocked", "approvals", "checks", "review", "guidance", "mode")
         return {k: run.get(k) for k in keys}
 
     @staticmethod
@@ -315,7 +321,11 @@ class CodeRuns:
             raise CodeWorkError("시스템 폴더는 쓸 수 없습니다.")
         return repo
 
-    def start(self, repo_path, prompt, model_ref="auto", confirm_cost=False, guidance_on=None):
+    def start(self, repo_path, prompt, model_ref="auto", confirm_cost=False, guidance_on=None, mode="agent", validate=True):
+        if mode == "direct":
+            return self._start_direct(repo_path, prompt, model_ref, confirm_cost, validate)
+        if mode != "agent":
+            raise CodeWorkError("알 수 없는 방식입니다.")
         with self._lock:
             if any(t.is_alive() for t in self._threads.values()):
                 raise CodeWorkError("다른 코드 작업이 실행 중입니다. 끝나거나 취소한 뒤 시작하세요.")
@@ -362,6 +372,117 @@ class CodeRuns:
             self._threads[run_id] = thread
             thread.start()
             return self._summary(run)
+
+    # -- direct mode (JetAI drives the steps, the model only writes text) -------------------------------------------
+    def _direct_candidates(self):
+        """Local/free models usable in direct mode: they are called through chat (so the free-quota guard applies), never OpenCode's own."""
+        found = []
+        for name, entry in self.providers.load().items():
+            if entry["data_policy"] != "local" and not entry.get("consented"):
+                continue
+            for model in entry.get("models", []):
+                option = self._describe(name, entry, model)
+                if option["tier"] in ("local", "free"):
+                    found.append(option)
+        return found
+
+    def auto_direct_model(self):
+        options = self._direct_candidates()
+        if not options:
+            raise CodeWorkError("직접 모드에 쓸 무료·로컬 모델이 없습니다. 서비스를 연결하거나 모델을 직접 고르세요.")
+        return max(options, key=lambda o: (o["level"], o["tier"] == "local"))["ref"]
+
+    def _resolve_direct_model(self, model_ref, confirm_cost):
+        if not isinstance(model_ref, str) or not MODEL_REF.fullmatch(model_ref) or model_ref.startswith("opencode/"):
+            raise CodeWorkError("직접 모드는 연결한 서비스의 모델만 쓸 수 있습니다(OpenCode 자체 모델 제외).")
+        name, _, model = model_ref.partition("/")
+        provider = self.providers.get(name)
+        if provider is None:
+            raise CodeWorkError("연결되지 않은 서비스입니다: " + name)
+        if provider["data_policy"] != "local" and not provider.get("consented"):
+            raise CodeWorkError("이 서비스로 코드를 보내려면 연결할 때 동의가 필요합니다.")
+        tier = usage.tier_for(provider, model)
+        if tier == "other" and confirm_cost is not True:
+            raise CodeWorkError("요금이 나올 수 있거나 무료 한도 보호가 닫혀 있는 모델입니다. 비용을 확인하고 체크해야 실행됩니다.")
+        return provider, model, tier
+
+    def _start_direct(self, repo_path, prompt, model_ref, confirm_cost, validate):
+        with self._lock:
+            if any(t.is_alive() for t in self._threads.values()):
+                raise CodeWorkError("다른 코드 작업이 실행 중입니다. 끝나거나 취소한 뒤 시작하세요.")
+            repo = self.check_repo(repo_path)
+            if not isinstance(prompt, str) or not prompt.strip() or len(prompt) > MAX_PROMPT:
+                raise CodeWorkError("요청은 1~%d자로 써 주세요." % MAX_PROMPT)
+            if model_ref in (None, "", "auto"):
+                model_ref = self.auto_direct_model()
+            provider, model, tier = self._resolve_direct_model(model_ref, confirm_cost)
+            run_id = uuid.uuid4().hex[:12]
+            try:
+                base_commit = worktree._git("rev-parse", "HEAD", cwd=repo).strip()
+                path, branch = worktree.create(repo, self.worktree_base, "code", run_id)
+            except (RuntimeError, ValueError) as error:
+                raise CodeWorkError("작업용 폴더를 만들지 못했습니다: " + str(error)[:200]) from None
+            dirty = bool(worktree._git("status", "--porcelain", cwd=repo, check=False).strip())
+            run = {"id": run_id, "repo": str(repo), "prompt": prompt.strip(), "model": model_ref, "tier": tier, "status": "running", "mode": "direct",
+                   "started": self.clock(), "finished": None, "error": "", "worktree": str(path), "branch": branch, "base": base_commit,
+                   "files": [], "stat": "", "activity": [], "repo_was_dirty": dirty, "cost_ok": confirm_cost is True, "session": "",
+                   "once_allow": [], "blocked": [], "approvals": [], "guidance": "off", "validate": bool(validate)}
+            try:
+                run["project"] = projectmap.render(projectmap.read_project(path))
+            except Exception:
+                run["project"] = ""
+            self._save(run)
+            thread = threading.Thread(target=self._run_direct, args=(run, provider, model), name="direct-" + run_id, daemon=True)
+            self._threads[run_id] = thread
+            thread.start()
+            return self._summary(run)
+
+    def _run_direct(self, run, provider, model):
+        run_id, directory = run["id"], self._path(run["id"])
+        tail = self._tails.setdefault(run_id, [])
+        events = open(directory / "events.jsonl", "ab")
+        timeout = 300 if provider.get("data_policy") == "local" else 120
+
+        def emit(tool, ok, text):
+            tail.append("%s %s %s" % ("✓" if ok else "✗", tool, text))
+            del tail[:-120]
+            line = {"type": "tool_use", "part": {"tool": tool, "state": {"status": "completed" if ok else "error", "input": {"filePath": text[:200]}}}}
+            events.write((json.dumps(line, ensure_ascii=False) + "\n").encode("utf-8"))
+            events.flush()
+
+        def ask(messages, max_tokens):
+            return self.direct_chat(provider, model, messages, timeout=timeout, max_tokens=max_tokens)
+
+        def test_fn():
+            return self._direct_tests(run)
+        result = {"ok": False, "error": "", "changed": []}
+        try:
+            files = projectmap.list_files(Path(run["worktree"]))
+            result = directmode.run(ask, run["prompt"], run["worktree"], files, run.get("project", ""), test_fn, emit,
+                                    cancelled=lambda: bool(self._cancel_flags.get(run_id)), validate=run.get("validate", True))
+        except Exception as error:
+            result["error"] = "실행 중 오류: " + str(error)[:200]
+        finally:
+            events.close()
+        run["finished"] = self.clock()
+        run["activity"] = list(tail)[-60:]
+        if self._cancel_flags.get(run_id):
+            run["status"], run["error"] = "cancelled", "사용자가 취소했습니다."
+        elif not result["ok"]:
+            run["status"], run["error"] = "failed", result["error"] or "직접 모드가 끝나지 못했습니다."
+        self._collect(run, keep_status=run["status"] in ("cancelled", "failed"))
+        self._save(run)
+
+    def _direct_tests(self, run):
+        """Run the detected build/test commands in the copy (the same fixed, shell-free runner as the manual check)."""
+        env = {k: v for k, v in os.environ.items() if k in WINDOWS_ENV_KEEP}
+        env.update({"CI": "1", "PYTHONDONTWRITEBYTECODE": "1", "PYTHONUTF8": "1"})
+        items = checks.plan(run["worktree"])
+        done = [checks.run_one(item, run["worktree"], env, self.check_timeout, self.popen, kill_tree) for item in items]
+        verdict = checks.verdict(done)
+        run["checks"] = {"state": "done", "items": done, "verdict": verdict, "planned": [i["command"] for i in items], "started": self.clock(), "finished": self.clock()}
+        output = "\n".join("$ %s\n%s" % (c["command"], c["output"]) for c in done if c["status"] in ("failed", "timeout"))
+        return verdict, output
 
     def _run(self, run, command, env):
         run_id, directory = run["id"], self._path(run["id"])
