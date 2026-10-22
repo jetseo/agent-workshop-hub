@@ -24,7 +24,7 @@ if "SLEEP" in prompt:
 if "ENV" in prompt:
     open("env.txt", "w").write("\n".join(sorted(os.environ)))
     open("cfg.json", "w").write(os.environ.get("OPENCODE_CONFIG_CONTENT", ""))
-    open("argv.txt", "w").write(" | ".join(sys.argv[1:]))
+    open("argv.txt", "w", encoding="utf-8").write(" | ".join(sys.argv[1:]))
 if "FIX" in prompt:
     src = open("calc.py", "rb").read().replace(b"a - b", b"a + b")       # bytes: the file may hold Korean text and a BOM
     open("calc.py", "wb").write(src)
@@ -115,6 +115,13 @@ class RunTests(Base):
         self.assertEqual(git(self.repo, "status", "--porcelain").strip(), "")
         self.assertEqual(run["tier"], "local")
         self.assertTrue(Path(self.runs._read(run_id)["worktree"]).is_dir())
+
+    def test_project_summary_is_read_stored_and_sent_with_the_request(self):
+        run_id = self.start("고쳐줘")
+        run = self.wait(run_id)
+        self.assertIn("프로젝트 요약", run["project"])
+        self.assertIn("calc.py", run["project"])
+        self.assertEqual(run["prompt"], "고쳐줘")
 
     def test_new_files_are_part_of_the_patch_and_no_change_is_reported(self):
         run = self.wait(self.start("NEWFILE please"), "review")
