@@ -51,7 +51,9 @@ def run_one(item, directory, env, timeout, popen, kill, clock=time.time):
     try:
         out, _ = proc.communicate(timeout=timeout)
         result["status"] = "passed" if proc.returncode == 0 else "failed"
-        no_tests = proc.returncode == 5 and b"no tests ran" in (out or b"").lower()
+        # Python 3.12 exits with 5 when unittest finds nothing, 3.11 exits with 0 and prints only "Ran 0 tests": the words are the reliable signal.
+        said = (out or b"").lower()
+        no_tests = proc.returncode in (0, 5) and (b"no tests ran" in said or b"ran 0 tests" in said)
         if no_tests:
             result["status"] = "notests"                                  # the runner ran but found nothing to run: not a pass
     except subprocess.TimeoutExpired:
