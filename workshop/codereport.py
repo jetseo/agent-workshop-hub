@@ -66,7 +66,7 @@ def build(run, events_path):
     metrics = {"id": run["id"], "status": run["status"], "model": run.get("model"), "tier": run.get("tier"), "seconds": seconds,
                "files_changed": len(files), "lines_added": sum(f.get("added", 0) for f in files),
                "lines_deleted": sum(f.get("deleted", 0) for f in files), **events,
-               "applied": bool(run.get("applied_at")), "undone": bool(run.get("undone_at")), "repo_was_dirty": bool(run.get("repo_was_dirty")), "checks": (run.get("checks") or {}).get("verdict") or None,
+               "applied": bool(run.get("applied_at")), "undone": bool(run.get("undone_at")), "repo_was_dirty": bool(run.get("repo_was_dirty")), "checks": (run.get("checks") or {}).get("verdict") or None, "review": (run.get("review") or {}).get("verdict"),
                "cost": "무료/로컬" if run.get("tier") in ("local", "free") else "확인 필요(유료일 수 있음)"}
     lines = ["# 코드 작업 보고서 " + run["id"], "",
              "## 목표", mask(run.get("prompt", "")), "",
@@ -102,7 +102,16 @@ def build(run, events_path):
         lines += ["  - %s `%s`: %s (%s초)" % (c["kind"], c["command"], names.get(c["status"], c["status"]), c["seconds"]) for c in check.get("items", [])]
     else:
         lines.append("- 빌드·테스트: 기록 없음(사용자가 \"빌드·테스트 실행\"을 누르지 않았습니다).")
-    lines += ["- 코드 리뷰: 기록 없음(아직 자동 리뷰 단계 없음).",
-              "", "## 주의", "- 작업 시작 때 폴더에 저장하지 않은 변경이 %s." % ("있었음(복사본에는 없음)" if run.get("repo_was_dirty") else "없었음"),
+    review = run.get("review") or {}
+    if review.get("state") == "done":
+        verdict_names = {"ok": "문제 없어 보임", "caution": "주의", "problem": "문제 있음", "unknown": "판단 불가(형식을 못 읽음)"}
+        lines += ["- 코드 리뷰(수정과 다른 모델 `%s`): **%s** — %s" % (review.get("model"), verdict_names.get(review.get("verdict"), "?"), mask(review.get("summary", "")))]
+        lines += ["  - [%s] %s: %s" % (i["severity"], i["where"], i["text"]) for i in review.get("issues", [])]
+        lines += ["  - 빠진 것: " + m for m in review.get("missing", [])]
+    elif review.get("state") == "failed":
+        lines.append("- 코드 리뷰: 실패 — " + mask(review.get("error", "")))
+    else:
+        lines.append("- 코드 리뷰: 기록 없음(사용자가 요청하지 않았습니다).")
+    lines += ["", "## 주의", "- 작업 시작 때 폴더에 저장하지 않은 변경이 %s." % ("있었음(복사본에는 없음)" if run.get("repo_was_dirty") else "없었음"),
               "- 이 보고서는 기록된 사실만 담습니다. 비밀처럼 보이는 문자열은 가렸습니다.", ""]
     return "\n".join(lines), metrics

@@ -25,7 +25,7 @@ import time
 import uuid
 from pathlib import Path
 
-from . import adapters, checks, cmdguard, codereport, modelpick, projectmap, usage, worktree
+from . import adapters, checks, cmdguard, codereport, codereview, modelpick, projectmap, usage, worktree
 
 CHECK_TIMEOUT = 300                                             # seconds per build/test command
 MAX_PROMPT = 8000
@@ -148,6 +148,7 @@ class CodeRuns:
         self.find_binary, self.popen, self.clock, self.max_runtime = find_binary, popen, clock, max_runtime
         self.info = info
         self.check_timeout = check_timeout
+        self.review_fn = codereview.review
         self.rules = cmdguard.ProjectRules(self.home / "command-rules.json")
         self._lock = threading.RLock()
         self._procs = {}
@@ -207,7 +208,7 @@ class CodeRuns:
 
     @staticmethod
     def _summary(run):
-        keys = ("id", "repo", "prompt", "model", "status", "started", "finished", "error", "files", "stat", "applied_at", "undone_at", "tier", "repo_was_dirty", "project", "blocked", "approvals", "checks")
+        keys = ("id", "repo", "prompt", "model", "status", "started", "finished", "error", "files", "stat", "applied_at", "undone_at", "tier", "repo_was_dirty", "project", "blocked", "approvals", "checks", "review")
         return {k: run.get(k) for k in keys}
 
     @staticmethod
@@ -537,6 +538,55 @@ class CodeRuns:
             thread = threading.Thread(target=self._run, args=(run, command, env), name="code-" + run_id, daemon=True)
             self._threads[run_id] = thread
             thread.start()
+
+    # -- second-opinion review ------------------------------------------------------------------------------------
+    def pick_reviewer(self, run, model_ref="auto"):
+        """-> (provider, model, ref). A local/free model that did not write the change; never OpenCode's own catalogue, never paid."""
+        if model_ref in (None, "", "auto"):
+            options = [o for o in self.model_options() if o["tier"] in ("local", "free") and not o["ref"].startswith("opencode/") and o["ref"] != run["model"]]
+            if not options:
+                raise CodeWorkError("리뷰에 쓸 다른 무료·로컬 모델이 없습니다. 서비스를 하나 더 연결하거나 모델을 직접 고르세요.")
+            model_ref = max(options, key=lambda o: o["level"])["ref"]
+        if not isinstance(model_ref, str) or not MODEL_REF.fullmatch(model_ref) or model_ref.startswith("opencode/"):
+            raise CodeWorkError("리뷰할 모델을 고르세요(OpenCode 자체 모델은 리뷰에 쓸 수 없습니다).")
+        if model_ref == run["model"]:
+            raise CodeWorkError("수정한 모델과 다른 모델을 고르세요.")
+        name, _, model = model_ref.partition("/")
+        provider = self.providers.get(name)
+        if provider is None:
+            raise CodeWorkError("연결되지 않은 서비스입니다: " + name)
+        if provider["data_policy"] != "local" and not provider.get("consented"):
+            raise CodeWorkError("이 서비스로 코드를 보내려면 연결할 때 동의가 필요합니다.")
+        if usage.tier_for(provider, model) not in ("local", "free"):
+            raise CodeWorkError("리뷰에는 무료·로컬 모델만 쓸 수 있습니다.")
+        return provider, model, model_ref
+
+    def review(self, run_id, model_ref="auto"):
+        with self._lock:
+            run = self._read(run_id)
+            patch = self._path(run_id) / "patch.diff"
+            if run["status"] == "running" or not patch.exists() or not patch.stat().st_size:
+                raise CodeWorkError("리뷰할 변경이 없습니다(실행 중이거나 바뀐 파일이 없음).")
+            if (run.get("review") or {}).get("state") == "running":
+                raise CodeWorkError("이미 리뷰 중입니다.")
+            if any(t.is_alive() for t in self._threads.values()):
+                raise CodeWorkError("다른 작업이 실행 중입니다. 끝난 뒤 다시 누르세요.")
+            provider, model, ref = self.pick_reviewer(run, model_ref)
+            run["review"] = {"state": "running", "model": ref, "started": self.clock()}
+            self._save(run)
+            thread = threading.Thread(target=self._run_review, args=(run, provider, model, patch), name="review-" + run_id, daemon=True)
+            thread.start()
+
+    def _run_review(self, run, provider, model, patch):
+        info = run["review"]
+        try:
+            text = patch.read_bytes().decode("utf-8", "replace")
+            info.update(self.review_fn(provider, model, run, text, run.get("checks")))
+            info["state"] = "done"
+        except Exception as error:                                      # network, quota, bad answer: report it, never crash
+            info.update({"state": "failed", "error": codereport.mask(str(error))[:200]})
+        info["finished"] = self.clock()
+        self._save(run)
 
     # -- build/test checks ---------------------------------------------------------------------------------------
     def check(self, run_id):

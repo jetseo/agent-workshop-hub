@@ -133,6 +133,8 @@ def _code_api(ctx, method, rest, body):
                 code.cancel(run_id)
             elif action == "apply":
                 code.apply(run_id, body.get("confirm") is True)
+            elif action == "review":
+                code.review(run_id, body.get("model") or "auto")
             elif action == "check":
                 code.check(run_id)
             elif action == "command":
