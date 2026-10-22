@@ -72,12 +72,14 @@ def _with_account(provider, attempt):
     return attempt(choices[0][1])
 
 
-def _chat_request(provider, model, messages, max_tokens, stream, include_usage=False):
+def _chat_request(provider, model, messages, max_tokens, stream, include_usage=False, temperature=None):
     headers = {"Content-Type": "application/json"}
     key = _key(provider)
     if key:
         headers["Authorization"] = "Bearer " + key
     payload = {"model": model, "messages": messages, "max_tokens": max_tokens}
+    if temperature is not None:
+        payload["temperature"] = temperature
     if stream:
         payload["stream"] = True
         if include_usage:
@@ -99,11 +101,11 @@ def _guard_begin(provider, messages, max_tokens, timeout):
     return ticket, guard.timeout_for(gid, timeout)
 
 
-def chat(provider, model, messages, *, timeout=120, max_tokens=2000):
+def chat(provider, model, messages, *, timeout=120, max_tokens=2000, temperature=None):
     ticket, timeout = _guard_begin(provider, messages, max_tokens, timeout)
 
     def attempt(view):
-        with _open(_chat_request(view, model, messages, max_tokens, False), timeout) as response:
+        with _open(_chat_request(view, model, messages, max_tokens, False, temperature=temperature), timeout) as response:
             return json.load(response)
     try:
         data = _with_account(provider, attempt)

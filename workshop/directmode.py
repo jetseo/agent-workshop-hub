@@ -145,19 +145,41 @@ def write_text(path, text, bom, crlf):
     Path(path).write_bytes((b"\xef\xbb\xbf" if bom else b"") + data.encode("utf-8"))
 
 
-def _ask(chat, system, user, max_tokens):
-    return chat([{"role": "system", "content": system}, {"role": "user", "content": user}], max_tokens)
+def _ask(chat, system, user, max_tokens, temperature=None):
+    messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
+    return chat(messages, max_tokens) if temperature is None else chat(messages, max_tokens, temperature=temperature)
 
 
-def run(chat, task, worktree, files, summary, test_fn, emit, *, cancelled=lambda: False, validate=True):
+def is_test_path(path):
+    name = path.rsplit("/", 1)[-1]
+    return name.startswith("test_") or name.endswith("_test.py") or path.startswith("tests/") or "/tests/" in path
+
+
+def related_tests(worktree, files, exclude=(), limit=8000):
+    """Read-only context: the project's test files (small ones, up to `limit` characters in all), so the model sees what is expected."""
+    parts, total = [], 0
+    for rel in [f for f in files if is_test_path(f) and f not in exclude][:8]:
+        path = safe_path(worktree, rel)
+        if path is None or not path.is_file():
+            continue
+        text, _, _ = read_text(path)
+        if total + len(text) > limit:
+            continue
+        parts.append("--- %s\n%s" % (rel, text))
+        total += len(text)
+    return "\n".join(parts)
+
+
+def run(chat, task, worktree, files, summary, test_fn, emit, *, cancelled=lambda: False, validate=True, context="", temperature=None):
     """Run the pipeline in `worktree`. `chat(messages, max_tokens) -> str`, `test_fn() -> (verdict, output)`, `emit(tool, ok, text)`.
 
     Returns {"ok", "error", "changed", "tests", "calls"}; it never raises for model mistakes (they become `error`)."""
     result = {"ok": False, "error": "", "changed": [], "tests": "skipped", "calls": 0}
+    ctx = ("\n\nRelated tests (read-only, do not edit them):\n" + context) if context else ""
 
     def ask(system, user, tokens):
         result["calls"] += 1
-        return _ask(chat, system, user, tokens)
+        return _ask(chat, system, user, tokens, temperature)
 
     def stopped():
         if cancelled():
@@ -195,7 +217,7 @@ def run(chat, task, worktree, files, summary, test_fn, emit, *, cancelled=lambda
         for rel in existing:
             if stopped():
                 return result
-            ok = _edit_file(ask, task, worktree, rel, original[rel], emit, retry=True)
+            ok = _edit_file(ask, task, worktree, rel, original[rel], emit, retry=True, ctx=ctx)
             if not ok:
                 result["error"] = "%s 에 수정안을 적용하지 못했습니다." % rel
                 return result
@@ -229,7 +251,7 @@ def run(chat, task, worktree, files, summary, test_fn, emit, *, cancelled=lambda
             for rel in existing:
                 text, bom, crlf = read_text(safe_path(worktree, rel))
                 original[rel] = (text, bom, crlf)
-            fixed = _repair(ask, task, worktree, existing, original, output, emit)
+            fixed = _repair(ask, task, worktree, existing, original, output, emit, ctx)
             if fixed:
                 verdict, output = test_fn()
                 emit("test", verdict == "passed", "수정 뒤 결과: " + verdict)
@@ -242,10 +264,10 @@ def run(chat, task, worktree, files, summary, test_fn, emit, *, cancelled=lambda
         return result
 
 
-def _edit_file(ask, task, worktree, rel, current, emit, retry):
+def _edit_file(ask, task, worktree, rel, current, emit, retry, ctx=""):
     text, bom, crlf = current
     path = safe_path(worktree, rel)
-    prompt = "Task:\n%s\n\nFile: %s\n```\n%s\n```" % (task, rel, text)
+    prompt = "Task:\n%s\n\nFile: %s\n```\n%s\n```%s" % (task, rel, text, ctx)
 
     def attempt(extra=""):
         """-> (new_text or None, problem, note). new_text is set only for a usable change."""
@@ -278,12 +300,12 @@ def _edit_file(ask, task, worktree, rel, current, emit, retry):
     return True
 
 
-def _repair(ask, task, worktree, existing, original, output, emit):
+def _repair(ask, task, worktree, existing, original, output, emit, ctx=""):
     any_fixed = False
     for rel in existing:
         text, bom, crlf = original[rel]
         prompt = ("Task:\n%s\n\nThe project's tests fail after the change. Test output:\n%s\n\nCurrent file %s:\n```\n%s\n```\n"
-                  "Fix the file so the tests pass. Reply with SEARCH/REPLACE blocks only.") % (task, (output or "")[-2500:], rel, text)
+                  "Fix the file so the tests pass. Reply with SEARCH/REPLACE blocks only.") % (task, (output or "")[-2500:], rel, text) + ctx
         blocks = parse_blocks(ask(EDIT, prompt, 3000))
         new_text, applied, failed = apply_blocks(text, blocks)
         if applied and not failed:
