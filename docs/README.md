@@ -8,6 +8,7 @@
 | [design-auto-routing.md](design-auto-routing.md) | 자동 선택·질문 판단(아비터)·이어서 작업하기 설계서 |
 | [free-services.md](free-services.md) | 무료로 쓸 수 있는 AI 서비스 목록, 조사 방법, 갱신 방법 |
 | [multi-model.md](multi-model.md) | 멀티 모델 보드 사용법 |
+| [remote-control.md](remote-control.md) | 모바일 원격 제어(텔레그램) 사용법·안전 규칙·다른 후보 비교 |
 | [improvements.md](improvements.md) | 개선 후보 전체 목록(우선순위·상태·결정 필요) |
 | [roadmap.md](roadmap.md) | 앞으로 할 일, 상태, 사용자가 정할 것 |
 
