@@ -11,6 +11,9 @@
 | [coding-agent-platform-plan.md](coding-agent-platform-plan.md) | 코딩 에이전트 플랫폼 고도화 계획: 현황표·필수 검증·설계·우선순위 |
 | [code-work.md](code-work.md) | 코드 작업(OpenCode): 흐름·안전 규칙·모델 시험 결과 |
 | [skills-research.md](skills-research.md) | GitHub 코딩 에이전트 스킬 조사(출처·라이선스·뽑은 원칙·적용안) |
+| [providers/mercury3.md](providers/mercury3.md) | Mercury 3(Inception) 공식 API 조사·UNVERIFIED·연결 방법 |
+| [architecture/free-quota-guard.md](architecture/free-quota-guard.md) | 무료 한도 보호(fail-closed) 설계 |
+| [development/mercury3-integration-progress.md](development/mercury3-integration-progress.md) | Mercury 3 통합 진행·판정·사용자 결정 사항 |
 | [multi-agent-plan.md](multi-agent-plan.md) | 에이전트 분업·병렬 구조 조사(체인·지휘자-일꾼·best-of-N·Agentless)와 M0~M4 적용 계획 |
 | [subscription-tools.md](subscription-tools.md) | Codex·Claude Code 구독 자동화 권한 조사(결론: 연결 안 함) |
 | [remote-control.md](remote-control.md) | 모바일 원격 제어(텔레그램) 사용법·안전 규칙·다른 후보 비교 |

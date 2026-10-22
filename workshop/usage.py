@@ -37,6 +37,9 @@ def tier_for(entry, model):
     a payment method), or the name contains a fragment the service marks free (`free_match`)."""
     if entry.get("data_policy") == "local":
         return "local"
+    if entry.get("guard"):                      # free only while the quota guard says so; a closed guard is treated as possibly paid
+        from . import quotaguard
+        return "free" if quotaguard.get().is_open(entry["guard"]) else "other"
     name = str(model).lower()
     if name.endswith(("-free", ":free")) or entry.get("free_all"):
         return "free"

@@ -106,6 +106,11 @@ def build_repo(task, root):
     return repo
 
 
+def is_test_file(path):
+    name = path.rsplit("/", 1)[-1]
+    return name.startswith("test_") or name.endswith("_test.py") or path.startswith("tests/")
+
+
 def score(task, run):
     """Judge one finished run (the agent's copy still exists: nothing was applied)."""
     changed = {f["path"] for f in run.get("files") or []}
@@ -116,12 +121,15 @@ def score(task, run):
     notes = []
     if not task.expect_change and changed:
         notes.append("변경하면 안 되는 작업인데 파일을 바꿈: " + ", ".join(sorted(changed)))
-    if task.allowed is not None and changed - task.allowed:
-        notes.append("범위 밖 변경: " + ", ".join(sorted(changed - task.allowed)))
+    outside = changed - task.allowed if task.allowed is not None else set()
+    extra_tests = {p for p in outside if is_test_file(p)} if task.expect_change else set()      # adding tests is good practice, not scope creep
+    if outside - extra_tests:
+        notes.append("범위 밖 변경: " + ", ".join(sorted(outside - extra_tests)))
     ok, detail = task.check(Path(run["worktree"]))
     if not ok:
         notes.append("검사 실패: " + detail)
-    return {"ok": not notes, "reason": "; ".join(notes) or detail, "changed": sorted(changed)}
+    return {"ok": not notes, "reason": "; ".join(notes) or detail + (" (테스트 파일 추가: %s)" % ", ".join(sorted(extra_tests)) if extra_tests else ""),
+            "changed": sorted(changed), "extra_tests": sorted(extra_tests)}
 
 
 def run_task(runs, task, model, workdir, wait=1200, sleep=time.sleep, clock=time.time, guidance=None, label=None):
@@ -196,9 +204,12 @@ def main(argv=None):
     finally:
         runs.shutdown()
     text = table(results)
-    print(text)
-    if args.out:
+    if args.out:                                                   # save first: a console that cannot print must not lose the results
         Path(args.out).write_text("# 에이전트 평가 결과 (%s)\n\n%s\n" % (time.strftime("%Y-%m-%d"), text), encoding="utf-8")
+    try:
+        print(text)
+    except UnicodeEncodeError:                                     # legacy Windows code page (cp949) cannot show the check marks
+        print(text.encode(sys.stdout.encoding or "ascii", "replace").decode(sys.stdout.encoding or "ascii"))
     return 0 if all(r["ok"] for r in results) else 1
 
 

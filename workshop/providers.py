@@ -46,6 +46,10 @@ def validate(name, entry):
         result["models"] = models
     if entry.get("consented") is not None:
         result["consented"] = bool(entry["consented"])
+    if entry.get("guard"):
+        if not isinstance(entry["guard"], str) or not re.fullmatch(r"[a-z0-9_-]{1,30}", entry["guard"]):
+            raise ValueError("guard must be a short id")
+        result["guard"] = entry["guard"]      # free use is gated by workshop/quotaguard.py (fail-closed), never assumed
     if entry.get("free_all"):
         result["free_all"] = True            # every chat model of this service is free within its free-tier limits
     match = entry.get("free_match")
@@ -103,7 +107,7 @@ class Providers:
     def add(self, name, **entry):
         data = self.load()
         previous = data.get(name, {})
-        for keep in ("models", "consented", "accounts", "free_all", "free_match"):        # re-registering must not forget these
+        for keep in ("models", "consented", "accounts", "free_all", "free_match", "guard"):        # re-registering must not forget these
             if keep not in entry and keep in previous:
                 entry[keep] = previous[keep]
         data[name] = validate(name, entry)

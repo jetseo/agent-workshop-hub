@@ -245,6 +245,8 @@ class CodeRuns:
         for name, entry in self.providers.load().items():
             if entry["data_policy"] != "local" and not entry.get("consented"):
                 continue
+            if entry.get("guard"):                      # OpenCode calls the service itself, past the free-quota guard: not usable here
+                continue
             for model in entry.get("models", []):
                 options.append(self._describe(name, entry, model))
         return options
@@ -274,6 +276,8 @@ class CodeRuns:
             raise CodeWorkError("연결되지 않은 서비스입니다: " + name)
         if provider["data_policy"] != "local" and not provider.get("consented"):
             raise CodeWorkError("이 서비스로 코드를 보내려면 연결할 때 동의가 필요합니다.")
+        if provider.get("guard"):
+            raise CodeWorkError("이 서비스는 무료 한도 보호가 걸려 있어 코드 작업(OpenCode가 직접 호출)에는 쓸 수 없습니다. 채팅·리뷰·보드에서만 쓰입니다.")
         tier = usage.tier_for(provider, model)
         if tier == "other" and confirm_cost is not True:
             raise CodeWorkError("요금이 나올 수 있는 모델입니다. 비용을 확인하고 체크해야 실행됩니다.")
