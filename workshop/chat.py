@@ -4,7 +4,7 @@ import os
 import urllib.error
 import urllib.request
 
-from . import ratelimit
+from . import quotaguard, ratelimit
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -86,11 +86,35 @@ def _chat_request(provider, model, messages, max_tokens, stream, include_usage=F
                                   headers=headers, method="POST")
 
 
+def _guard_begin(provider, messages, max_tokens, timeout):
+    """-> (ticket, timeout). Services under a free-quota guard are refused here, before any network call."""
+    gid = quotaguard.guard_id(provider)
+    if gid is None:
+        return None, timeout
+    guard = quotaguard.get()
+    try:
+        ticket = guard.begin(gid, quotaguard.estimate_tokens(messages), max_tokens)
+    except quotaguard.QuotaBlocked as error:
+        raise quotaguard.QuotaBlocked("무료 한도 보호: " + str(error)) from None
+    return ticket, guard.timeout_for(gid, timeout)
+
+
 def chat(provider, model, messages, *, timeout=120, max_tokens=2000):
+    ticket, timeout = _guard_begin(provider, messages, max_tokens, timeout)
+
     def attempt(view):
         with _open(_chat_request(view, model, messages, max_tokens, False), timeout) as response:
             return json.load(response)
-    data = _with_account(provider, attempt)
+    try:
+        data = _with_account(provider, attempt)
+    except Exception as error:
+        quotaguard.get().fail(ticket, error)
+        raise
+    reported = data.get("usage") if isinstance(data, dict) else None
+    if isinstance(reported, dict):
+        quotaguard.get().settle(ticket, reported.get("prompt_tokens"), reported.get("completion_tokens"))
+    else:
+        quotaguard.get().settle(ticket)
     try:
         return data["choices"][0]["message"]["content"]
     except (KeyError, IndexError, TypeError):
@@ -101,6 +125,10 @@ def chat_stream(provider, model, messages, *, timeout=120, max_tokens=2048, usag
     """Yield text deltas from an OpenAI-style server-sent-events stream.
 
     If `usage` (a dict) is given it is filled with prompt_tokens/completion_tokens when the service reports them."""
+    ticket, timeout = _guard_begin(provider, messages, max_tokens, timeout)
+    if ticket is not None and usage is None:
+        usage = {}                                             # the guard needs the real counts when the service reports them
+
     def attempt(view):
         for include in (True, False):
             try:
@@ -109,7 +137,22 @@ def chat_stream(provider, model, messages, *, timeout=120, max_tokens=2048, usag
                 if include and "HTTP 400" in str(error):      # some servers reject stream_options: retry without it
                     continue
                 raise
-    response = _with_account(provider, attempt)
+    try:
+        response = _with_account(provider, attempt)
+    except Exception as error:
+        quotaguard.get().fail(ticket, error)
+        raise
+    try:
+        yield from _read_stream(response, usage)
+    except Exception as error:
+        quotaguard.get().fail(ticket, error)
+        raise
+    finally:                                                   # also runs when the reader stops early: count what was spent
+        if ticket is not None and not ticket["done"]:
+            quotaguard.get().settle(ticket, (usage or {}).get("prompt_tokens"), (usage or {}).get("completion_tokens"))
+
+
+def _read_stream(response, usage):
     with response:
         for raw in response:
             line = raw.decode("utf-8", "replace").strip()

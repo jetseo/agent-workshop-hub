@@ -45,7 +45,9 @@ class CatalogTests(unittest.TestCase):
         for sid in ("openrouter", "opencode-zen", "unorouter", "huggingface"):
             self.assertEqual(by_id[sid]["free"], "suffix")                    # only -free / :free names
         self.assertEqual(by_id["zhipu"]["free_match"], ["flash"])
-        self.assertTrue(all(c["free"] in ("all", "suffix", "match") for c in CATALOG))
+        self.assertTrue(all(c["free"] in ("all", "suffix", "match", "guard") for c in CATALOG))
+        self.assertEqual(by_id["mercury"]["guard"], "inception")             # never `free: all`: its free use is gated by the quota guard
+        self.assertTrue(all(c.get("free") != "all" for c in CATALOG if c.get("guard")))
 
     def test_every_catalog_id_resolves(self):
         for c in CATALOG:
