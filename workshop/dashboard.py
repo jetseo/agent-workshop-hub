@@ -417,6 +417,7 @@ def main():
     except KeyboardInterrupt:
         pass
     finally:
+        api_ctx.code.shutdown()                       # a coding agent must not keep running after the app is closed
         api_ctx.engine.stop()                         # the built-in engine must not outlive the app
         server.server_close()
         applog.write("stop")

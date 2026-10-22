@@ -36,7 +36,7 @@ def render(terminal_state, term_token="", csrf=""):
             '<nav class="side-nav"><button data-view="settings"><i>&#9881;</i>설정</button>'
             '<button data-view="tasks"><i>&#9776;</i>작업</button><button data-view="boards"><i>&#9636;</i>보드</button>'
             '<button data-view="usage"><i>&#9645;</i>사용량</button>'
-            '<button data-view="digest"><i>&#8681;</i>압축</button>'
+            '<button data-view="digest"><i>&#8681;</i>압축</button><button data-view="code"><i>&#9998;</i>코드</button>'
             + terminal_nav +
             '</nav><div class="side-foot">로컬 전용 · 127.0.0.1</div></aside>'
             '<div id="scrim" hidden></div>'
@@ -51,6 +51,9 @@ def render(terminal_state, term_token="", csrf=""):
             'placeholder="메시지를 입력하세요" aria-label="메시지"></textarea>'
             '<button id="send" type="submit" aria-label="보내기" disabled>&#8593;</button></div>'
             '<p class="hint">Enter로 전송 · Shift+Enter로 줄바꿈 · 모델이 틀릴 수 있으니 중요한 내용은 확인하세요.<span id="usage-chip" hidden></span></p></form></div>'
+            '<div id="view-code" class="view" hidden><div class="code-work"><h2>코드 작업 <button type="button" class="help" data-help="code" aria-label="설명">?</button></h2>'
+            '<p class="sub">내 프로젝트 폴더를 고르고 할 일을 적으면, 일회용 복사본(git worktree)에서 코딩 에이전트(OpenCode)가 고칩니다. 바뀐 내용을 보고 마음에 들 때만 내 폴더에 적용합니다. 커밋·푸시는 하지 않습니다.</p>'
+            '<p id="code-env" class="sub"></p><div id="code-form"></div><h3>작업 기록</h3><div id="code-runs"></div><div id="code-detail"></div></div></div>'
             '<div id="view-digest" class="view" hidden><div class="digest"><h2>긴 글 압축</h2>'
             '<p class="sub">긴 로그·문서를 무료/로컬 모델로 먼저 줄인 뒤 유료 모델에 넘기면 토큰을 아낄 수 있습니다.</p>'
             '<p class="warn">요약은 틀리거나 내용을 빠뜨릴 수 있습니다. 오류·경로·숫자는 원문으로 다시 확인하세요.</p>'
