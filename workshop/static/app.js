@@ -650,7 +650,7 @@
         h("span", { class: "sub", text: " " + r.model + " · " + (r.stat || "") + " · " + new Date((r.started || 0) * 1000).toLocaleString() })));
     });
     if (codeOpen) renderCodeDetail(codeOpen); else $("code-detail").textContent = "";
-    var running = d.runs.some(function (r) { return r.status === "running"; });
+    var running = d.runs.some(function (r) { return r.status === "running" || (r.checks && r.checks.state === "running") || (r.review && r.review.state === "running"); });
     if (running && !codeTimer) codeTimer = setInterval(function () { if ($("view-code").hidden) return; renderCode(); }, 2000);
     if (!running && codeTimer) { clearInterval(codeTimer); codeTimer = null; }
   }
@@ -705,12 +705,36 @@
       }
       card.appendChild(box2);
     });
+    var ck = r.checks;
+    if (ck) {
+      var verdictText = { passed: "✅ 통과", failed: "❌ 실패", none: "검사할 명령이 감지되지 않았습니다", unavailable: "실행 도구가 없어 못 했습니다", notests: "실행된 테스트가 없습니다(통과로 보지 않음)", "": "진행 중…" }[ck.verdict || ""] || ck.verdict;
+      card.appendChild(h("div", { class: "code-checks" }, h("p", {}, "빌드·테스트(JetAI가 복사본에서 직접 실행): ", h("b", { text: ck.state === "running" ? "실행 중…" : verdictText })),
+        (ck.items || []).map(function (c) { return h("details", {}, h("summary", { text: ({ passed: "✓", failed: "✗", timeout: "⏱", unavailable: "—", notests: "∅" }[c.status] || "?") + " " + c.kind + " · " + c.command + " (" + c.seconds + "초)" }), h("pre", { class: "sub", text: c.output || "(출력 없음)" })); })));
+    }
+    var rv = r.review;
+    if (rv) {
+      var rvName = { ok: "✅ 문제 없어 보임", caution: "⚠ 주의", problem: "❌ 문제 있음", unknown: "판단 불가(답을 읽지 못함)" }[rv.verdict] || "";
+      var rvBox = h("div", { class: "code-review" }, h("p", {}, "코드 리뷰(" + rv.model + "): ", h("b", { text: rv.state === "running" ? "리뷰 중…" : rv.state === "failed" ? "실패: " + (rv.error || "") : rvName })));
+      if (rv.state === "done") {
+        if (rv.summary) rvBox.appendChild(h("p", { class: "sub", text: rv.summary }));
+        (rv.issues || []).forEach(function (i) { rvBox.appendChild(h("p", { class: "sub", text: "[" + i.severity + "] " + i.where + ": " + i.text })); });
+        (rv.missing || []).forEach(function (m) { rvBox.appendChild(h("p", { class: "sub", text: "빠진 것: " + m })); });
+        rvBox.appendChild(h("p", { class: "sub", text: "리뷰는 참고용입니다. 자동으로 고치거나 막지 않습니다." }));
+      }
+      card.appendChild(rvBox);
+    }
     if (r.report) card.appendChild(h("details", {}, h("summary", { text: "작업 보고서(Markdown)" }), h("pre", { class: "sub", text: r.report })));
     var row = h("div", { class: "row" });
     if (r.status === "running") row.appendChild(h("button", { type: "button", class: "btn", text: "취소", onclick: async function () { try { await api("POST", "/code/runs/" + id + "/cancel", {}); renderCode(); } catch (e) { toast(e.message); } } }));
     if (r.status === "review") row.appendChild(h("button", { type: "button", class: "btn primary", text: "변경을 내 폴더에 적용", onclick: async function () {
       if (!confirm("위 변경을 내 프로젝트 폴더에 적용할까요?\n(커밋은 하지 않습니다. 적용 후 직접 확인하고 커밋하세요.)")) return;
       try { await api("POST", "/code/runs/" + id + "/apply", { confirm: true }); toast("적용했습니다. 폴더에서 변경을 확인하세요."); renderCode(); } catch (e) { toast(e.message); } } }));
+    if (["review", "nochange", "failed"].indexOf(r.status) >= 0 && !(r.checks && r.checks.state === "running")) row.appendChild(h("button", { type: "button", class: "btn", text: r.checks ? "빌드·테스트 다시 실행" : "빌드·테스트 실행", onclick: async function () {
+      if (!confirm("이 작업의 복사본에서 프로젝트의 빌드·테스트 명령을 실행합니다(에이전트가 쓴 코드도 실행됩니다). 계속할까요?")) return;
+      try { await api("POST", "/code/runs/" + id + "/check", {}); toast("실행합니다."); renderCode(); } catch (e) { toast(e.message); } } }));
+    if (r.files && r.files.length && r.status !== "running" && !(r.review && r.review.state === "running")) row.appendChild(h("button", { type: "button", class: "btn", text: r.review ? "코드 리뷰 다시" : "코드 리뷰(다른 모델)", onclick: async function () {
+      if (!confirm("수정한 모델과 다른 무료·로컬 모델이 변경 내용(diff)을 읽고 의견을 냅니다. 클라우드 서비스라면 diff가 그 서비스로 전송됩니다. 계속할까요?")) return;
+      try { await api("POST", "/code/runs/" + id + "/review", {}); toast("리뷰를 시작했습니다."); renderCode(); } catch (e) { toast(e.message); } } }));
     if (r.status === "applied") row.appendChild(h("button", { type: "button", class: "btn", text: "적용 되돌리기", onclick: async function () {
       if (!confirm("적용했던 변경을 내 폴더에서 다시 빼낼까요?\n(적용 뒤에 같은 부분을 또 고쳤다면 되돌릴 수 없습니다.)")) return;
       try { await api("POST", "/code/runs/" + id + "/undo", { confirm: true }); toast("되돌렸습니다."); renderCode(); } catch (e) { toast(e.message); } } }));
