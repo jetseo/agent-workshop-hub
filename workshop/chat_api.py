@@ -129,6 +129,8 @@ def _code_api(ctx, method, rest, body):
                 code.cancel(run_id)
             elif action == "apply":
                 code.apply(run_id, body.get("confirm") is True)
+            elif action == "undo":
+                code.undo(run_id, body.get("confirm") is True)
             elif action == "discard":
                 code.discard(run_id)
             else:

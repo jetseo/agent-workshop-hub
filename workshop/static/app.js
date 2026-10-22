@@ -614,7 +614,7 @@
   /* ---------- code work (OpenCode in a throw-away worktree) ---------- */
   var codeTimer = null, codeOpen = "";
   function codeBadge(status) {
-    var label = { running: "실행 중", review: "검토 대기", nochange: "변경 없음", failed: "실패", cancelled: "취소됨", applied: "적용됨", discarded: "버림" }[status] || status;
+    var label = { running: "실행 중", review: "검토 대기", nochange: "변경 없음", failed: "실패", cancelled: "취소됨", applied: "적용됨", undone: "되돌림", discarded: "버림" }[status] || status;
     return h("span", { class: "code-badge st-" + status, text: label });
   }
   async function renderCode() {
@@ -696,6 +696,9 @@
     if (r.status === "review") row.appendChild(h("button", { type: "button", class: "btn primary", text: "변경을 내 폴더에 적용", onclick: async function () {
       if (!confirm("위 변경을 내 프로젝트 폴더에 적용할까요?\n(커밋은 하지 않습니다. 적용 후 직접 확인하고 커밋하세요.)")) return;
       try { await api("POST", "/code/runs/" + id + "/apply", { confirm: true }); toast("적용했습니다. 폴더에서 변경을 확인하세요."); renderCode(); } catch (e) { toast(e.message); } } }));
+    if (r.status === "applied") row.appendChild(h("button", { type: "button", class: "btn", text: "적용 되돌리기", onclick: async function () {
+      if (!confirm("적용했던 변경을 내 폴더에서 다시 빼낼까요?\n(적용 뒤에 같은 부분을 또 고쳤다면 되돌릴 수 없습니다.)")) return;
+      try { await api("POST", "/code/runs/" + id + "/undo", { confirm: true }); toast("되돌렸습니다."); renderCode(); } catch (e) { toast(e.message); } } }));
     if (r.status !== "running" && r.status !== "discarded") row.appendChild(h("button", { type: "button", class: "btn", text: r.status === "applied" ? "기록만 정리" : "버리기", onclick: async function () {
       if (r.status !== "applied" && !confirm("이 작업의 복사본과 변경을 지울까요?")) return;
       try { await api("POST", "/code/runs/" + id + "/discard", {}); renderCode(); } catch (e) { toast(e.message); } } }));

@@ -200,7 +200,7 @@ class CodeRuns:
 
     @staticmethod
     def _summary(run):
-        keys = ("id", "repo", "prompt", "model", "status", "started", "finished", "error", "files", "stat", "applied_at", "tier", "repo_was_dirty", "project")
+        keys = ("id", "repo", "prompt", "model", "status", "started", "finished", "error", "files", "stat", "applied_at", "undone_at", "tier", "repo_was_dirty", "project")
         return {k: run.get(k) for k in keys}
 
     def get(self, run_id):
@@ -445,6 +445,27 @@ class CodeRuns:
         run["status"], run["applied_at"] = "applied", self.clock()
         self._save(run)
         self._remove_worktree(run)
+
+    def undo(self, run_id, confirm):
+        """Take an applied change back out of the user's folder with the reverse patch (never touches git history)."""
+        if confirm is not True:
+            raise CodeWorkError("적용한 변경을 되돌리려면 확인이 필요합니다.")
+        run = self._read(run_id)
+        if run["status"] != "applied":
+            raise CodeWorkError("되돌릴 변경이 없습니다(적용된 작업이 아닙니다).")
+        patch = self._path(run_id) / "patch.diff"
+        if not patch.exists():
+            raise CodeWorkError("되돌릴 패치 파일이 없습니다.")
+        repo = self.check_repo(run["repo"])
+        command = ["git", "apply", "-R", "--whitespace=nowarn"]
+        check = subprocess.run(command + ["--check", str(patch)], cwd=repo, capture_output=True, text=True, stdin=subprocess.DEVNULL)
+        if check.returncode != 0:
+            raise CodeWorkError("자동으로 되돌릴 수 없습니다(적용 뒤에 같은 부분을 또 고쳤습니다). 파일을 직접 확인하세요: " + (check.stderr.strip() or check.stdout.strip())[-240:])
+        done = subprocess.run(command + [str(patch)], cwd=repo, capture_output=True, text=True, stdin=subprocess.DEVNULL)
+        if done.returncode != 0:
+            raise CodeWorkError("되돌리지 못했습니다: " + (done.stderr.strip() or done.stdout.strip())[-240:])
+        run["status"], run["undone_at"] = "undone", self.clock()
+        self._save(run)
 
     def discard(self, run_id):
         run = self._read(run_id)
