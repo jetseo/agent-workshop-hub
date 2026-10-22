@@ -59,6 +59,12 @@ body.side-closed #side-open{display:inline-flex}
 .help-tabs{display:flex;gap:6px;flex-wrap:wrap;margin-top:12px}.btn.mini{padding:4px 10px;font-size:12.5px;border-radius:999px}.btn.mini.on{border-color:var(--accent);color:var(--accent)}
 .recs{margin:6px 0 10px}.rec-row{display:flex;align-items:center;gap:8px;padding:7px 4px;border-bottom:1px solid var(--border);font-size:14px}.rec-name{font-weight:600}.rec-cap{color:var(--muted);font-size:12.5px;flex:1}
 .all-models{margin:8px 0}.all-models summary{cursor:pointer;color:var(--muted);font-size:13.5px;margin-bottom:6px}
+.code-work{max-width:860px;margin:0 auto;padding:24px 18px}.code-work textarea,.code-work input[type=text],.code-work select{width:100%;padding:9px;border:1px solid var(--border);border-radius:10px;background:var(--bg);color:var(--fg);font:inherit}
+.code-run{padding:9px 10px;border:1px solid var(--border);border-radius:12px;margin:6px 0;cursor:pointer}.code-run.open{border-color:var(--accent)}
+.code-badge{font-size:12px;padding:2px 8px;border-radius:999px;border:1px solid var(--border);margin:0 6px}.st-running{color:var(--accent)}.st-review{color:#e0a100}.st-failed{color:#e5484d}.st-applied{color:#30a46c}
+.code-card{margin-top:12px;padding:12px;border:1px solid var(--border);border-radius:14px}.code-activity{font:12.5px/1.5 ui-monospace,Consolas,monospace;background:var(--bg3);border-radius:8px;padding:8px;margin:8px 0;max-height:170px;overflow:auto}
+.code-files{margin:6px 0 10px 18px;padding:0;font:13px ui-monospace,Consolas,monospace}
+.diff{font:12.5px/1.45 ui-monospace,Consolas,monospace;background:var(--bg3);border-radius:8px;padding:6px 0;max-height:60vh;overflow:auto;white-space:pre}.dl{padding:0 10px}.dl-add{background:rgba(48,164,108,.18)}.dl-del{background:rgba(229,72,77,.18)}.dl-hunk{color:var(--muted)}.dl-file{font-weight:700;margin-top:6px}
 .rem-steps{margin:6px 0 10px 18px;padding:0;font-size:13.5px;color:var(--muted)}.rem-code{font:600 22px/1.4 ui-monospace,Consolas,monospace;letter-spacing:.06em;background:var(--bg3);border-radius:10px;padding:8px 12px;display:inline-block}
 #set-remote .warn{font-size:13px}
 .eng-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:7px 0;border-bottom:1px solid var(--border)}.eng-row .sub{flex:1;min-width:160px;font-size:12.5px}

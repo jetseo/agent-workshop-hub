@@ -32,15 +32,40 @@ def _nvm_opencode():
     found = [p for p in base.glob("*/bin/opencode") if p.is_file() and os.access(p, os.X_OK)]
     return str(max(found, key=version_key)) if found else None
 
+def windows_opencode_exe(shim=None):
+    """The real opencode.exe behind npm's `opencode.cmd` shim (native Windows only), or None.
+
+    Running the .cmd shim would pass the prompt through cmd.exe, whose quoting is unsafe for arbitrary text;
+    the package ships a real executable next to it, which is started directly with an argument list.
+    """
+    shim = shim or shutil.which("opencode")
+    if not shim:
+        return None
+    path = Path(shim)
+    if path.suffix.lower() == ".exe":
+        return str(path)
+    package = path.parent / "node_modules" / "opencode-ai"
+    candidates = [package / "bin" / "opencode.exe"]
+    candidates += sorted((package / "node_modules").glob("opencode-windows-x64*/bin/opencode.exe")) if (package / "node_modules").is_dir() else []
+    for candidate in candidates:
+        if candidate.is_file():
+            return str(candidate)
+    return None
+
+
 def find_opencode():
     """Path of a Linux/native opencode, or None.
 
     Under WSL, the Windows PATH exposes Windows installs (/mnt/c/.../opencode.exe). Running those
     from a Linux cwd hangs or mangles arguments and uses Windows credentials, so they are refused
     unless WORKSHOP_ALLOW_WINDOWS_OPENCODE=1. A native install under nvm is found even when the
-    current shell has not loaded nvm.
+    current shell has not loaded nvm. On native Windows the real opencode.exe of the npm install is used.
     """
     binary = shutil.which("opencode")
+    if os.name == "nt" and binary and not binary.startswith("/mnt/"):       # /mnt/... is a Windows install seen from WSL: still refused
+        real = windows_opencode_exe(binary)
+        if real:
+            return real
     if binary and not binary.startswith("/mnt/"):
         return binary
     native = _nvm_opencode()

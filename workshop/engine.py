@@ -449,8 +449,8 @@ class Engine:
         while time.time() < deadline and proc.poll() is None:
             if self.health_fn(port):
                 if self._proc is proc:
-                    self._ready = True
-                    self._register(port, model)
+                    self._register(port, model)          # first make it a usable service ...
+                    self._ready = True                   # ... then say it is ready (never "ready" without the service)
                 return
             time.sleep(0.5)
 

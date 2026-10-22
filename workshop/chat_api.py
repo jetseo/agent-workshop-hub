@@ -14,6 +14,7 @@ from .explain import explain
 from .chat import chat, chat_stream, list_models
 from .chat_store import DEFAULT_TITLE, CHAT_ID, ChatStore
 from . import arbiter, router
+from .codework import CodeRuns, CodeWorkError
 from .engine import Engine, EngineError
 from .modelinfo import ModelInfo
 from .modelwatch import ModelWatch
@@ -61,6 +62,9 @@ class Context:
         self.watch = ModelWatch(providers, list_fn, info=self.info)
         self.feed = ServiceFeed(providers.path.parent / "service-feed.json", builtin=setup_page.CATALOG)
         setup_page.set_extra(self.feed.catalog_entries())             # services found earlier by the daily list
+        self.code = CodeRuns(providers)                              # coding agent (OpenCode) in throw-away worktrees
+
+
         self.remote = RemoteControl(self)                            # phone control; the server attaches the job queue and starts it
         self.engine = Engine(providers.path.parent / "engine", providers)      # built-in local engine (llama.cpp), off until installed
         self.active = set()
@@ -102,6 +106,37 @@ def open_external(ctx, url):
         raise ApiError(400, "열 수 없는 주소입니다.")
     ctx.open_url_fn(url)
     return {"ok": True}
+
+
+def _code_api(ctx, method, rest, body):
+    """Code work (OpenCode in a throw-away worktree). Starting and applying always need an explicit request."""
+    code = ctx.code
+    try:
+        if not rest and method == "GET":
+            runs = code.list()
+            repos = []
+            for run in runs:
+                if run["repo"] not in repos:
+                    repos.append(run["repo"])
+            return {"environment": code.environment(), "models": code.model_options(), "runs": runs, "repos": repos[:8]}
+        if rest == ["start"] and method == "POST":
+            return code.start(body.get("repo"), body.get("prompt"), body.get("model") or "auto", body.get("confirm_cost") is True)
+        if len(rest) == 2 and rest[0] == "runs" and method == "GET":
+            return code.get(rest[1])
+        if len(rest) == 3 and rest[0] == "runs" and method == "POST":
+            run_id, action = rest[1], rest[2]
+            if action == "cancel":
+                code.cancel(run_id)
+            elif action == "apply":
+                code.apply(run_id, body.get("confirm") is True)
+            elif action == "discard":
+                code.discard(run_id)
+            else:
+                raise LookupError("Unknown code route")
+            return code.get(run_id)
+    except CodeWorkError as error:
+        raise ApiError(400, str(error))
+    raise LookupError("Unknown code route")
 
 
 def _remote_api(ctx, method, rest, body):
@@ -445,6 +480,10 @@ def dispatch(ctx, method, path, body):
             if len(keys) != 1 or not isinstance(body[keys[0]], bool):
                 raise ApiError(400, "잘못된 설정입니다.")
             return Json(200, {"settings": ctx.watch.set_setting(keys[0], body[keys[0]])})
+        if parts and parts[0] == "code":
+            return Json(200, _code_api(ctx, method, parts[1:], body))
+
+
         if parts and parts[0] == "remote":
             return Json(200, _remote_api(ctx, method, parts[1:], body))
         if parts and parts[0] == "engine":
