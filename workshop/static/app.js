@@ -691,6 +691,20 @@
     }
     if (r.patch) card.appendChild(diffView(r.patch));
     if (r.patch_truncated) card.appendChild(h("p", { class: "sub", text: "(diff가 길어 앞부분만 보입니다. 적용하면 전체가 적용됩니다.)" }));
+    (r.blocked || []).forEach(function (b) {
+      var box2 = h("div", { class: "code-blocked" }, h("p", {}, "🚫 막힌 명령: ", h("code", { text: b.command })),
+        h("p", { class: "sub", text: b.state !== "open" ? ({ once: "이번만 허용함", always: "이 프로젝트에서 항상 허용함", declined: "거절함" }[b.state] || b.state) : (b.level === "never" ? "허용할 수 없는 명령입니다: " + b.note : b.level === "once" ? b.note : "이 명령을 허용하면 같은 복사본에서 이어서 작업합니다.") }));
+      if (b.state === "open" && b.level !== "never" && r.status !== "running") {
+        var answer = function (decision, ask) { return async function () {
+          if (ask && !confirm(ask)) return;
+          try { await api("POST", "/code/runs/" + id + "/command", { id: b.id, decision: decision }); toast(decision === "decline" ? "거절했습니다." : "허용하고 이어서 실행합니다."); renderCode(); } catch (e) { toast(e.message); } }; };
+        var actions = h("div", { class: "row" }, h("button", { type: "button", class: "btn", text: "이번만 허용", onclick: answer("once", "이 명령을 이번 한 번만 허용하고 이어서 실행할까요?\n" + b.command) }));
+        if (b.level === "normal") actions.appendChild(h("button", { type: "button", class: "btn", text: "이 프로젝트에서 항상 허용", onclick: answer("always", "이 프로젝트에서 이 명령을 항상 허용할까요?\n" + b.command) }));
+        actions.appendChild(h("button", { type: "button", class: "btn", text: "거절", onclick: answer("decline") }));
+        box2.appendChild(actions);
+      }
+      card.appendChild(box2);
+    });
     if (r.report) card.appendChild(h("details", {}, h("summary", { text: "작업 보고서(Markdown)" }), h("pre", { class: "sub", text: r.report })));
     var row = h("div", { class: "row" });
     if (r.status === "running") row.appendChild(h("button", { type: "button", class: "btn", text: "취소", onclick: async function () { try { await api("POST", "/code/runs/" + id + "/cancel", {}); renderCode(); } catch (e) { toast(e.message); } } }));

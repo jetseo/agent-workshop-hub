@@ -85,6 +85,11 @@ def build(run, events_path):
               "## 에이전트가 한 일", "- 도구 호출 %d회(오류 %d회): %s" % (events["tool_calls"], events["tool_errors"],
                                                               ", ".join("%s %d" % kv for kv in sorted(events["tools"].items())) or "-")]
     lines += ["- 마지막 활동:"] + ["  - " + mask(line)[:200] for line in (run.get("activity") or [])[-10:]]
+    lines += ["", "## 막힌 명령과 승인"]
+    blocked = run.get("blocked") or []
+    names = {"open": "결정 안 함", "once": "이번만 허용", "always": "이 프로젝트에서 항상 허용", "declined": "거절"}
+    lines += ["- `%s` — %s%s" % (mask(b["command"]), names.get(b["state"], b["state"]), "" if b["level"] == "normal" else " (" + b["note"] + ")")
+              for b in blocked] or ["- 막힌 명령 없음"]
     lines += ["", "## 바뀐 파일 (%s)" % (run.get("stat") or "없음")]
     kinds = {"A": "추가", "M": "수정", "D": "삭제", "R": "이름변경"}
     lines += ["- %s `%s` %s" % (kinds.get(f.get("status"), f.get("status")), f["path"], "(바이너리)" if f.get("binary") else "+%d −%d" % (f["added"], f["deleted"])) for f in files] or ["- 없음"]

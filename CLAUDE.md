@@ -20,7 +20,7 @@ Everything below is on `main`; "verified" levels are recorded per item in `docs/
 - Launchers: `jetai.ps1`, `JetAI.exe` (built by `scripts/build-exe.ps1`), portable package (`scripts/build-package.ps1`), WSL scripts, diagnostics (`diagnostics.py`, `doctor.py`, `preflight.py`).
 
 ## Next tasks (see the plan for details and acceptance criteria)
-P0 in the plan: (1) agent evaluation harness, (2) built-in engine 7B Coder tool-call test (needs the user's OK for a ~4.7 GB download), (3) approval for blocked/dangerous commands, (4) undo of an applied change, (5) Markdown report + metrics per code run, (6) DONE project reading (`workshop/projectmap.py`), (7) DONE: `docs/subscription-tools.md` — Codex / Claude Code stay disconnected (no verified permission; API keys are paid).
+P0 status: DONE (4) undo, (5) report + metrics, (6) project reading, (7) subscription research (`docs/subscription-tools.md`: Codex / Claude Code stay disconnected), (3) blocked-command approval (`cmdguard.py`, PR #25; mock-tested only). Skeleton DONE for (1) evaluation harness (`workshop/agenteval.py`) but **no real model has been measured yet**. Open: (2) 7B Coder tool-call test in the built-in engine (needs the user's OK for a ~4.7 GB download). Then P1 in the plan (goal-input orchestrator, JetAI-run build/test, review stage, work-branch commit).
 
 ## Essential safety and design constraints
 - No automatic paid API calls, credentials overwrite, model downloads without the user's confirmed size, destructive installation, or automatic merges. Existing subscriptions (Codex, Claude Code, OpenAI login, OpenCode Zen key) must not be used by automation unless verified and explicitly confirmed.

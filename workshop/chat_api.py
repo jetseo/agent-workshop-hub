@@ -121,6 +121,10 @@ def _code_api(ctx, method, rest, body):
             return {"environment": code.environment(), "models": code.model_options(), "runs": runs, "repos": repos[:8]}
         if rest == ["start"] and method == "POST":
             return code.start(body.get("repo"), body.get("prompt"), body.get("model") or "auto", body.get("confirm_cost") is True)
+        if rest == ["rules", "remove"] and method == "POST":
+            repo = code.check_repo(body.get("repo"))
+            code.rules.remove(repo, str(body.get("command") or ""))
+            return {"rules": code.rules.get(repo)}
         if len(rest) == 2 and rest[0] == "runs" and method == "GET":
             return code.get(rest[1])
         if len(rest) == 3 and rest[0] == "runs" and method == "POST":
@@ -129,6 +133,8 @@ def _code_api(ctx, method, rest, body):
                 code.cancel(run_id)
             elif action == "apply":
                 code.apply(run_id, body.get("confirm") is True)
+            elif action == "command":
+                code.decide(run_id, body.get("id"), body.get("decision"))
             elif action == "undo":
                 code.undo(run_id, body.get("confirm") is True)
             elif action == "discard":
