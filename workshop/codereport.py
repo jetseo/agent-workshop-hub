@@ -79,7 +79,7 @@ def build(run, events_path):
     if run.get("undone_at"):
         lines.append("- 적용을 되돌림: " + _stamp(run["undone_at"]))
     lines += ["", "## 모델·비용", "- 모델: `%s` (구분: %s, %s)" % (run.get("model"), run.get("tier"), metrics["cost"]),
-             "- 방식: " + ("직접 모드" + (" (시도 %d회 중 선택)" % run["attempts"] if (run.get("attempts") or 1) > 1 else "") if run.get("mode") == "direct" else "에이전트(OpenCode)"),
+             "- 방식: " + ("직접 모드" + (" (시도 %d회 중 선택)" % run["attempts"] if (run.get("attempts") or 1) > 1 else "") + (" · 모델 번갈아: " + ", ".join(run["models"]) if run.get("models") else "") if run.get("mode") == "direct" else "에이전트(OpenCode)"),
              "- 작업 지침: " + {"off": "사용 안 함", "short": "짧은 지침", "full": "전체 지침"}.get(run.get("guidance") or "off", "사용 안 함")]
     t = events["tokens"]
     lines.append("- 토큰: " + ("입력 %d / 출력 %d" % (t["input"], t["output"]) if t else "실행기가 알려 주지 않음(기록 없음)"))

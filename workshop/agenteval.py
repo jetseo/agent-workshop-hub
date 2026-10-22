@@ -251,10 +251,10 @@ def score(task, run):
             "changed": sorted(changed), "extra_tests": sorted(extra_tests)}
 
 
-def run_task(runs, task, model, workdir, wait=1200, sleep=time.sleep, clock=time.time, guidance=None, label=None, mode="agent", attempts=1):
+def run_task(runs, task, model, workdir, wait=1200, sleep=time.sleep, clock=time.time, guidance=None, label=None, mode="agent", attempts=1, extra_models=None):
     repo = build_repo(task, workdir)
     began = clock()
-    run_id = runs.start(str(repo), task.prompt, model, False, guidance, mode, True, attempts)["id"]
+    run_id = runs.start(str(repo), task.prompt, model, False, guidance, mode, True, attempts, extra_models)["id"]
     cancelled = False
     while runs.get(run_id)["status"] == "running":
         if not cancelled and clock() - began > wait:
@@ -281,8 +281,16 @@ GUIDANCE_VARIANTS = {"default": [("", None)], "on": [(" [지침 있음]", True)]
                      "both": [(" [지침 없음]", False), (" [지침 있음]", True)]}
 
 
-def evaluate(runs, models, task_ids=None, guidance="default", mode="agent", attempts=1, **kwargs):
+def evaluate(runs, models, task_ids=None, guidance="default", mode="agent", attempts=1, mix=False, **kwargs):
     chosen = [t for t in TASKS if not task_ids or t.id in task_ids]
+    if mix and len(models) > 1:                                        # one pool: the tries take turns across these models
+        results = []
+        label = "+".join(models)
+        with tempfile.TemporaryDirectory(prefix="jetai-eval-") as tmp:
+            for task in chosen:
+                results.append(run_task(runs, task, models[0], Path(tmp) / ("mix-" + task.id), guidance=None, label=label + " [직접 모드·번갈아 %d회]" % attempts,
+                                        mode="direct", attempts=attempts, extra_models=models[1:], **kwargs))
+        return results
     results = []
     with tempfile.TemporaryDirectory(prefix="jetai-eval-") as tmp:
         for number, model in enumerate(models):
@@ -315,13 +323,14 @@ def main(argv=None):
                         help="작업 지침: on/off, both는 같은 모델·작업을 지침 없음/있음으로 둘 다 실행해 비교, default는 설정을 따름")
     parser.add_argument("--mode", choices=("agent", "direct"), default="agent", help="agent: OpenCode 에이전트, direct: JetAI가 단계를 진행하는 직접 모드(도구 호출 불필요)")
     parser.add_argument("--attempts", type=int, default=1, help="직접 모드에서 작업당 최대 시도 횟수(1~5): 테스트가 통과하는 첫 시도에서 멈춤")
+    parser.add_argument("--mix", action="store_true", help="여러 --model을 한 묶음으로: 시도(--attempts)마다 모델을 번갈아 씀(직접 모드)")
     parser.add_argument("--out", help="결과 표를 쓸 Markdown 파일")
     args = parser.parse_args(argv)
     from .codework import CodeRuns
     from .providers import Providers
     runs = CodeRuns(Providers())
     try:
-        results = evaluate(runs, args.model, args.tasks.split(",") if args.tasks else None, guidance=args.guidance, mode=args.mode, attempts=args.attempts)
+        results = evaluate(runs, args.model, args.tasks.split(",") if args.tasks else None, guidance=args.guidance, mode=args.mode, attempts=args.attempts, mix=args.mix)
     finally:
         runs.shutdown()
     text = table(results)
