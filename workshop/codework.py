@@ -25,7 +25,7 @@ import time
 import uuid
 from pathlib import Path
 
-from . import adapters, codereport, modelpick, projectmap, usage, worktree
+from . import adapters, cmdguard, codereport, modelpick, projectmap, usage, worktree
 
 MAX_PROMPT = 8000
 MAX_RUNTIME = 20 * 60
@@ -73,11 +73,11 @@ def clean_environment(base_env, opencode_home, config_json, key=None):
     return env
 
 
-def build_config(model_ref, provider=None):
+def build_config(model_ref, provider=None, extra_allow=()):
     """OpenCode config (passed as JSON in an environment variable, so no file is written into the repository)."""
     config = {"$schema": "https://opencode.ai/config.json", "autoupdate": False, "share": "disabled",
               "permission": {"edit": "allow", "webfetch": "deny", "external_directory": "deny", "doom_loop": "deny",
-                             "bash": {"*": "deny", **{pattern: "allow" for pattern in BASH_ALLOW}}}}
+                             "bash": {"*": "deny", **{pattern: "allow" for pattern in [*BASH_ALLOW, *extra_allow]}}}}
     if provider is not None:
         name = model_ref.split("/", 1)[1]
         options = {"baseURL": provider["base_url"]}
@@ -88,8 +88,11 @@ def build_config(model_ref, provider=None):
     return json.dumps(config, ensure_ascii=False)
 
 
-def opencode_command(binary, model_arg, prompt):
-    return [binary, "run", "--pure", "--format", "json", "-m", model_arg, prompt]
+def opencode_command(binary, model_arg, prompt, session=None):
+    command = [binary, "run", "--pure", "--format", "json", "-m", model_arg]
+    if session:
+        command += ["-s", session]                                       # carry on in the same conversation after an approval
+    return command + [prompt]
 
 
 def _git_bytes(*args, cwd):
@@ -143,6 +146,7 @@ class CodeRuns:
         self.worktree_base = Path(worktree_base) if worktree_base else self.home / "worktrees"
         self.find_binary, self.popen, self.clock, self.max_runtime = find_binary, popen, clock, max_runtime
         self.info = info
+        self.rules = cmdguard.ProjectRules(self.home / "command-rules.json")
         self._lock = threading.RLock()
         self._procs = {}
         self._threads = {}
@@ -201,7 +205,7 @@ class CodeRuns:
 
     @staticmethod
     def _summary(run):
-        keys = ("id", "repo", "prompt", "model", "status", "started", "finished", "error", "files", "stat", "applied_at", "undone_at", "tier", "repo_was_dirty", "project")
+        keys = ("id", "repo", "prompt", "model", "status", "started", "finished", "error", "files", "stat", "applied_at", "undone_at", "tier", "repo_was_dirty", "project", "blocked", "approvals")
         return {k: run.get(k) for k in keys}
 
     @staticmethod
@@ -325,9 +329,10 @@ class CodeRuns:
             dirty = bool(worktree._git("status", "--porcelain", cwd=repo, check=False).strip())
             run = {"id": run_id, "repo": str(repo), "prompt": prompt.strip(), "model": model_ref, "tier": tier, "status": "running",
                    "started": self.clock(), "finished": None, "error": "", "worktree": str(path), "branch": branch, "base": base_commit,
-                   "files": [], "stat": "", "activity": [], "repo_was_dirty": dirty}
+                   "files": [], "stat": "", "activity": [], "repo_was_dirty": dirty,
+                   "cost_ok": confirm_cost is True, "session": "", "once_allow": [], "blocked": [], "approvals": []}
             self._save(run)
-            config = build_config(model_ref, provider)
+            config = build_config(model_ref, provider, self.rules.get(repo))
             env = clean_environment(os.environ, self.opencode_home, config, key=(provider or {}).get("api_key"))
             try:
                 run["project"] = projectmap.render(projectmap.read_project(path))
@@ -363,7 +368,10 @@ class CodeRuns:
                     if size <= MAX_EVENTS_FILE:
                         events.write(raw)
                     try:
-                        line = summarise(json.loads(raw.decode("utf-8", "replace")))
+                        parsed = json.loads(raw.decode("utf-8", "replace"))
+                        if isinstance(parsed, dict) and isinstance(parsed.get("sessionID"), str) and not run.get("session"):
+                            run["session"] = parsed["sessionID"][:80]
+                        line = summarise(parsed)
                     except ValueError:
                         line = raw.decode("utf-8", "replace").strip()[:200] or None
                     if line:
@@ -395,6 +403,7 @@ class CodeRuns:
         elif code not in (0, None):
             run["status"], run["error"] = "failed", "OpenCode가 오류로 끝났습니다(종료 코드 %s)." % code
         self._collect(run, keep_status=run["status"] in ("cancelled", "failed"))
+        self._note_blocked(run)
         self._save(run)
 
     def _collect(self, run, keep_status):
@@ -461,6 +470,74 @@ class CodeRuns:
         run["status"], run["applied_at"] = "applied", self.clock()
         self._save(run)
         self._remove_worktree(run)
+
+    # -- command approval ---------------------------------------------------------------------------------------
+    def _allowed_patterns(self, run):
+        return [*BASH_ALLOW, *self.rules.get(run["repo"]), *run.get("once_allow", [])]
+
+    def _note_blocked(self, run):
+        """List shell commands the agent tried that the deny-by-default rule blocked, with how risky each is."""
+        try:
+            known = [b["command"] for b in run.get("blocked", [])]
+            for command in cmdguard.find_blocked(self._path(run["id"]) / "events.jsonl", self._allowed_patterns(run), known):
+                level, note = cmdguard.classify(command)
+                run.setdefault("blocked", []).append({"id": len(run.get("blocked", [])) + 1, "command": command[:cmdguard.MAX_COMMAND],
+                                                       "level": level, "note": note, "state": "open"})
+        except OSError:
+            pass
+
+    def decide(self, run_id, item_id, decision):
+        """Answer one blocked command: "once" / "always" (this project) / "decline". Allowed ones continue the same work in the same copy."""
+        if decision not in ("once", "always", "decline"):
+            raise CodeWorkError("허용(이번만/항상) 또는 거절 중에서 고르세요.")
+        with self._lock:
+            run = self._read(run_id)
+            if run["status"] not in ("review", "nochange", "failed"):
+                raise CodeWorkError("지금은 명령을 승인할 수 없는 상태입니다.")
+            if any(t.is_alive() for t in self._threads.values()):
+                raise CodeWorkError("다른 코드 작업이 실행 중입니다. 끝나거나 취소한 뒤 승인하세요.")
+            item = next((b for b in run.get("blocked", []) if b["id"] == item_id and b["state"] == "open"), None)
+            if item is None:
+                raise CodeWorkError("처리할 수 있는 막힌 명령이 아닙니다.")
+            if decision == "decline":
+                item["state"] = "declined"
+                run["approvals"].append({"command": item["command"], "decision": "declined", "at": self.clock()})
+                self._save(run)
+                return
+            level, note = cmdguard.classify(item["command"])
+            if level == "never":
+                raise CodeWorkError("이 명령은 허용할 수 없습니다: " + note)
+            if decision == "always":
+                if level != "normal":
+                    raise CodeWorkError("이 종류의 명령은 이번만 허용할 수 있습니다.")
+                try:
+                    self.rules.add(run["repo"], item["command"])
+                except ValueError as error:
+                    raise CodeWorkError(str(error)) from None
+            else:
+                run.setdefault("once_allow", []).append(item["command"])
+            item["state"] = decision
+            run["approvals"].append({"command": item["command"], "decision": decision, "at": self.clock()})
+            binary = self.find_binary()
+            if not binary:
+                raise CodeWorkError("OpenCode를 찾지 못했습니다.")
+            if not Path(run["worktree"]).exists():
+                raise CodeWorkError("작업용 복사본이 없어 이어서 실행할 수 없습니다. 새 작업으로 다시 시작하세요.")
+            model_arg, provider, _tier = self._resolve_model(run["model"], run.get("cost_ok") is True)
+            config = build_config(run["model"], provider, [*self.rules.get(run["repo"]), *run.get("once_allow", [])])
+            env = clean_environment(os.environ, self.opencode_home, config, key=(provider or {}).get("api_key"))
+            prompt = "허용된 명령: `%s`. 이 명령을 사용해 원래 요청을 이어서 끝내세요." % item["command"]
+            command = self._resume_command(binary, model_arg, prompt, run.get("session") or None)
+            run["status"], run["finished"], run["error"] = "running", None, ""
+            self._cancel_flags.pop(run_id, None)
+            self._timed_out.discard(run_id)
+            self._save(run)
+            thread = threading.Thread(target=self._run, args=(run, command, env), name="code-" + run_id, daemon=True)
+            self._threads[run_id] = thread
+            thread.start()
+
+    def _resume_command(self, binary, model_arg, prompt, session):
+        return self.command_fn(binary, model_arg, prompt, session=session) if session else self.command_fn(binary, model_arg, prompt)
 
     def undo(self, run_id, confirm):
         """Take an applied change back out of the user's folder with the reverse patch (never touches git history)."""
