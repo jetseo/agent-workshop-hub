@@ -698,10 +698,8 @@
         var answer = function (decision, ask) { return async function () {
           if (ask && !confirm(ask)) return;
           try { await api("POST", "/code/runs/" + id + "/command", { id: b.id, decision: decision }); toast(decision === "decline" ? "거절했습니다." : "허용하고 이어서 실행합니다."); renderCode(); } catch (e) { toast(e.message); } }; };
-        var actions = h("div", { class: "row" }, h("button", { type: "button", class: "btn", text: "이번만 허용", onclick: answer("once", "이 명령을 이번 한 번만 허용하고 이어서 실행할까요?
-" + b.command) }));
-        if (b.level === "normal") actions.appendChild(h("button", { type: "button", class: "btn", text: "이 프로젝트에서 항상 허용", onclick: answer("always", "이 프로젝트에서 이 명령을 항상 허용할까요?
-" + b.command) }));
+        var actions = h("div", { class: "row" }, h("button", { type: "button", class: "btn", text: "이번만 허용", onclick: answer("once", "이 명령을 이번 한 번만 허용하고 이어서 실행할까요?\n" + b.command) }));
+        if (b.level === "normal") actions.appendChild(h("button", { type: "button", class: "btn", text: "이 프로젝트에서 항상 허용", onclick: answer("always", "이 프로젝트에서 이 명령을 항상 허용할까요?\n" + b.command) }));
         actions.appendChild(h("button", { type: "button", class: "btn", text: "거절", onclick: answer("decline") }));
         box2.appendChild(actions);
       }
