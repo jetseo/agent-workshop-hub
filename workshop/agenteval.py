@@ -117,6 +117,43 @@ ROMAN_TESTS = (
     "        self.assertEqual(to_roman(1994), 'MCMXCIV')\n")
 
 
+LRU_TESTS = (
+    "import unittest\nfrom cache import LRUCache\n\n\nclass LRUTests(unittest.TestCase):\n"
+    "    def test_basic(self):\n"
+    "        c = LRUCache(2)\n        c.put('a', 1)\n        c.put('b', 2)\n        self.assertEqual(c.get('a'), 1)\n"
+    "        c.put('c', 3)\n        self.assertIsNone(c.get('b'))\n        self.assertEqual(c.get('a'), 1)\n        self.assertEqual(c.get('c'), 3)\n\n"
+    "    def test_update_refreshes(self):\n"
+    "        c = LRUCache(2)\n        c.put('a', 1)\n        c.put('b', 2)\n        c.put('a', 10)\n        c.put('c', 3)\n"
+    "        self.assertIsNone(c.get('b'))\n        self.assertEqual(c.get('a'), 10)\n\n"
+    "    def test_missing_and_capacity_one(self):\n"
+    "        c = LRUCache(1)\n        self.assertIsNone(c.get('x'))\n        c.put('a', 1)\n        c.put('b', 2)\n"
+    "        self.assertIsNone(c.get('a'))\n        self.assertEqual(c.get('b'), 2)\n")
+CSV_TESTS = (
+    "import unittest\nfrom csvline import parse_line\n\n\nclass CsvTests(unittest.TestCase):\n"
+    "    def test_cases(self):\n"
+    "        self.assertEqual(parse_line('a,b,c'), ['a', 'b', 'c'])\n"
+    "        self.assertEqual(parse_line('a,,c'), ['a', '', 'c'])\n"
+    "        self.assertEqual(parse_line('\"a,b\",c'), ['a,b', 'c'])\n"
+    "        self.assertEqual(parse_line('\"say \"\"hi\"\"\",x'), ['say \"hi\"', 'x'])\n"
+    "        self.assertEqual(parse_line(''), [''])\n"
+    "        self.assertEqual(parse_line('a,'), ['a', ''])\n")
+REPORT_TESTS = (
+    "import unittest\nfrom shapes import Circle, Rect\nfrom report import describe\n\n\nclass ReportTests(unittest.TestCase):\n"
+    "    def test_area(self):\n"
+    "        self.assertEqual(Rect(2, 3).area(), 6)\n"
+    "        self.assertAlmostEqual(Circle(1).area(), 3.14159, places=3)\n\n"
+    "    def test_describe(self):\n"
+    "        self.assertEqual(describe(Rect(2, 3)), 'Rect with area 6.00')\n"
+    "        self.assertEqual(describe(Circle(2)), 'Circle with area 12.57')\n")
+WORDS_TESTS = (
+    "import unittest\nfrom words import word_count\n\n\nclass WordTests(unittest.TestCase):\n"
+    "    def test_cases(self):\n"
+    "        self.assertEqual(word_count('the cat The dog'), {'the': 2, 'cat': 1, 'dog': 1})\n"
+    "        self.assertEqual(word_count('Hello, world! hello.'), {'hello': 2, 'world': 1})\n"
+    "        self.assertEqual(word_count('  spaced   out  '), {'spaced': 1, 'out': 1})\n"
+    "        self.assertEqual(word_count(''), {})\n")
+
+
 def _tests_pass_and_untouched(test_file, original):
     def check(path):
         if (path / test_file).read_text(encoding="utf-8", errors="replace").replace("\r\n", "\n") != original:
@@ -152,7 +189,23 @@ TASKS = [
     Task("roman", "테스트를 보고 구현(로마 숫자)", "roman.py의 to_roman을 구현해서 tests/test_roman.py가 통과하게 해 주세요. 테스트 파일은 고치지 마세요.",
          {"roman.py": "def to_roman(number):\n    raise NotImplementedError\n", "tests/test_roman.py": ROMAN_TESTS},
          _tests_pass_and_untouched("tests/test_roman.py", ROMAN_TESTS), allowed={"roman.py"}),
+    Task("lru-cache", "클래스 구현(LRU 캐시)", "cache.py의 LRUCache 클래스를 구현해서 tests/test_cache.py가 통과하게 해 주세요. 테스트 파일은 고치지 마세요.",
+         {"cache.py": "class LRUCache:\n    def __init__(self, capacity):\n        raise NotImplementedError\n\n    def get(self, key):\n        raise NotImplementedError\n\n    def put(self, key, value):\n        raise NotImplementedError\n",
+          "tests/test_cache.py": LRU_TESTS},
+         _tests_pass_and_untouched("tests/test_cache.py", LRU_TESTS), allowed={"cache.py"}),
+    Task("csv-line", "까다로운 파싱(따옴표 CSV 한 줄)", "csvline.py의 parse_line을 구현해서 tests/test_csvline.py가 통과하게 해 주세요. 테스트 파일은 고치지 마세요.",
+         {"csvline.py": "def parse_line(line):\n    raise NotImplementedError\n", "tests/test_csvline.py": CSV_TESTS},
+         _tests_pass_and_untouched("tests/test_csvline.py", CSV_TESTS), allowed={"csvline.py"}),
+    Task("two-files", "두 파일을 함께 고치기", "shapes.py의 Circle과 Rect에 area() 메서드를 추가하고, report.py의 describe가 그것을 써서 tests/test_report.py가 통과하게 해 주세요. 테스트 파일은 고치지 마세요.",
+         {"shapes.py": "class Circle:\n    def __init__(self, r):\n        self.r = r\n\n\nclass Rect:\n    def __init__(self, w, h):\n        self.w = w\n        self.h = h\n",
+          "report.py": "def describe(shape):\n    raise NotImplementedError\n", "tests/test_report.py": REPORT_TESTS},
+         _tests_pass_and_untouched("tests/test_report.py", REPORT_TESTS), allowed={"shapes.py", "report.py"}),
+    Task("word-count", "테스트를 보고 버그 고치기(단어 세기)", "words.py의 word_count가 테스트와 다르게 동작합니다. tests/test_words.py가 통과하게 고쳐 주세요. 테스트 파일은 고치지 마세요.",
+         {"words.py": "def word_count(text):\n    counts = {}\n    for word in text.split(' '):\n        counts[word] = counts.get(word, 0) + 1\n    return counts\n",
+          "tests/test_words.py": WORDS_TESTS},
+         _tests_pass_and_untouched("tests/test_words.py", WORDS_TESTS), allowed={"words.py"}),
 ]
+HARD_TASK_IDS = ["slugify", "merge-intervals", "roman", "lru-cache", "csv-line", "two-files", "word-count"]
 TASK_IDS = [t.id for t in TASKS]
 
 

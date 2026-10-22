@@ -17,6 +17,10 @@ from pathlib import Path
 from . import projectmap
 
 MAX_FILES = 3
+# Answer budgets are ceilings, not costs. Reasoning ('thinking') models spend several hundred tokens before the answer:
+# with a small ceiling their answer comes back empty (measured with gemma4:12b: ~800 tokens of thinking for a one-line reply).
+LOCALIZE_TOKENS = 2500
+WRITE_TOKENS = 6000
 MAX_BLOCKS = 8
 MAX_FILE_CHARS = 40_000
 MAX_NEW_FILE_CHARS = 60_000
@@ -188,7 +192,7 @@ def run(chat, task, worktree, files, summary, test_fn, emit, *, cancelled=lambda
         return False
     try:
         listing = "\n".join(files[:400]) + ("\n… (%d more)" % (len(files) - 400) if len(files) > 400 else "")
-        answer = ask(LOCALIZE % MAX_FILES, "Task:\n%s\n\nProject summary:\n%s\n\nFiles:\n%s" % (task, summary, listing), 400)
+        answer = ask(LOCALIZE % MAX_FILES, "Task:\n%s\n\nProject summary:\n%s\n\nFiles:\n%s" % (task, summary, listing), LOCALIZE_TOKENS)
         if re.search(r'"refuse"\s*:\s*true', answer or "", flags=re.I):
             emit("localize", False, "위험한 요청이라 이행하지 않음")
             result["error"] = "요청이 파일 삭제·초기화 같은 위험한 작업이라 이행하지 않았습니다."
@@ -230,7 +234,7 @@ def run(chat, task, worktree, files, summary, test_fn, emit, *, cancelled=lambda
                 emit("create", False, rel + " (허용되지 않는 경로 또는 이미 있음)")
                 result["error"] = "만들 수 없는 파일 경로입니다: " + rel
                 return result
-            answer = ask(CREATE, "Task:\n%s\n\nNew file path: %s\nExisting files:\n%s" % (task, rel, "\n".join(files[:80])), 3000)
+            answer = ask(CREATE, "Task:\n%s\n\nNew file path: %s\nExisting files:\n%s" % (task, rel, "\n".join(files[:80])), WRITE_TOKENS)
             match = FENCE.search(answer or "")
             body = match.group(1) if match else ""
             if not body.strip() or len(body) > MAX_NEW_FILE_CHARS:
@@ -271,7 +275,7 @@ def _edit_file(ask, task, worktree, rel, current, emit, retry, ctx=""):
 
     def attempt(extra=""):
         """-> (new_text or None, problem, note). new_text is set only for a usable change."""
-        answer = ask(EDIT, prompt + extra, 3000)
+        answer = ask(EDIT, prompt + extra, WRITE_TOKENS)
         blocks = parse_blocks(answer)
         if blocks:
             candidate, applied, failed = apply_blocks(text, blocks)
@@ -306,7 +310,7 @@ def _repair(ask, task, worktree, existing, original, output, emit, ctx=""):
         text, bom, crlf = original[rel]
         prompt = ("Task:\n%s\n\nThe project's tests fail after the change. Test output:\n%s\n\nCurrent file %s:\n```\n%s\n```\n"
                   "Fix the file so the tests pass. Reply with SEARCH/REPLACE blocks only.") % (task, (output or "")[-2500:], rel, text) + ctx
-        blocks = parse_blocks(ask(EDIT, prompt, 3000))
+        blocks = parse_blocks(ask(EDIT, prompt, WRITE_TOKENS))
         new_text, applied, failed = apply_blocks(text, blocks)
         if applied and not failed:
             write_text(safe_path(worktree, rel), new_text, bom, crlf)
