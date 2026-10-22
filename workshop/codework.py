@@ -25,7 +25,7 @@ import time
 import uuid
 from pathlib import Path
 
-from . import adapters, modelpick, projectmap, usage, worktree
+from . import adapters, codereport, modelpick, projectmap, usage, worktree
 
 MAX_PROMPT = 8000
 MAX_RUNTIME = 20 * 60
@@ -177,6 +177,7 @@ class CodeRuns:
             for attempt in range(5):
                 try:
                     os.replace(tmp, directory / "run.json")
+                    self._write_report(run, directory)
                     return
                 except PermissionError:
                     if attempt == 4:
@@ -203,10 +204,25 @@ class CodeRuns:
         keys = ("id", "repo", "prompt", "model", "status", "started", "finished", "error", "files", "stat", "applied_at", "undone_at", "tier", "repo_was_dirty", "project")
         return {k: run.get(k) for k in keys}
 
+    @staticmethod
+    def _write_report(run, directory):
+        """report.md and metrics.json beside run.json once a run has stopped; a report problem never breaks the run."""
+        if run.get("status") == "running":
+            return
+        try:
+            text, metrics = codereport.build(run, directory / "events.jsonl")
+            (directory / "report.md").write_text(text, encoding="utf-8")
+            (directory / "metrics.json").write_text(json.dumps(metrics, ensure_ascii=False, indent=1), encoding="utf-8")
+        except (OSError, ValueError, KeyError):
+            pass
+
     def get(self, run_id):
         run = self._read(run_id)
         detail = self._summary(run)
         detail["activity"] = list(self._tails.get(run_id) or run.get("activity", []))[-40:]
+        report = self._path(run_id) / "report.md"
+        if report.exists():
+            detail["report"] = report.read_text(encoding="utf-8", errors="replace")[:20000]
         patch = self._path(run_id) / "patch.diff"
         if patch.exists():
             text = patch.read_text(encoding="utf-8", errors="replace")
