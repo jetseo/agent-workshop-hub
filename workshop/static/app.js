@@ -632,6 +632,10 @@
     var datalist = h("datalist", { id: "code-repos" });
     var repo = h("input", { type: "text", id: "code-repo", list: "code-repos", "aria-label": "프로젝트 폴더", placeholder: "프로젝트 폴더 (git 저장소)  예: D:\\projects\\myapp", value: store("code-repo") || "" });
     var model = h("select", { id: "code-model", "aria-label": "모델" });
+    var mode = h("select", { id: "code-mode", "aria-label": "방식", title: "에이전트: OpenCode가 도구를 써서 직접 고칩니다. 직접 모드: JetAI가 단계를 진행하고 모델은 글로 수정안만 씁니다(약한 모델에 적합)." },
+      h("option", { value: "agent", text: "에이전트(OpenCode)" }), h("option", { value: "direct", text: "직접 모드(JetAI가 진행)" }));
+    var validate = h("label", { class: "check cw-guide", id: "code-validate-row", hidden: true }, h("input", { type: "checkbox", id: "code-validate", checked: true }), h("span", { text: " 테스트로 확인" }));
+    mode.onchange = codeModeChanged;
     var prompt = h("textarea", { id: "code-prompt", rows: "2", maxlength: "8000", "aria-label": "할 일", placeholder: "할 일을 적으세요. / 를 입력하면 명령이 나옵니다. (Ctrl+Enter로 보내기)" });
     var send = h("button", { type: "submit", class: "btn primary", id: "code-start", "aria-label": "시작", text: "시작" });
     var cost = h("label", { class: "check", id: "code-cost-row", hidden: true }, h("input", { type: "checkbox", id: "code-cost" }), h("span", { text: " 요금이 나올 수 있는 모델임을 확인했고 감수합니다" }));
@@ -640,7 +644,7 @@
       h("span", { text: " 작업 지침" }));
     var menu = h("div", { id: "code-slash", class: "cw-slash", role: "listbox", hidden: true });
     var form = h("form", { id: "code-composer", class: "cw-composer", autocomplete: "off", onsubmit: function (e) { e.preventDefault(); codeSubmit(); } },
-      h("div", { class: "cw-opts" }, repo, model, guide), h("p", { class: "sub", id: "code-model-note" }), cost, menu,
+      h("div", { class: "cw-opts" }, repo, mode, model, guide, validate), h("p", { class: "sub", id: "code-model-note" }), cost, menu,
       h("div", { class: "cw-box" }, prompt, send));
     prompt.addEventListener("keydown", function (e) {
       if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); codeSubmit(); }
@@ -664,8 +668,8 @@
     sel.appendChild(h("option", { value: "auto", text: "자동 (무료·로컬 중 코드 작업에 충분한 모델)" }));
     d.models.forEach(function (m) { sel.appendChild(h("option", { value: m.ref, "data-warn": m.warn || "", "data-tier": m.tier, text: m.ref + (m.tier === "local" ? " (내 PC)" : m.tier === "free" ? " (무료)" : " (유료 가능)") + (m.warn ? " ⚠" : "") })); });
     d.environment.opencode && sel.appendChild(h("option", { value: "opencode/deepseek-v4.1-flash-free", "data-warn": "OpenCode의 무료 서비스입니다. 코드가 그 서비스로 전송됩니다.", "data-tier": "free", text: "opencode/deepseek-v4.1-flash-free (OpenCode 무료)" }));
-    if (prev) sel.value = prev; codeModelNote();
-    $("code-start").disabled = !d.environment.opencode || codeBusy;
+    if (prev) sel.value = prev; codeModeChanged();
+    $("code-start").disabled = (!d.environment.opencode && $("code-mode").value !== "direct") || codeBusy;
     var box = $("code-runs"); box.textContent = "";
     if (!d.runs.length) box.appendChild(h("p", { class: "sub", text: "아직 작업이 없습니다." }));
     d.runs.forEach(function (r) {
@@ -689,6 +693,13 @@
         h("li", { text: "/ 를 입력하면 적용·되돌리기·검사·리뷰 같은 명령이 나옵니다." }))));
   }
   /* (welcome end) */
+  function codeModeChanged() {
+    var direct = $("code-mode").value === "direct";
+    $("code-validate-row").hidden = !direct;
+    [].forEach.call($("code-model").options, function (o) { o.disabled = direct && o.value.indexOf("opencode/") === 0; });
+    if ($("code-model").selectedOptions[0] && $("code-model").selectedOptions[0].disabled) $("code-model").value = "auto";
+    codeModelNote();
+  }
   function codeModelNote() {
     var o = $("code-model").selectedOptions[0]; if (!o) return;
     $("code-model-note").textContent = o.dataset.warn || "";
@@ -723,7 +734,7 @@
     codeBusy = true; $("code-start").disabled = true;
     try {
       store("code-repo", $("code-repo").value.trim());
-      var r = await api("POST", "/code/start", { repo: $("code-repo").value.trim(), prompt: text, model: $("code-model").value, confirm_cost: $("code-cost").checked, guidance: $("code-guidance").checked });
+      var r = await api("POST", "/code/start", { repo: $("code-repo").value.trim(), prompt: text, model: $("code-model").value, confirm_cost: $("code-cost").checked, guidance: $("code-guidance").checked, mode: $("code-mode").value, validate: $("code-validate").checked });
       codeOpen = r.id; codeStick = true; input.value = ""; toast("작업을 시작했습니다.");
     } catch (e) { toast(e.message); }
     codeBusy = false; renderCode();
@@ -766,7 +777,7 @@
   function toolLine(text) {
     var m = /^(✓|✗|…)\s+(\S+)\s*(.*)$/.exec(text);
     if (!m) return null;
-    var icons = { read: "📄", edit: "✏️", write: "✏️", bash: "⌨️", grep: "🔎", glob: "🔎", list: "📁", patch: "✏️" };
+    var icons = { localize: "🔎", create: "✏️", test: "🧪", repair: "🔧", read: "📄", edit: "✏️", write: "✏️", bash: "⌨️", grep: "🔎", glob: "🔎", list: "📁", patch: "✏️" };
     return h("div", { class: "cw-tool " + (m[1] === "✗" ? "bad" : m[1] === "…" ? "wait" : "ok") },
       h("span", { class: "cw-ico", text: icons[m[2]] || "🛠" }), h("b", { text: m[2] }), h("span", { class: "cw-target", text: m[3] }), h("span", { class: "cw-mark", text: m[1] }));
   }
@@ -791,7 +802,7 @@
       h("p", { class: "sub", text: r.repo + " · " + r.model + " · 작업 지침: " + ({ off: "없음", short: "짧게", full: "전체" }[r.guidance] || "없음") + (r.repo_was_dirty ? " · ⚠ 폴더에 저장하지 않은 변경이 있었습니다(복사본에는 없음)" : "") }));
     if (r.project) you.appendChild(h("details", { class: "cw-fold" }, h("summary", { text: "JetAI가 미리 읽은 프로젝트 요약(에이전트에 함께 전달됨)" }), h("pre", { class: "sub", text: r.project })));
     box.appendChild(you);
-    var agent = h("div", { class: "cw-msg agent" }, h("div", { class: "cw-who" }, "에이전트 ", codeBadge(r.status)));
+    var agent = h("div", { class: "cw-msg agent" }, h("div", { class: "cw-who" }, (r.mode === "direct" ? "직접 모드 " : "에이전트 "), codeBadge(r.status)));
     var lines = r.activity || [];
     lines.forEach(function (l, at) {
       if (/^…\s/.test(l) && lines.slice(at + 1).some(function (x) { return x.slice(1).trim() === l.slice(1).trim(); })) return;   // finished later: show only the result

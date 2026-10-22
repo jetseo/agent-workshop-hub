@@ -1,0 +1,251 @@
+import json
+import tempfile
+import unittest
+from pathlib import Path
+
+from workshop import directmode
+from workshop.codework import CodeRuns, CodeWorkError
+from tests.test_codework import Base
+
+BUG = "def add(a, b):\n    return a - b\n"
+
+
+def blocks(search, replace):
+    return "<<<<<<< SEARCH\n%s\n=======\n%s\n>>>>>>> REPLACE" % (search, replace)
+
+
+class Script:
+    """A fake model: answers by the kind of question (the system prompt) from queues, and records every call."""
+
+    def __init__(self, localize=None, edits=(), creates=()):
+        self.localize = localize if localize is not None else '{"files": ["calc.py"], "new_files": []}'
+        self.edits, self.creates = list(edits), list(creates)
+        self.calls = []
+
+    def __call__(self, messages, max_tokens=0):
+        system, user = messages[0]["content"], messages[1]["content"]
+        self.calls.append((system[:20], user))
+        if system.startswith("You are a careful"):
+            return self.localize
+        if system.startswith("You create"):
+            return self.creates.pop(0) if self.creates else ""
+        return self.edits.pop(0) if self.edits else ""
+
+
+class PipelineTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.dir = Path(self.tmp.name)
+        (self.dir / "calc.py").write_text(BUG, encoding="utf-8", newline="\n")
+        (self.dir / "notes.md").write_text("# n\n", encoding="utf-8")
+        self.lines = []
+
+    def emit(self, tool, ok, text):
+        self.lines.append((tool, ok, text))
+
+    def go(self, script, tests=(("passed", ""),), **kw):
+        results = list(tests)
+        return directmode.run(script, "add가 뺄셈을 해요. 고쳐줘", self.dir, ["calc.py", "notes.md"], "요약",
+                              lambda: results.pop(0) if len(results) > 1 else results[0], self.emit, **kw)
+
+    def test_localize_edit_validate_success(self):
+        script = Script(edits=[blocks("    return a - b", "    return a + b")])
+        result = self.go(script)
+        self.assertTrue(result["ok"], result)
+        self.assertEqual((result["changed"], result["tests"], result["calls"]), (["calc.py"], "passed", 2))
+        self.assertIn("a + b", (self.dir / "calc.py").read_text(encoding="utf-8"))
+        self.assertEqual([t for t, ok, _ in self.lines], ["localize", "edit", "test"])
+
+    def test_a_block_that_does_not_match_gets_one_retry_with_the_reason(self):
+        script = Script(edits=[blocks("    return a minus b", "x"), blocks("    return a - b", "    return a + b")])
+        result = self.go(script)
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(result["calls"], 3)
+        self.assertIn("did not match exactly once", script.calls[-1][1])
+        self.assertIn("a minus b", script.calls[-1][1])
+
+    def test_two_failed_attempts_stop_with_a_clear_error_and_leave_the_file_alone(self):
+        script = Script(edits=["sorry, no blocks", blocks("nope", "x")])
+        result = self.go(script)
+        self.assertFalse(result["ok"])
+        self.assertIn("calc.py", result["error"])
+        self.assertEqual((self.dir / "calc.py").read_text(encoding="utf-8"), BUG)
+
+    def test_failing_tests_get_one_repair_round(self):
+        script = Script(edits=[blocks("    return a - b", "    return a * b"), blocks("    return a * b", "    return a + b")])
+        result = self.go(script, tests=[("failed", "assert 5 == 6"), ("passed", "")])
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["tests"], "passed")
+        self.assertIn("assert 5 == 6", script.calls[-1][1])                      # the model saw the failure
+        self.assertIn("a + b", (self.dir / "calc.py").read_text(encoding="utf-8"))
+        self.assertIn("repair", [t for t, _, _ in self.lines])
+
+    def test_still_failing_after_the_repair_is_reported_not_hidden(self):
+        script = Script(edits=[blocks("    return a - b", "    return a * b"), blocks("    return a * b", "    return a * 2")])
+        result = self.go(script, tests=[("failed", "x"), ("failed", "y")])
+        self.assertTrue(result["ok"])                                              # the run finished; the verdict says what happened
+        self.assertEqual(result["tests"], "failed")
+
+    def test_validate_off_skips_the_tests(self):
+        called = []
+        script = Script(edits=[blocks("    return a - b", "    return a + b")])
+        result = directmode.run(script, "t", self.dir, ["calc.py"], "", lambda: called.append(1) or ("passed", ""), self.emit, validate=False)
+        self.assertTrue(result["ok"])
+        self.assertEqual((called, result["tests"]), ([], "skipped"))
+
+    def test_bom_and_crlf_are_preserved(self):
+        (self.dir / "calc.py").write_bytes(b"\xef\xbb\xbf" + BUG.replace("\n", "\r\n").encode("utf-8"))
+        script = Script(edits=[blocks("    return a - b", "    return a + b")])
+        self.assertTrue(self.go(script)["ok"])
+        raw = (self.dir / "calc.py").read_bytes()
+        self.assertTrue(raw.startswith(b"\xef\xbb\xbf"))
+        self.assertEqual(raw[3:], "def add(a, b):\r\n    return a + b\r\n".encode("utf-8"))
+
+    def test_trailing_whitespace_differences_still_match(self):
+        (self.dir / "calc.py").write_text("def add(a, b):   \n    return a - b  \n", encoding="utf-8", newline="\n")
+        script = Script(edits=[blocks("def add(a, b):\n    return a - b", "def add(a, b):\n    return a + b")])
+        self.assertTrue(self.go(script)["ok"])
+        self.assertIn("a + b", (self.dir / "calc.py").read_text(encoding="utf-8"))
+
+    def test_ambiguous_search_text_is_refused(self):
+        (self.dir / "calc.py").write_text("x = 1\nx = 1\n", encoding="utf-8")
+        script = Script(edits=[blocks("x = 1", "x = 2"), blocks("x = 1", "x = 3")])
+        result = self.go(script)
+        self.assertFalse(result["ok"])
+        self.assertEqual((self.dir / "calc.py").read_text(encoding="utf-8"), "x = 1\nx = 1\n")
+
+    def test_new_file_is_created_from_a_fenced_block_and_existing_paths_are_not_overwritten(self):
+        script = Script(localize='{"files": [], "new_files": ["utils/helper.py"]}', creates=["Here:\n```python\nVALUE = 1\n```"])
+        result = self.go(script)
+        self.assertTrue(result["ok"], result)
+        self.assertEqual((self.dir / "utils" / "helper.py").read_text(encoding="utf-8"), "VALUE = 1\n")
+        again = self.go(Script(localize='{"files": [], "new_files": ["notes.md"]}'))
+        self.assertFalse(again["ok"] and again["changed"])
+        self.assertEqual((self.dir / "notes.md").read_text(encoding="utf-8"), "# n\n")
+
+    def test_a_new_file_named_under_files_is_still_a_new_file(self):
+        script = Script(localize='{"files": ["test_calc.py"], "new_files": []}', creates=["```python\nimport calc\n```"])
+        result = self.go(script)
+        self.assertTrue(result["ok"], result)
+        self.assertEqual((self.dir / "test_calc.py").read_text(encoding="utf-8"), "import calc\n")
+
+    def test_an_empty_search_block_appends_to_the_end(self):
+        script = Script(edits=[blocks("", "def mul(a, b):\n    return a * b")])
+        result = self.go(script)
+        self.assertTrue(result["ok"], result)
+        self.assertEqual((self.dir / "calc.py").read_text(encoding="utf-8"), BUG + "def mul(a, b):\n    return a * b\n")
+
+    def test_a_whole_file_answer_is_accepted_when_there_are_no_blocks(self):
+        script = Script(edits=["```python\ndef add(a, b):\n    return a + b\n```", "```python\ndef add(a, b):\n    return a + b\n```"])
+        result = self.go(script)
+        self.assertTrue(result["ok"], result)
+        self.assertIn("a + b", (self.dir / "calc.py").read_text(encoding="utf-8"))
+        self.assertTrue(any("전체를 다시 씀" in text for _, _, text in self.lines))
+
+    def test_a_change_that_leaves_the_file_unchanged_is_retried_not_counted(self):
+        script = Script(edits=[blocks("    return a - b", "    return a - b"), blocks("    return a - b", "    return a + b")])
+        result = self.go(script)
+        self.assertTrue(result["ok"], result)
+        self.assertIn("unchanged", script.calls[-1][1])
+        self.assertIn("a + b", (self.dir / "calc.py").read_text(encoding="utf-8"))
+
+    def test_wiping_a_file_is_refused_even_when_the_blocks_apply(self):
+        big = "line %d\n" * 1 % 1 + "".join("value_%d = %d\n" % (i, i) for i in range(60))
+        (self.dir / "calc.py").write_text(big, encoding="utf-8")
+        wipe = blocks(big.rstrip("\n"), "x = 1")
+        result = self.go(Script(edits=[wipe, wipe]))
+        self.assertFalse(result["ok"])
+        self.assertEqual((self.dir / "calc.py").read_text(encoding="utf-8"), big)
+
+    def test_a_destructive_request_is_refused_without_touching_anything(self):
+        script = Script(localize='{"refuse": true, "reason": "deleting files"}')
+        result = self.go(script)
+        self.assertFalse(result["ok"])
+        self.assertIn("위험한", result["error"])
+        self.assertEqual(result["calls"], 1)
+        self.assertEqual((self.dir / "calc.py").read_text(encoding="utf-8"), BUG)
+
+    def test_the_model_cannot_name_paths_outside_the_listed_files(self):
+        script = Script(localize='{"files": ["../evil.py", ".env", "/etc/passwd", "C:\\\\x.py"], "new_files": []}')
+        result = self.go(script)
+        self.assertFalse(result["ok"])
+        self.assertEqual(sorted(p.name for p in self.dir.iterdir()), ["calc.py", "notes.md"])
+
+    def test_safe_path_rules(self):
+        for bad in ("../x", "a/../../x", "/abs", "C:/x", "", ".git/config", "src/.git/x", ".env", "keys/id_rsa", "a\x00b", "x" * 400):
+            self.assertIsNone(directmode.safe_path(self.dir, bad), bad)
+        self.assertIsNotNone(directmode.safe_path(self.dir, "src/new/file.py"))
+
+    def test_garbage_or_a_failing_service_ends_in_an_error_never_an_exception(self):
+        self.assertFalse(self.go(Script(localize="I think maybe the calculator?"))["ok"])
+
+        def broken(messages, max_tokens=0):
+            raise RuntimeError("Provider returned HTTP 429 (rate limit reached)")
+        result = directmode.run(broken, "t", self.dir, ["calc.py"], "", lambda: ("passed", ""), self.emit)
+        self.assertFalse(result["ok"])
+        self.assertIn("429", result["error"])
+
+    def test_cancel_stops_between_steps(self):
+        script = Script(edits=[blocks("    return a - b", "    return a + b")])
+        result = self.go(script, cancelled=lambda: True)
+        self.assertFalse(result["ok"])
+        self.assertEqual((self.dir / "calc.py").read_text(encoding="utf-8"), BUG)
+
+    def test_prompt_size_is_bounded(self):
+        (self.dir / "calc.py").write_text("x = 1\n" * 20000, encoding="utf-8")
+        result = self.go(Script())
+        self.assertFalse(result["ok"])
+        self.assertIn("너무 커서", result["error"])
+
+
+class RunsIntegrationTests(Base):
+    def make(self, script):
+        self.runs.shutdown()
+        self.script = script
+        self.runs = CodeRuns(self.providers, find_binary=lambda: None, worktree_base=self.dir / "wt",
+                             direct_chat=lambda provider, model, messages, timeout, max_tokens: script(messages, max_tokens))
+        self.addCleanup(self.runs.shutdown)
+
+    def test_a_direct_run_produces_a_reviewable_patch_checks_report_and_needs_no_opencode(self):
+        (self.repo / "tests").mkdir()
+        (self.repo / "tests" / "test_unit.py").write_text("import unittest\nfrom calc import add\n\nclass T(unittest.TestCase):\n    def test_add(self):\n        self.assertEqual(add(2, 3), 5)\n", encoding="utf-8")
+        import subprocess
+        subprocess.run(["git", "add", "-A"], cwd=self.repo, check=True)
+        subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "unit"], cwd=self.repo, check=True)
+        self.make(Script(localize='{"files": ["calc.py"]}', edits=[blocks("    return a - b", "    return a + b")]))
+        run = self.runs.start(str(self.repo), "고쳐줘", "loc/qwen2.5-coder:32b", mode="direct")
+        self.assertEqual(run["mode"], "direct")
+        done = self.wait(run["id"], "review")
+        self.assertEqual([f["path"] for f in done["files"]], ["calc.py"])
+        self.assertIn("+    return a + b", done["patch"])
+        self.assertEqual(done["checks"]["verdict"], "passed")
+        self.assertTrue(any("edit calc.py" in line for line in done["activity"]))
+        self.assertIn("## 에이전트가 한 일", done["report"])
+        metrics = json.loads((self.runs._path(run["id"]) / "metrics.json").read_text(encoding="utf-8"))
+        self.assertEqual(metrics["tool_calls"], 3)                                  # localize, edit, test
+        self.runs.apply(run["id"], True)                                            # same review/apply flow as agent runs
+        self.assertIn("a + b", (self.repo / "calc.py").read_text(encoding="utf-8"))
+
+    def test_a_failed_pipeline_is_a_failed_run_with_the_reason(self):
+        self.make(Script(localize="no idea"))
+        run = self.runs.start(str(self.repo), "고쳐줘", "loc/qwen2.5-coder:32b", mode="direct")
+        done = self.wait(run["id"], "failed")
+        self.assertIn("정하지 못했습니다", done["error"])
+
+    def test_auto_picks_the_strongest_local_or_free_model_and_never_opencode_or_paid(self):
+        self.make(Script())
+        ref = self.runs.auto_direct_model()
+        self.assertIn(ref.split("/")[0], ("loc", "cloud"))
+        self.assertNotEqual(ref.split("/")[0], "pay")
+        for bad in ("opencode/x-free", "pay/gpt-x", "nope/zzz", "bad"):
+            with self.assertRaises(CodeWorkError, msg=bad):
+                self.runs.start(str(self.repo), "x", bad, mode="direct")
+
+    def test_unknown_mode_is_refused(self):
+        with self.assertRaises(CodeWorkError):
+            self.runs.start(str(self.repo), "x", "loc/qwen2.5-coder:32b", mode="swarm")
+
+
+if __name__ == "__main__":
+    unittest.main()
