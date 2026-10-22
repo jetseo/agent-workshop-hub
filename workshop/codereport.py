@@ -66,7 +66,7 @@ def build(run, events_path):
     metrics = {"id": run["id"], "status": run["status"], "model": run.get("model"), "tier": run.get("tier"), "seconds": seconds,
                "files_changed": len(files), "lines_added": sum(f.get("added", 0) for f in files),
                "lines_deleted": sum(f.get("deleted", 0) for f in files), **events,
-               "applied": bool(run.get("applied_at")), "undone": bool(run.get("undone_at")), "repo_was_dirty": bool(run.get("repo_was_dirty")),
+               "applied": bool(run.get("applied_at")), "undone": bool(run.get("undone_at")), "repo_was_dirty": bool(run.get("repo_was_dirty")), "checks": (run.get("checks") or {}).get("verdict") or None,
                "cost": "무료/로컬" if run.get("tier") in ("local", "free") else "확인 필요(유료일 수 있음)"}
     lines = ["# 코드 작업 보고서 " + run["id"], "",
              "## 목표", mask(run.get("prompt", "")), "",
@@ -93,7 +93,16 @@ def build(run, events_path):
     lines += ["", "## 바뀐 파일 (%s)" % (run.get("stat") or "없음")]
     kinds = {"A": "추가", "M": "수정", "D": "삭제", "R": "이름변경"}
     lines += ["- %s `%s` %s" % (kinds.get(f.get("status"), f.get("status")), f["path"], "(바이너리)" if f.get("binary") else "+%d −%d" % (f["added"], f["deleted"])) for f in files] or ["- 없음"]
-    lines += ["", "## 빌드·테스트·리뷰", "- 기록 없음: 아직 JetAI가 자동으로 실행하지 않습니다(에이전트가 한 시도는 위 활동에 나옴).",
+    lines += ["", "## 빌드·테스트·리뷰"]
+    check = run.get("checks") or {}
+    verdicts = {"passed": "통과", "failed": "실패", "none": "검사할 명령이 감지되지 않음", "unavailable": "실행 도구가 없어 못 함", "notests": "실행된 테스트가 없음(통과로 보지 않음)", "": "진행 중"}
+    names = {"passed": "통과", "failed": "실패", "timeout": "시간 초과", "unavailable": "도구 없음", "notests": "테스트 없음"}
+    if check:
+        lines.append("- JetAI가 복사본에서 직접 실행한 결과: **%s**" % verdicts.get(check.get("verdict"), check.get("verdict")))
+        lines += ["  - %s `%s`: %s (%s초)" % (c["kind"], c["command"], names.get(c["status"], c["status"]), c["seconds"]) for c in check.get("items", [])]
+    else:
+        lines.append("- 빌드·테스트: 기록 없음(사용자가 \"빌드·테스트 실행\"을 누르지 않았습니다).")
+    lines += ["- 코드 리뷰: 기록 없음(아직 자동 리뷰 단계 없음).",
               "", "## 주의", "- 작업 시작 때 폴더에 저장하지 않은 변경이 %s." % ("있었음(복사본에는 없음)" if run.get("repo_was_dirty") else "없었음"),
               "- 이 보고서는 기록된 사실만 담습니다. 비밀처럼 보이는 문자열은 가렸습니다.", ""]
     return "\n".join(lines), metrics
