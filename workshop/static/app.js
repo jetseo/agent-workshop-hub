@@ -721,12 +721,15 @@
     var chgOpen = store("changes-open"); root.classList.toggle("changes-closed", chgOpen === "0" || (chgOpen === null && window.innerWidth < 1200));
     var changes = h("aside", { class: "cw-changes", id: "code-changes", "aria-label": "변경 사항" });
     root.append(datalist,
-      h("aside", { class: "cw-side" }, h("button", { type: "button", class: "btn primary cw-new", text: "＋ 새 작업", onclick: function () { codeOpen = ""; renderCode(); } }), runTools[0], runTools[1], runTools[2], h("div", { id: "code-runs", class: "cw-list" }), runTools[3]),
+      h("aside", { class: "cw-side" }, h("button", { type: "button", class: "btn primary cw-new", text: "＋ 새 작업", onclick: function () { codeOpen = ""; renderCode(); } }), runTools[0], runTools[1], runTools[2], runTools[3], h("div", { id: "code-runs", class: "cw-list" }), runTools[4]),
       gutter,
       h("section", { class: "cw-main" }, h("div", { id: "code-env", class: "sub cw-env" }), stream, form), gutter2, changes);
     var tl = $("tb-left"), tr = $("tb-right");
     if (tl) { tl.textContent = ""; tl.appendChild(h("button", { type: "button", class: "btn", id: "code-toggle-runs", text: "☰ 작업 목록", title: "작업 목록 접기/펴기 (Ctrl+Shift+B)", "aria-controls": "code-runs", onclick: function () { toggleRuns(); } })); }
-    if (tr) { tr.textContent = ""; tr.appendChild(h("button", { type: "button", class: "btn", id: "code-toggle-changes", title: "변경 사항 패널 접기/펴기", "aria-controls": "code-changes", onclick: function () { toggleChanges(); } }, "± 변경 사항", h("span", { id: "code-changes-count", class: "tag", hidden: true }))); }
+    if (tr) { tr.textContent = ""; var sysPop = h("div", { class: "cw-pop cw-sys", id: "code-sys", hidden: true }); var sysBtn = h("button", { type: "button", class: "btn", id: "code-sys-btn", text: "상태", "aria-haspopup": "true", "aria-expanded": "false", title: "Ollama·내장 엔진·OpenCode·메모리·그래픽 상태" });
+      sysBtn.addEventListener("click", function (e) { e.stopPropagation(); openSystemPop(sysBtn, sysPop); });
+      tr.appendChild(h("div", { class: "cw-pop-wrap" }, sysBtn, sysPop));
+      tr.appendChild(h("button", { type: "button", class: "btn", id: "code-toggle-changes", title: "변경 사항 패널 접기/펴기", "aria-controls": "code-changes", onclick: function () { toggleChanges(); } }, "± 변경 사항", h("span", { id: "code-changes-count", class: "tag", hidden: true }))); }
     document.body.dataset.view = document.body.dataset.view || "code";
     syncRunsToggle(); renderChanges(null, {}); updateProjectChip();
   }
@@ -794,6 +797,14 @@
   /* ---------- task list: search, views (active / archived / trash), row menu, bulk actions ---------- */
   var codeView = "active", codeQuery = "", codeLimit = 30, codeSel = {}, codeSelectMode = false, codeCounts = { active: 0, archived: 0, trash: 0 }, codeLast = [];
   var VIEW_NAMES = { active: "작업", archived: "보관", trash: "휴지통" };
+  var codeFilter = store("code-filter") || "", codeSort = store("code-sort") || "recent", codeGroup = store("code-group") === "1", codeCollapsed = {};
+  var FILTERS = { "": "모든 상태", running: "진행 중", review: "검토 대기", failed: "실패·취소", other: "완료·기타" };
+  function filterOf(status) { return status === "running" ? "running" : status === "review" ? "review" : status === "failed" || status === "cancelled" ? "failed" : "other"; }
+  function visibleRuns(runs) {
+    var list = runs.filter(function (r) { return !codeFilter || filterOf(r.status) === codeFilter; });
+    if (codeSort === "name") list = list.slice().sort(function (a, b) { return runTitle(a).localeCompare(runTitle(b), "ko"); });
+    return list;
+  }
   function runTitle(r) { return r.title || (r.prompt || "").split("\n")[0].slice(0, 80) || "(제목 없음)"; }
   function runFolder(r) { return (r.project_name || (r.repo || "").replace(/[\\/]+$/, "").split(/[\\/]/).pop() || ""); }
   function toastUndo(message, undo) {
@@ -856,8 +867,15 @@
     var selBtn = h("button", { type: "button", class: "btn mini", id: "code-select-toggle", text: "선택", title: "여러 작업을 골라 한 번에 처리합니다",
       onclick: function () { codeSelectMode = !codeSelectMode; codeSel = {}; renderCode(); } });
     var bulk = h("div", { id: "code-bulk", class: "cw-bulk", hidden: true });
+    var filt = h("select", { id: "code-filter", class: "cw-mini", "aria-label": "상태 필터", title: "상태로 거르기" }, Object.keys(FILTERS).map(function (k) { return h("option", { value: k, text: FILTERS[k] }); }));
+    filt.value = codeFilter; filt.onchange = function () { codeFilter = filt.value; store("code-filter", codeFilter); renderRunList({ runs: codeLast }); };
+    var sort = h("select", { id: "code-sort", class: "cw-mini", "aria-label": "정렬", title: "정렬" }, h("option", { value: "recent", text: "최근순" }), h("option", { value: "name", text: "이름순" }));
+    sort.value = codeSort; sort.onchange = function () { codeSort = sort.value; store("code-sort", codeSort); renderRunList({ runs: codeLast }); };
+    var grp = h("label", { class: "cw-mini check", title: "프로젝트(폴더)별로 묶어 접고 펼칩니다" }, h("input", { type: "checkbox", id: "code-group", checked: codeGroup }), h("span", { text: " 프로젝트별" }));
+    grp.querySelector("input").onchange = function (e) { codeGroup = e.target.checked; store("code-group", codeGroup ? "1" : "0"); renderRunList({ runs: codeLast }); };
+    var fbar = h("div", { class: "cw-filters" }, filt, sort, grp);
     var more = h("button", { type: "button", class: "btn mini", id: "code-more", text: "더 보기", hidden: true, onclick: function () { codeLimit += 30; renderCode(); } });
-    return [h("div", { class: "cw-tools" }, search, selBtn), tabs, bulk, more];
+    return [h("div", { class: "cw-tools" }, search, selBtn), tabs, fbar, bulk, more];
   }
   function renderRunList(d) {
     if (document.querySelector(".cw-rowmenu") || document.querySelector(".cw-rename")) return;       // never rebuild a list while a menu or a name is being edited
@@ -869,8 +887,18 @@
         text: VIEW_NAMES[v] + " " + (codeCounts[v] || 0), onclick: function () { codeView = v; codeLimit = 30; codeSel = {}; renderCode(); } }));
     });
     $("code-select-toggle").setAttribute("aria-pressed", codeSelectMode ? "true" : "false");
+    var shown = visibleRuns(d.runs);
+    if (d.runs.length && !shown.length) box.appendChild(h("p", { class: "sub", text: "이 상태의 작업이 없습니다. 위의 상태 필터를 바꿔 보세요." }));
     if (!d.runs.length) box.appendChild(h("p", { class: "sub", text: codeQuery ? "검색 결과가 없습니다." : codeView === "trash" ? "휴지통이 비어 있습니다." : codeView === "archived" ? "보관한 작업이 없습니다." : "아직 작업이 없습니다." }));
-    d.runs.forEach(function (r) {
+    var folders = {}; shown.forEach(function (r) { folders[runFolder(r)] = (folders[runFolder(r)] || 0) + 1; });
+    var grouped = codeGroup && Object.keys(folders).length > 1, lastFolder = null, hiddenFolder = false;
+    shown.slice().sort(function (a, b) { return grouped ? runFolder(a).localeCompare(runFolder(b), "ko") : 0; }).forEach(function (r) {
+      if (grouped && runFolder(r) !== lastFolder) {
+        lastFolder = runFolder(r); hiddenFolder = !!codeCollapsed[lastFolder];
+        box.appendChild(h("button", { type: "button", class: "cw-grp", "aria-expanded": hiddenFolder ? "false" : "true", onclick: (function (name) { return function () { codeCollapsed[name] = !codeCollapsed[name]; renderRunList({ runs: codeLast }); }; })(lastFolder) },
+          (hiddenFolder ? "▸ " : "▾ ") + (lastFolder || "(폴더 없음)") + " ", h("span", { class: "sub", text: "(" + folders[lastFolder] + ")" })));
+      }
+      if (grouped && hiddenFolder) return;
       var row = h("div", { class: "cw-row" + (r.id === codeOpen ? " open" : "") });
       if (codeSelectMode) row.appendChild(h("input", { type: "checkbox", "aria-label": "선택", checked: !!codeSel[r.id], onchange: function (e) { if (e.target.checked) codeSel[r.id] = true; else delete codeSel[r.id]; renderBulk(); } }));
       row.appendChild(h("button", { type: "button", class: "cw-run" + (r.id === codeOpen ? " open" : ""), title: r.prompt, onclick: function () { codeOpen = r.id; codeStick = true; renderCode(); } },
@@ -905,6 +933,24 @@
         try { var all = (await api("POST", "/code/list", { view: "trash", limit: 500 })).runs.map(function (r) { return r.id; }); for (var i = 0; i < all.length; i += 100) await bulkAct(all.slice(i, i + 100), "purge", true); } catch (e) { toast(e.message); }
       } }));
     }
+  }
+  /* ---------- system status popover (only values JetAI already reads; nothing is invented) ---------- */
+  async function openSystemPop(btn, pop) {
+    var was = pop.hidden; closePops(); if (!was) return;
+    pop.textContent = ""; pop.appendChild(h("div", { class: "mh", text: "불러오는 중…" })); pop.hidden = false; btn.setAttribute("aria-expanded", "true");
+    var env = null, eng = null;
+    try { env = await api("GET", "/env"); } catch (e) { /* shown as unknown below */ }
+    try { eng = await api("GET", "/engine"); } catch (e) { /* idem */ }
+    pop.textContent = "";
+    function row(label, value, bad) { pop.appendChild(h("div", { class: "cw-sys-row" }, h("span", { class: "sub", text: label }), h("b", { class: bad ? "bad" : "", text: value }))); }
+    pop.appendChild(h("div", { class: "mh", text: "이 PC와 실행 환경" }));
+    row("Ollama", env ? (env.ollama && env.ollama.running ? "실행 중 · 모델 " + (env.ollama.models || []).length + "개" : "꺼져 있음") : "알 수 없음", env && !(env.ollama && env.ollama.running));
+    row("내장 엔진", eng ? (eng.running ? "실행 중" : eng.binary ? "설치됨(꺼져 있음)" : eng.supported === false ? "이 PC에서는 지원하지 않음" : "설치 안 됨") : "알 수 없음");
+    row("OpenCode", env ? (env.opencode ? "있음" : "없음 (에이전트 방식에 필요, 직접 모드는 없어도 됨)") : "알 수 없음", env && !env.opencode);
+    var hw = eng && eng.hardware;
+    row("메모리", hw && hw.ram_gb ? hw.ram_gb + " GB" : "알 수 없음");
+    row("그래픽", hw && hw.gpu ? hw.gpu + " · " + hw.vram_gb + " GB" + (hw.vram_free_gb ? " (지금 비어 있는 " + hw.vram_free_gb + " GB)" : "") : "그래픽 카드 없음(CPU로 실행)");
+    pop.appendChild(h("div", { class: "mh", text: "실시간 사용률은 측정하지 않습니다. 위 값은 조회 시점의 값입니다." }));
   }
   async function renderCode() {
     codeBuildShell();
@@ -1103,8 +1149,50 @@
     if (["review", "nochange", "failed"].indexOf(r.status) >= 0 && !checking) btn(r.checks ? "빌드·테스트 다시" : "빌드·테스트", "check");
     if (r.files && r.files.length && r.status !== "running" && !reviewing) btn(r.review ? "코드 리뷰 다시" : "코드 리뷰", "review");
     if (r.status === "applied") btn("적용 되돌리기", "undo");
+    if (["review", "nochange", "failed", "cancelled"].indexOf(r.status) >= 0 && !checking) row.appendChild(h("button", { type: "button", class: "btn", text: r.status === "failed" ? "다시 시도(새 작업)" : "다시 실행(새 작업)",
+      title: "같은 요청과 설정으로 새 복사본에서 새 작업을 시작합니다(이 작업은 그대로 남습니다)",
+      onclick: async function () { try { var n = await api("POST", "/code/runs/" + id + "/rerun", {}); codeOpen = n.id; codeStick = true; toast("새 작업을 시작했습니다."); } catch (e) { toast(e.message); } renderCode(); } }));
     if (r.status !== "running" && r.status !== "discarded") btn(r.status === "applied" ? "복사본 정리" : "복사본 정리(변경 버리기)", "discard");
     return row;
+  }
+  /* ---------- run detail: summary card and the plan / work / verify timeline (built only from data JetAI already records) ---------- */
+  var STAGE_OF = { plan: 0, localize: 0, list: 0, search: 0, read: 0, glob: 0, grep: 0, attempt: 0, edit: 1, patch: 1, create: 1, write: 1, repair: 1, step: 1, run: 2, bash: 2, test: 2, check: 2, finish: 2 };
+  var STAGE_NAMES = ["① 계획·탐색", "② 수정", "③ 실행·검증"];
+  function fmtDur(sec) { sec = Math.max(0, Math.round(sec)); return sec >= 3600 ? Math.floor(sec / 3600) + "시간 " + Math.floor(sec % 3600 / 60) + "분" : sec >= 60 ? Math.floor(sec / 60) + "분 " + (sec % 60) + "초" : sec + "초"; }
+  function runSummaryCard(r) {
+    var s = r.stats || {}, modeName = { agent: "에이전트(OpenCode)", direct: "직접 모드", loop: "액션 루프(실험)" }[r.mode] || "에이전트(OpenCode)";
+    var end = r.finished || (Date.now() / 1000), seconds = r.started ? end - r.started : 0;
+    var tokens;
+    if (s.prompt_tokens != null) tokens = "입력 " + fmt(s.prompt_tokens) + " · 출력 " + fmt(s.completion_tokens || 0) + " (서비스가 센 값)";
+    else if (s.tokens_est) tokens = "약 " + fmt(s.tokens_est) + " (추정)";
+    else tokens = "기록 없음" + (r.mode === "agent" || !r.mode ? " (에이전트 방식은 실행기가 알려 주지 않습니다)" : "");
+    var rows = [["모델", r.model || "-"], ["방식", modeName + (r.attempts > 1 ? " · 최대 " + r.attempts + "회 시도" : "")], [r.status === "running" ? "경과" : "걸린 시간", r.started ? fmtDur(seconds) : "기록 없음"], ["토큰", tokens]];
+    if (s.calls != null) rows.push(["모델 호출", s.calls + "회" + (s.steps != null ? " · 단계 " + s.steps : "")]);
+    var ck = r.checks && r.checks.verdict ? { passed: "✅ 통과", failed: "❌ 실패", none: "검사할 명령 없음", unavailable: "실행 도구 없음", notests: "실행된 테스트 없음" }[r.checks.verdict] : "";
+    if (ck) rows.push(["빌드·테스트", ck]);
+    var card = h("div", { class: "cw-sum" });
+    rows.forEach(function (row) { card.appendChild(h("div", { class: "cw-sum-i" }, h("span", { class: "sub", text: row[0] }), h("b", { text: row[1] }))); });
+    if (s.cut_calls) card.appendChild(h("div", { class: "cw-sum-i warn" }, h("span", { class: "sub", text: "입력 잘림" }), h("b", { text: s.cut_calls + "회 (모델이 일부를 못 봤을 수 있음)" })));
+    return card;
+  }
+  function stageOf(text) { var m = /^(✓|✗|…)\s+(\S+)/.exec(text); return m && m[2] !== "attempt" ? (STAGE_OF[m[2]] !== undefined ? STAGE_OF[m[2]] : 1) : -1; }   // an "attempt" marker stays with the step before it
+  function buildTimeline(lines, running) {
+    var wrap = h("div", { class: "cw-stages" }), groups = [];
+    lines.forEach(function (l, at) {
+      if (/^…\s/.test(l) && lines.slice(at + 1).some(function (x) { return x.slice(1).trim() === l.slice(1).trim(); })) return;   // finished later: show only the result
+      var st = stageOf(l), last = groups[groups.length - 1];
+      if (st < 0) st = last ? last.stage : 0;                                                          // a plain message stays with the step it belongs to
+      if (!last || last.stage !== st) { last = { stage: st, items: [], bad: 0 }; groups.push(last); }
+      var tool = toolLine(l);
+      if (tool) { last.items.push(tool); if (/^✗/.test(l)) last.bad++; } else last.items.push(h("div", { class: "cw-text", text: l.replace(/^💬\s*/, "") }));
+    });
+    groups.forEach(function (g, i) {
+      var det = h("details", { class: "cw-stage" + (g.bad ? " bad" : "") }, h("summary", {}, h("b", { text: STAGE_NAMES[g.stage] }), h("span", { class: "sub", text: "  " + g.items.length + "줄" + (g.bad ? " · 실패 " + g.bad : "") })));
+      g.items.forEach(function (it) { det.appendChild(it); });
+      det.open = g.bad > 0 || i === groups.length - 1 && (running || groups.length === 1);
+      wrap.appendChild(det);
+    });
+    return wrap;
   }
   async function renderCodeDetail(id) {
     var box = $("code-stream"), r;
@@ -1115,14 +1203,10 @@
       h("p", { class: "sub", text: (r.project_name ? r.project_name + " · " : "") + r.repo + " · " + r.model + " · 작업 지침: " + ({ off: "없음", short: "짧게", full: "전체" }[r.guidance] || "없음") + (r.repo_was_dirty ? " · ⚠ 폴더에 저장하지 않은 변경이 있었습니다(복사본에는 없음)" : "") }));
     if (r.project) you.appendChild(h("details", { class: "cw-fold" }, h("summary", { text: "JetAI가 미리 읽은 프로젝트 요약(에이전트에 함께 전달됨)" }), h("pre", { class: "sub", text: r.project })));
     box.appendChild(you);
+    box.appendChild(runSummaryCard(r));
     var agent = h("div", { class: "cw-msg agent" }, h("div", { class: "cw-who" }, (r.mode === "direct" ? "직접 모드 " : r.mode === "loop" ? "액션 루프 " : "에이전트 "), codeBadge(r.status)));
     var lines = r.activity || [];
-    lines.forEach(function (l, at) {
-      if (/^…\s/.test(l) && lines.slice(at + 1).some(function (x) { return x.slice(1).trim() === l.slice(1).trim(); })) return;   // finished later: show only the result
-      var tool = toolLine(l);
-      if (tool) agent.appendChild(tool);
-      else agent.appendChild(h("div", { class: "cw-text", text: l.replace(/^💬\s*/, "") }));
-    });
+    if (lines.length) agent.appendChild(buildTimeline(lines, r.status === "running"));
     if (r.status === "running" && !(r.activity || []).length) agent.appendChild(h("div", { class: "sub", text: "시작하는 중…" }));
     if (r.status === "running") agent.appendChild(h("div", { class: "cw-typing", "aria-label": "작업 중" }, h("i"), h("i"), h("i")));
     if (r.stats && r.stats.cut_calls) box.appendChild(h("div", { class: "cw-card warn" }, h("p", { text: "⚠ 입력이 잘렸을 수 있습니다(" + r.stats.cut_calls + "회). 모델이 일부를 보지 못했을 수 있어요. 모델 옆 \"입력 한도 점검\"으로 확인하세요." })));
