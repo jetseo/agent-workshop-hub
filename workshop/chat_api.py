@@ -65,7 +65,8 @@ class Context:
         self.feed = ServiceFeed(providers.path.parent / "service-feed.json", builtin=setup_page.CATALOG)
         setup_page.set_extra(self.feed.catalog_entries())             # services found earlier by the daily list
         self.quota = quotaguard.install(quotaguard.FreeQuotaGuard(providers.path.parent / "quota-guard.json"))   # fail-closed gate for guarded free services
-        self.code = CodeRuns(providers, use_guidance=lambda: self.watch.settings().get("code_guidance", False))                             # coding agent (OpenCode) in throw-away worktrees
+        self.code = CodeRuns(providers, use_guidance=lambda: self.watch.settings().get("code_guidance", False),
+                         recorder=lambda model, ok, seconds, kind, tokens: _stats(self).record(model, ok=ok, seconds=seconds, kind=kind, tokens=tokens))                             # coding agent (OpenCode) in throw-away worktrees
 
 
         self.projects = ProjectRegistry(providers.path.parent / "projects.json", check_repo=CodeRuns.check_repo)   # the projects JetAI may work on

@@ -148,7 +148,8 @@ def summarise(event):
 
 class CodeRuns:
     def __init__(self, providers, *, find_binary=adapters.find_opencode, popen=subprocess.Popen, clock=time.time, max_runtime=MAX_RUNTIME,
-                 worktree_base=None, info=None, command_fn=opencode_command, check_timeout=CHECK_TIMEOUT, use_guidance=lambda: True, direct_chat=None):
+                 worktree_base=None, info=None, command_fn=opencode_command, check_timeout=CHECK_TIMEOUT, use_guidance=lambda: True, direct_chat=None, recorder=None):
+        self.recorder = recorder                                     # optional fn(model, ok, seconds, kind, tokens) for routing statistics
         self.providers = providers
         self.command_fn = command_fn
         self.home = home_dir(providers)
@@ -591,6 +592,18 @@ class CodeRuns:
             run["status"], run["error"] = "failed", result["error"] or "직접 모드가 끝나지 못했습니다."
         self._collect(run, keep_status=run["status"] in ("cancelled", "failed"))
         self._save(run)
+        self._record_outcome(run)
+
+    def _record_outcome(self, run):
+        """Feed the router's statistics; never let a recording problem fail the run."""
+        if not self.recorder or run.get("status") == "cancelled":
+            return
+        try:
+            ok = run.get("status") != "failed" and (run.get("checks") or {}).get("verdict") != "failed"
+            self.recorder(run.get("model") or "", ok, max(0.0, (run.get("finished") or 0) - (run.get("started") or 0)),
+                          "code:" + str(run.get("mode") or "agent"), (run.get("stats") or {}).get("tokens_est"))
+        except Exception:
+            pass
 
     @staticmethod
     def _trial_score(trial):
