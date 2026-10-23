@@ -293,6 +293,46 @@ class ProviderIntegrationTests(GuardCase):
         self.assertEqual(self.guard.status(GID)["total_tokens"], 0)
 
 
+class GuardByHostTests(GuardCase):
+    """A guarded service stays guarded however it was registered: the guard follows the address, not only the `guard` field."""
+
+    def test_the_guard_is_found_from_the_address(self):
+        self.assertEqual(quotaguard.guard_for_url("https://api.inceptionlabs.ai/v1"), GID)
+        self.assertEqual(quotaguard.guard_for_url("https://API.InceptionLabs.AI/v1"), GID)
+        for other in ("https://api.inceptionlabs.ai.evil.example/v1", "https://evil-api.inceptionlabs.ai.example/v1",
+                      "https://example.com/api.inceptionlabs.ai", "http://127.0.0.1:11434/v1", "", None, 5):
+            self.assertIsNone(quotaguard.guard_for_url(other), other)
+
+    def test_a_service_added_without_the_guard_field_is_guarded_anyway(self):
+        providers = Providers(Path(self.tmp.name) / "providers.json")
+        providers.add("custom-mercury", base_url="https://api.inceptionlabs.ai/v1", data_policy="cloud-may-train", free_all=True, models=["mercury-3"])
+        entry = providers.get("custom-mercury")
+        self.assertEqual(entry["guard"], GID)                                      # derived from the address
+        self.assertEqual(usage.tier_for(entry, "mercury-3"), "other")             # "free_all" does not make it free: the guard decides
+
+    def test_a_chat_to_such_a_service_is_refused_before_any_network_call(self):
+        def no_network(*a, **k):
+            raise AssertionError("a request left the PC")
+        old = chat._open
+        chat._open = no_network
+        self.addCleanup(setattr, chat, "_open", old)
+        provider = {"base_url": "https://api.inceptionlabs.ai/v1", "api_key": "sk-secret-0123456789", "data_policy": "cloud-may-train"}     # no `guard`
+        with self.assertRaises(QuotaBlocked):
+            chat.chat(provider, "mercury-3", [{"role": "user", "content": "hi"}], max_tokens=16)
+        with self.assertRaises(QuotaBlocked):
+            list(chat.chat_stream(provider, "mercury-3", [{"role": "user", "content": "hi"}], max_tokens=16))
+
+    def test_code_work_refuses_it_too(self):
+        from workshop.codework import CodeRuns, CodeWorkError
+        providers = Providers(Path(self.tmp.name) / "providers.json")
+        providers.add("custom-mercury", base_url="https://api.inceptionlabs.ai/v1", data_policy="cloud-may-train", models=["mercury-3"])
+        providers.set_consent("custom-mercury")
+        runs = CodeRuns(providers, find_binary=lambda: "x")
+        self.assertEqual([o for o in runs.model_options() if o["ref"].startswith("custom-mercury/")], [])
+        with self.assertRaises(CodeWorkError):
+            runs._resolve_model("custom-mercury/mercury-3", False)
+
+
 class FallbackTests(GuardCase):
     def test_the_router_drops_a_closed_service_and_uses_other_free_models(self):
         from workshop import router
