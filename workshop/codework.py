@@ -27,6 +27,7 @@ from pathlib import Path
 
 from . import adapters, checks, cmdguard, codereport, codereview, directmode, guidance, modelpick, projectmap, usage, worktree
 
+MAX_MIX = 3                                                    # direct mode: models that take turns across the tries
 MAX_ATTEMPTS = 5                                               # direct mode: tries per task (each in its own copy)
 CHECK_TIMEOUT = 300                                             # seconds per build/test command
 MAX_PROMPT = 8000
@@ -216,7 +217,7 @@ class CodeRuns:
 
     @staticmethod
     def _summary(run):
-        keys = ("id", "repo", "prompt", "model", "status", "started", "finished", "error", "files", "stat", "applied_at", "undone_at", "tier", "repo_was_dirty", "project", "blocked", "approvals", "checks", "review", "guidance", "mode", "attempts", "attempts_log")
+        keys = ("id", "repo", "prompt", "model", "status", "started", "finished", "error", "files", "stat", "applied_at", "undone_at", "tier", "repo_was_dirty", "project", "blocked", "approvals", "checks", "review", "guidance", "mode", "attempts", "attempts_log", "models")
         return {k: run.get(k) for k in keys}
 
     @staticmethod
@@ -322,9 +323,9 @@ class CodeRuns:
             raise CodeWorkError("시스템 폴더는 쓸 수 없습니다.")
         return repo
 
-    def start(self, repo_path, prompt, model_ref="auto", confirm_cost=False, guidance_on=None, mode="agent", validate=True, attempts=1):
+    def start(self, repo_path, prompt, model_ref="auto", confirm_cost=False, guidance_on=None, mode="agent", validate=True, attempts=1, models=None):
         if mode == "direct":
-            return self._start_direct(repo_path, prompt, model_ref, confirm_cost, validate, attempts)
+            return self._start_direct(repo_path, prompt, model_ref, confirm_cost, validate, attempts, models)
         if mode != "agent":
             raise CodeWorkError("알 수 없는 방식입니다.")
         with self._lock:
@@ -407,7 +408,7 @@ class CodeRuns:
             raise CodeWorkError("요금이 나올 수 있거나 무료 한도 보호가 닫혀 있는 모델입니다. 비용을 확인하고 체크해야 실행됩니다.")
         return provider, model, tier
 
-    def _start_direct(self, repo_path, prompt, model_ref, confirm_cost, validate, attempts=1):
+    def _start_direct(self, repo_path, prompt, model_ref, confirm_cost, validate, attempts=1, models=None):
         if not isinstance(attempts, int) or isinstance(attempts, bool) or not 1 <= attempts <= MAX_ATTEMPTS:
             raise CodeWorkError("시도 횟수는 1~%d 사이로 정하세요." % MAX_ATTEMPTS)
         if attempts > 1 and not validate:
@@ -418,9 +419,24 @@ class CodeRuns:
             repo = self.check_repo(repo_path)
             if not isinstance(prompt, str) or not prompt.strip() or len(prompt) > MAX_PROMPT:
                 raise CodeWorkError("요청은 1~%d자로 써 주세요." % MAX_PROMPT)
-            if model_ref in (None, "", "auto"):
-                model_ref = self.auto_direct_model()
-            provider, model, tier = self._resolve_direct_model(model_ref, confirm_cost)
+            if models is not None and (not isinstance(models, list) or len(models) > MAX_MIX or any(not isinstance(m, str) for m in models)):
+                raise CodeWorkError("번갈아 쓸 모델은 최대 %d개까지 고를 수 있습니다." % MAX_MIX)
+            refs = []
+            for ref in [model_ref] + list(models or []):
+                if ref not in (None, "", "auto") and ref not in refs:
+                    refs.append(ref)
+            if not refs:
+                refs = [self.auto_direct_model()]
+            if models and "auto" in models:                    # "auto": also take the strongest other local/free model, if there is one
+                others = [o for o in self._direct_candidates() if o["ref"] not in refs]
+                if others:
+                    refs.append(max(others, key=lambda o: (o["level"], o["tier"] == "local"))["ref"])
+            pool = []
+            for ref in refs:
+                provider, model, tier = self._resolve_direct_model(ref, confirm_cost)
+                pool.append((provider, model, ref))
+            model_ref = refs[0]
+            tier = usage.tier_for(pool[0][0], pool[0][1])
             run_id = uuid.uuid4().hex[:12]
             try:
                 base_commit = worktree._git("rev-parse", "HEAD", cwd=repo).strip()
@@ -431,23 +447,22 @@ class CodeRuns:
             run = {"id": run_id, "repo": str(repo), "prompt": prompt.strip(), "model": model_ref, "tier": tier, "status": "running", "mode": "direct",
                    "started": self.clock(), "finished": None, "error": "", "worktree": str(path), "branch": branch, "base": base_commit,
                    "files": [], "stat": "", "activity": [], "repo_was_dirty": dirty, "cost_ok": confirm_cost is True, "session": "",
-                   "once_allow": [], "blocked": [], "approvals": [], "guidance": "off", "validate": bool(validate), "attempts": attempts}
+                   "once_allow": [], "blocked": [], "approvals": [], "guidance": "off", "validate": bool(validate), "attempts": attempts, "models": refs if len(refs) > 1 else None}
             try:
                 run["project"] = projectmap.render(projectmap.read_project(path))
             except Exception:
                 run["project"] = ""
             self._save(run)
-            thread = threading.Thread(target=self._run_direct, args=(run, provider, model), name="direct-" + run_id, daemon=True)
+            thread = threading.Thread(target=self._run_direct, args=(run, pool), name="direct-" + run_id, daemon=True)
             self._threads[run_id] = thread
             thread.start()
             return self._summary(run)
 
-    def _run_direct(self, run, provider, model):
+    def _run_direct(self, run, pool):
         """Up to `attempts` tries, each in its own copy; stops at the first one whose tests pass, else keeps the best by score."""
         run_id, directory = run["id"], self._path(run["id"])
         tail = self._tails.setdefault(run_id, [])
         events = open(directory / "events.jsonl", "ab")
-        timeout = 300 if provider.get("data_policy") == "local" else 120
         total = max(1, int(run.get("attempts", 1)))
         validate = run.get("validate", True)
         trials = []
@@ -470,12 +485,14 @@ class CodeRuns:
                     except (RuntimeError, ValueError) as error:
                         emit("attempt", False, "%d번째 복사본을 만들지 못함: %s" % (number, str(error)[:80]))
                         break
+                provider, model, ref = pool[(number - 1) % len(pool)]           # with several models the tries take turns
+                timeout = 300 if provider.get("data_policy") == "local" else 120
                 if total > 1:
-                    emit("attempt", True, "%d/%d 시작" % (number, total))
-                trial = {"n": number, "path": path, "branch": branch, "checks": None, "result": {"ok": False, "error": "", "changed": []}}
+                    emit("attempt", True, "%d/%d 시작%s" % (number, total, (" (%s)" % ref) if len(pool) > 1 else ""))
+                trial = {"n": number, "path": path, "branch": branch, "model": ref, "checks": None, "result": {"ok": False, "error": "", "changed": []}}
                 temperature = None if number == 1 else min(1.0, 0.5 + 0.15 * number)       # later tries need some variety to differ from the first
 
-                def ask(messages, max_tokens, temperature=temperature):
+                def ask(messages, max_tokens, temperature=temperature, provider=provider, model=model, timeout=timeout):
                     return self.direct_chat(provider, model, messages, timeout=timeout, max_tokens=max_tokens, temperature=temperature)
 
                 def test_fn(path=path, trial=trial):
@@ -510,7 +527,7 @@ class CodeRuns:
         else:
             result = {"ok": False, "error": "시도하지 못했습니다.", "changed": []}
         if total > 1:
-            run["attempts_log"] = [{"n": t["n"], "verdict": t["verdict"], "ok": t["result"]["ok"], "lines": t["lines"], "error": t["result"]["error"], "chosen": t is best} for t in trials]
+            run["attempts_log"] = [{"n": t["n"], "verdict": t["verdict"], "ok": t["result"]["ok"], "lines": t["lines"], "error": t["result"]["error"], "chosen": t is best, "model": t.get("model")} for t in trials]
         run["finished"] = self.clock()
         run["activity"] = list(tail)[-60:]
         if best is not None and best["checks"] is not None:

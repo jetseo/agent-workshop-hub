@@ -15,6 +15,7 @@
 | [architecture/free-quota-guard.md](architecture/free-quota-guard.md) | 무료 한도 보호(fail-closed) 설계 |
 | [development/mercury3-integration-progress.md](development/mercury3-integration-progress.md) | Mercury 3 통합 진행·판정·사용자 결정 사항 |
 | [direct-mode.md](direct-mode.md) | 직접 모드(Agentless식): 약한 모델용 코드 수정 흐름·안전·실측 |
+| [autonomous-agent-plan.md](autonomous-agent-plan.md) | 자율 코딩 에이전트 + Computer Use 통합 계획(프롬프트 대비 현황표·결정 사항·단계·테스트 T01~T18) |
 | [multi-agent-plan.md](multi-agent-plan.md) | 에이전트 분업·병렬 구조 조사(체인·지휘자-일꾼·best-of-N·Agentless)와 M0~M4 적용 계획 |
 | [subscription-tools.md](subscription-tools.md) | Codex·Claude Code 구독 자동화 권한 조사(결론: 연결 안 함) |
 | [remote-control.md](remote-control.md) | 모바일 원격 제어(텔레그램) 사용법·안전 규칙·다른 후보 비교 |

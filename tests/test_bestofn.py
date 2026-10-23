@@ -13,7 +13,7 @@ BAD = blocks("    return a - b", "    return a * b")
 BIGGER = blocks("    return a - b", "    x = a\n    y = b\n    z = x * y\n    return z")
 
 
-class BestOfNTests(Base):
+class WithUnitTest(Base):
     def setUp(self):
         super().setUp()
         (self.repo / "tests").mkdir()
@@ -22,6 +22,9 @@ class BestOfNTests(Base):
         subprocess.run(["git", "add", "-A"], cwd=self.repo, check=True)
         subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "unit"], cwd=self.repo, check=True)
 
+
+
+class BestOfNTests(WithUnitTest):
     def make(self, script):
         self.runs.shutdown()
         self.script = script
@@ -95,6 +98,55 @@ class BestOfNTests(Base):
         done = self.wait(run_id)
         self.assertEqual(done["status"], "cancelled")
         self.assertLessEqual(len(self.copies()), 1)
+
+
+class MixedModelTests(WithUnitTest):
+    """The tries take turns across several models (they solve different tasks); the first model is tried first."""
+
+    def make_recording(self, script):
+        self.runs.shutdown()
+        self.script, self.used = script, []
+
+        def chat(provider, model, messages, timeout, max_tokens, temperature=None):
+            self.used.append(model)
+            return script(messages, max_tokens, temperature)
+        self.runs = CodeRuns(self.providers, find_binary=lambda: None, worktree_base=self.dir / "wt", direct_chat=chat)
+        self.addCleanup(self.runs.shutdown)
+
+    def test_the_second_model_gets_the_second_try_and_the_log_names_the_models(self):
+        self.make_recording(Script(localize=LOCALIZE, edits=[BAD, BAD, GOOD]))
+        run = self.runs.start(str(self.repo), "add가 뺄셈을 해요. 고쳐줘", "loc/qwen2.5-coder:32b", mode="direct", attempts=3, models=["loc/tiny-3b"])
+        self.assertEqual(run["models"], ["loc/qwen2.5-coder:32b", "loc/tiny-3b"])
+        done = self.wait(run["id"], "review")
+        log = {a["n"]: a for a in done["attempts_log"]}
+        self.assertEqual((log[1]["model"], log[2]["model"]), ("loc/qwen2.5-coder:32b", "loc/tiny-3b"))
+        self.assertTrue(log[2]["chosen"])
+        self.assertEqual(self.used[0], "qwen2.5-coder:32b")
+        self.assertIn("tiny-3b", self.used)
+        self.assertTrue(any("loc/tiny-3b" in line for line in done["activity"]))
+
+    def test_a_third_try_goes_back_to_the_first_model(self):
+        self.make_recording(Script(localize=LOCALIZE, edits=[BAD, BAD, BAD, BAD, GOOD]))
+        run = self.runs.start(str(self.repo), "고쳐줘", "loc/qwen2.5-coder:32b", mode="direct", attempts=3, models=["loc/tiny-3b"])
+        done = self.wait(run["id"], "review")
+        self.assertEqual([a["model"] for a in done["attempts_log"]], ["loc/qwen2.5-coder:32b", "loc/tiny-3b", "loc/qwen2.5-coder:32b"])
+
+    def test_auto_adds_the_strongest_other_free_or_local_model(self):
+        self.make_recording(Script(localize=LOCALIZE, edits=[GOOD]))
+        run = self.runs.start(str(self.repo), "고쳐줘", "loc/qwen2.5-coder:32b", mode="direct", attempts=2, models=["auto"])
+        self.assertEqual(len(run["models"]), 2)
+        self.assertNotEqual(run["models"][1], "loc/qwen2.5-coder:32b")
+        self.assertNotEqual(run["models"][1].split("/")[0], "pay")                           # never a paid model
+        self.wait(run["id"])
+
+    def test_every_model_in_the_list_is_checked_like_the_first(self):
+        self.make_recording(Script())
+        for bad in (["pay/gpt-x"], ["opencode/x-free"], ["nope/zzz"], ["a/b", "c/d", "e/f", "g/h"], "loc/tiny-3b", [3]):
+            with self.assertRaises(CodeWorkError, msg=repr(bad)):
+                self.runs.start(str(self.repo), "x", "loc/qwen2.5-coder:32b", mode="direct", attempts=2, models=bad)
+        run = self.runs.start(str(self.repo), "x", "loc/qwen2.5-coder:32b", mode="direct", attempts=1, models=["loc/qwen2.5-coder:32b"])
+        self.assertIsNone(run["models"])                                                    # duplicates collapse to a single model
+        self.wait(run["id"])
 
 
 class ScoreTests(unittest.TestCase):
