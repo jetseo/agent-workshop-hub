@@ -187,7 +187,7 @@ GitHub Actions의 `JetAI-portable` 산출물(또는 `.\scripts\build-package.ps1
 ## Windows 설치 프로그램 (JetAI-Setup.exe)
 
 `dist\JetAI-Setup.exe` 하나로 설치·제거합니다(관리자 권한 불필요, 현재 사용자 전용).
-- 설치: `%LOCALAPPDATA%\Programs\JetAI`(바꿀 수 있음). 앱 + 공식 임베디드 Python 3.12가 들어 있어 **Python을 따로 설치하지 않아도** 됩니다. 시작 메뉴·바탕화면 바로가기, "앱 및 기능" 항목이 생깁니다. 비어 있지 않은 다른 폴더에는 설치를 거부합니다.
+- 설치: 기본 **`C:\JetAI`**(바꿀 수 있음, 일반 사용자도 C:\ 바로 아래에 폴더를 만들 수 있어 관리자 권한은 필요 없음). 예전 기본 폴더(`%LOCALAPPDATA%\Programs\JetAI`)에 설치돼 있었다면 새 설치가 끝난 뒤 그 폴더만 지웁니다(표식 파일이 있을 때만, 실행 중이라 못 지우면 남겨 둠). 사용자가 직접 고른 다른 폴더(예: `D:\JetAI`)는 지우지 않으므로, 옮겨 설치했다면 이전 폴더는 직접 지우세요. 앱 + 공식 임베디드 Python 3.12가 들어 있어 **Python을 따로 설치하지 않아도** 됩니다. 시작 메뉴·바탕화면 바로가기, "앱 및 기능" 항목이 생깁니다. 비어 있지 않은 다른 폴더에는 설치를 거부합니다.
 - 제거: "앱 및 기능" 또는 설치 폴더의 `Uninstall.exe`. **데이터 폴더 `~/.agent-workshop`(키·대화·사용 기록)는 지우지 않습니다.**
 - **실행**: `JetAI.exe`(바탕화면·시작 메뉴 바로가기)를 누르면 PowerShell·콘솔 창 **없이** 서버가 뒤에서 뜨고 앱 창이 열립니다. 작업 표시줄 오른쪽 아래(숨겨진 아이콘 포함)에 JetAI 트레이 아이콘이 남으며, 아이콘 오른쪽 클릭 → **종료**를 누르면 서버도 꺼집니다(앱 창만 닫으면 서버는 계속 실행 중이라 텔레그램·대기열 작업이 이어집니다). 서버 로그는 `%USERPROFILE%\.agent-workshop\logs\jetai-server.log`(트레이 → 로그 보기).
 - 조용히 설치: `JetAI-Setup.exe /S /D=C:\경로\JetAI /nodesktop /nostart`, 제거: `Uninstall.exe /uninstall /S`.

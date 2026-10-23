@@ -1,7 +1,8 @@
 // JetAI-Setup.exe - installer and uninstaller in one file (C# 5, compiled with the compiler that ships with Windows).
 // The app package (portable zip: app + embeddable Python) is embedded as the resource "payload.zip".
-// Installs for the current user only (no admin rights) into %LOCALAPPDATA%\Programs\JetAI, adds Start-menu and
-// optional desktop shortcuts and an "Apps & features" entry. The uninstaller never touches the data folder
+// Installs for the current user only (no admin rights) into C:\JetAI by default, adds Start-menu and
+// optional desktop shortcuts and an "Apps & features" entry. The former default folder
+// %LOCALAPPDATA%\Programs\JetAI is removed after a new install succeeded; any other folder is left alone. The uninstaller never touches the data folder
 // (%USERPROFILE%\.agent-workshop: keys, chats, usage).
 // Command line: /S silent, /D=<folder> target, /nodesktop, /nostart, /uninstall (silent with /S).
 using System;
@@ -21,7 +22,7 @@ static class JetAISetup
     const string Marker = "PACKAGE.txt";           // a folder without this file is never wiped by the uninstaller
 
     static bool silent, desktopLink = true, startLink = true;
-    static string target = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @"Programs\JetAI");
+    static string target = @"C:\JetAI";                // default; a normal user may create folders directly under C:\ (no admin rights)
 
     [STAThread]
     static int Main(string[] args)
@@ -63,6 +64,9 @@ static class JetAISetup
         if (Directory.Exists(full) && Directory.GetFileSystemEntries(full).Length > 0 && !File.Exists(Path.Combine(full, Marker)))
             throw new InvalidOperationException("이 폴더에는 이미 다른 파일이 있어 설치하지 않았습니다.\n빈 폴더이거나 JetAI 폴더를 고르세요.\n\n" + full);
         target = full;
+        string previous = null;
+        using (RegistryKey old = Registry.CurrentUser.OpenSubKey(UninstallKey))
+            if (old != null) previous = old.GetValue("InstallLocation") as string;
         Directory.CreateDirectory(full);
         Assembly me = Assembly.GetExecutingAssembly();
         using (Stream payload = me.GetManifestResourceStream("payload.zip"))
@@ -106,7 +110,23 @@ static class JetAISetup
             key.SetValue("NoModify", 1, RegistryValueKind.DWord);
             key.SetValue("NoRepair", 1, RegistryValueKind.DWord);
         }
+        RemoveOldCopy(previous, full);
         progress(100);
+    }
+
+    // Only the former default location (%LOCALAPPDATA%\Programs\JetAI) is cleaned up, and only with the marker file; failures (still running) are ignored.
+    static void RemoveOldCopy(string previous, string current)
+    {
+        try
+        {
+            if (string.IsNullOrEmpty(previous)) return;
+            string old = Path.GetFullPath(previous);
+            string legacy = Path.GetFullPath(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "JetAI"));
+            if (!old.Equals(legacy, StringComparison.OrdinalIgnoreCase)) return;     // only the former default location; a folder the user picked is never deleted
+            if (old.Equals(current, StringComparison.OrdinalIgnoreCase) || !File.Exists(Path.Combine(old, Marker))) return;
+            Directory.Delete(old, true);
+        }
+        catch { }
     }
 
     static void MakeLink(string link, string workDir, string exe)
