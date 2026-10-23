@@ -171,6 +171,8 @@ def _code_api(ctx, method, rest, body):
                 code.review(run_id, body.get("model") or "auto")
             elif action == "check":
                 code.check(run_id)
+            elif action == "webcheck":
+                code.webcheck(run_id, str(body.get("url") or ""))
             elif action == "command":
                 code.decide(run_id, body.get("id"), body.get("decision"))
             elif action == "undo":
