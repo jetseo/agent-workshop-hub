@@ -15,6 +15,7 @@ Safety design (each point is covered by tests):
   * models: free or local only; a paid model needs the explicit `confirm_cost`; OpenCode Zen is limited to `-free` ids;
   * apply = `git apply` of the saved patch after `--check`, never a commit.
 """
+import base64
 import json
 import os
 import re
@@ -22,10 +23,11 @@ import shutil
 import subprocess
 import threading
 import time
+import urllib.parse
 import uuid
 from pathlib import Path
 
-from . import adapters, agentloop, ctxprobe, checks, cmdguard, codereport, codereview, directmode, guidance, modelpick, projectmap, usage, worktree
+from . import adapters, agentloop, ctxprobe, checks, webcheck, cmdguard, codereport, codereview, directmode, guidance, modelpick, projectmap, usage, worktree
 
 MAX_MIX = 3                                                    # direct mode: models that take turns across the tries
 MAX_ATTEMPTS = 5                                               # direct mode: tries per task (each in its own copy)
@@ -149,6 +151,7 @@ def summarise(event):
 class CodeRuns:
     def __init__(self, providers, *, find_binary=adapters.find_opencode, popen=subprocess.Popen, clock=time.time, max_runtime=MAX_RUNTIME,
                  worktree_base=None, info=None, command_fn=opencode_command, check_timeout=CHECK_TIMEOUT, use_guidance=lambda: True, direct_chat=None, recorder=None):
+        self.webcheck_fn = webcheck.run_check                       # replaced in tests
         self.recorder = recorder                                     # optional fn(model, ok, seconds, kind, tokens) for routing statistics
         self.providers = providers
         self.command_fn = command_fn
@@ -223,7 +226,7 @@ class CodeRuns:
 
     @staticmethod
     def _summary(run):
-        keys = ("id", "repo", "prompt", "model", "status", "started", "finished", "error", "files", "stat", "applied_at", "undone_at", "tier", "repo_was_dirty", "project", "blocked", "approvals", "checks", "review", "guidance", "mode", "attempts", "attempts_log", "models", "project_id", "project_name", "limits", "stats")
+        keys = ("id", "repo", "prompt", "model", "status", "started", "finished", "error", "files", "stat", "applied_at", "undone_at", "tier", "repo_was_dirty", "project", "blocked", "approvals", "checks", "review", "guidance", "mode", "attempts", "attempts_log", "models", "project_id", "project_name", "limits", "stats", "webcheck")
         return {k: run.get(k) for k in keys}
 
     @staticmethod
@@ -245,6 +248,9 @@ class CodeRuns:
         report = self._path(run_id) / "report.md"
         if report.exists():
             detail["report"] = report.read_text(encoding="utf-8", errors="replace")[:20000]
+        shot = self._path(run_id) / "webcheck.png"
+        if shot.exists() and shot.stat().st_size < 900_000:
+            detail["webcheck_image"] = base64.b64encode(shot.read_bytes()).decode("ascii")
         patch = self._path(run_id) / "patch.diff"
         if patch.exists():
             text = patch.read_text(encoding="utf-8", errors="replace")
@@ -930,6 +936,53 @@ class CodeRuns:
             info.update({"state": "failed", "error": codereport.mask(str(error))[:200]})
         info["finished"] = self.clock()
         self._save(run)
+
+    # -- page check (observe only) -------------------------------------------------------------------------------
+    def webcheck(self, run_id, url=""):
+        """Open a local page in a throw-away headless browser and report what it shows, with a screenshot (only on request)."""
+        with self._lock:
+            run = self._read(run_id)
+            if run["status"] == "running":
+                raise CodeWorkError("작업이 실행 중입니다. 끝난 뒤 확인하세요.")
+            if (run.get("webcheck") or {}).get("state") == "running":
+                raise CodeWorkError("이미 화면을 확인하는 중입니다.")
+            dev_url, hosts = "", []
+            try:
+                project = self.projects.get(run["project_id"]) if getattr(self, "projects", None) and run.get("project_id") else None
+            except Exception:
+                project = None
+            if project and project.get("dev_url"):
+                dev_url = project["dev_url"]
+                hosts = [(urllib.parse.urlparse(dev_url).hostname or "")]
+            url = (url or dev_url or "").strip()
+            if not url:
+                raise CodeWorkError("확인할 주소를 적으세요(예: http://localhost:5173). 프로젝트 설정에 개발 서버 주소를 등록해 두면 자동으로 채워집니다.")
+            if not webcheck.cdp.host_allowed(url, hosts):
+                raise CodeWorkError("허용되지 않은 주소입니다. localhost 또는 프로젝트에 등록한 개발 서버 주소만 열 수 있습니다.")
+            run["webcheck"] = {"state": "running", "url": url[:300], "started": self.clock()}
+            self._save(run)
+            thread = threading.Thread(target=self._run_webcheck, args=(run, url, hosts), name="webcheck-" + run_id, daemon=True)
+            thread.start()
+
+    def _run_webcheck(self, run, url, hosts):
+        info = run["webcheck"]
+        shot = self._path(run["id"]) / "webcheck.png"
+        try:
+            info.update(self.webcheck_fn(url, str(shot), allow_hosts=hosts))
+        except Exception as error:
+            info.update({"ok": False, "error": codereport.mask(str(error))[:200]})
+        info["state"] = "done"
+        info["finished"] = self.clock()
+        info["has_image"] = shot.exists()
+        self._save(run)
+        self._audit_note(run["id"], {"state": "webcheck", "url": url[:200], "ok": bool(info.get("ok")), "problems": len(info.get("problems") or [])})
+
+    def _audit_note(self, run_id, entry):
+        try:
+            with open(self._path(run_id) / "audit.jsonl", "a", encoding="utf-8") as handle:
+                handle.write(json.dumps({"t": self.clock(), **entry}, ensure_ascii=False) + "\n")
+        except OSError:
+            pass
 
     # -- build/test checks ---------------------------------------------------------------------------------------
     def check(self, run_id):
