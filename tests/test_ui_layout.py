@@ -23,12 +23,12 @@ class LayoutStaticTests(unittest.TestCase):
 
     def test_css_defines_the_width_variables_rail_mode_and_the_gutter(self):
         css = (STATIC / "app.css").read_text(encoding="utf-8")
-        for needle in ("--side-w", "--runs-w", ".gutter", "#side.collapsed", ".cw.runs-closed"):
+        for needle in ("--side-w", "--runs-w", "--chg-w", ".gutter", "#side.collapsed", ".cw.runs-closed", ".cw.changes-closed", ".cw-changes", ".chg-file", ".cw-composer .cw-opts"):
             self.assertIn(needle, css)
 
     def test_script_wires_resizer_shortcuts_and_the_runs_toggle(self):
         js = (STATIC / "app.js").read_text(encoding="utf-8")
-        for needle in ("function makeResizer", "toggleRuns", "setHidden", 'key.toLowerCase() !== "b"', "code-toggle-runs"):
+        for needle in ("function makeResizer", "toggleRuns", "setHidden", "renderChanges", "toggleChanges", "code-toggle-changes", 'key.toLowerCase() !== "b"', "code-toggle-runs"):
             self.assertIn(needle, js)
 
 
