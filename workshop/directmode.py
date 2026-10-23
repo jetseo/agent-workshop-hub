@@ -235,14 +235,7 @@ def run(chat, task, worktree, files, summary, test_fn, emit, *, cancelled=lambda
                 result["error"] = "파일이 너무 커서 직접 모드로 고칠 수 없습니다: " + rel
                 return result
             original[rel] = (text, bom, crlf)
-        for rel in existing:
-            if stopped():
-                return result
-            ok = _edit_file(ask, task, worktree, rel, original[rel], emit, retry=True, ctx=ctx)
-            if not ok:
-                result["error"] = "%s 에 수정안을 적용하지 못했습니다." % rel
-                return result
-            result["changed"].append(rel)
+        done_notes = []                                                  # what earlier files now contain, shown to the model when it edits the next one
         for rel in new:
             if stopped():
                 return result
@@ -262,6 +255,17 @@ def run(chat, task, worktree, files, summary, test_fn, emit, *, cancelled=lambda
             write_text(path, body if body.endswith("\n") else body + "\n", False, False)
             emit("create", True, rel)
             result["changed"].append(rel)
+            done_notes.append("New file %s now contains:\n%s" % (rel, body[:800]))
+        for rel in existing:
+            if stopped():
+                return result
+            ok = _edit_file(ask, task, worktree, rel, original[rel], emit, retry=True, ctx=ctx + _earlier(done_notes))
+            if not ok:
+                result["error"] = "%s 에 수정안을 적용하지 못했습니다." % rel
+                return result
+            result["changed"].append(rel)
+            now = read_text(safe_path(worktree, rel))[0]
+            done_notes.append("Changed %s:\n%s" % (rel, _diff_note(original[rel][0], now, rel)))
         if not validate:
             result["ok"] = True
             return result
@@ -272,7 +276,7 @@ def run(chat, task, worktree, files, summary, test_fn, emit, *, cancelled=lambda
             for rel in existing:
                 text, bom, crlf = read_text(safe_path(worktree, rel))
                 original[rel] = (text, bom, crlf)
-            fixed = _repair(ask, task, worktree, existing, original, output, emit, ctx)
+            fixed = _repair(ask, task, worktree, existing, original, output, emit, ctx + _earlier(done_notes))
             if fixed:
                 verdict, output = test_fn()
                 emit("test", verdict == "passed", "수정 뒤 결과: " + verdict)
@@ -283,6 +287,19 @@ def run(chat, task, worktree, files, summary, test_fn, emit, *, cancelled=lambda
         result["error"] = "모델 호출 실패: " + str(error)[:200]
         emit("localize" if not result["changed"] else "edit", False, result["error"])
         return result
+
+
+def _earlier(notes):
+    """A short block listing the changes already made in other files, so the next edit can use their names."""
+    if not notes:
+        return ""
+    return "\n\nAlready changed in this task (use these names, do not redo them):\n" + "\n\n".join(notes)[:2500]
+
+
+def _diff_note(before, after, rel):
+    import difflib
+    lines = list(difflib.unified_diff(before.splitlines(), after.splitlines(), "a/" + rel, "b/" + rel, n=1, lineterm=""))
+    return "\n".join(lines)[:1200]
 
 
 def _edit_file(ask, task, worktree, rel, current, emit, retry, ctx=""):
@@ -305,6 +322,11 @@ def _edit_file(ask, task, worktree, rel, current, emit, retry, ctx=""):
                 return None, "Your reply had no SEARCH/REPLACE blocks in the required format.", ""
             candidate, note = whole.group(1).replace("\r\n", "\n"), "파일 전체를 다시 씀"
             candidate = candidate if candidate.endswith("\n") else candidate + "\n"
+        if rel.endswith(".py"):
+            try:
+                compile(candidate, rel, "exec")
+            except SyntaxError as error:                       # catch a broken file now, while the model still has the context
+                return None, "Your change makes the file invalid Python (line %s: %s). Fix it." % (error.lineno, error.msg), ""
         if candidate == text:
             return None, "Your change left the file unchanged. Make the change the task asks for.", ""
         if len(text) > 200 and len(candidate.strip()) < len(text.strip()) * 0.2:
