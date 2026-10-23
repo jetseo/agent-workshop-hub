@@ -183,3 +183,12 @@ GitHub Actions의 `JetAI-portable` 산출물(또는 `.\scripts\build-package.ps1
 - 종료: 최소화된 PowerShell 창(서버)을 닫으면 JetAI가 멈춥니다.
 - 포트를 바꾸려면 바로가기 대상 끝에 `-Port 8790`을 붙입니다.
 - Windows SmartScreen이 "알 수 없는 게시자" 경고를 낼 수 있습니다(코드 서명을 하지 않은 직접 만든 파일이라서). 직접 만든 파일일 때만 "추가 정보 → 실행"을 누르세요.
+
+## Windows 설치 프로그램 (JetAI-Setup.exe)
+
+`dist\JetAI-Setup.exe` 하나로 설치·제거합니다(관리자 권한 불필요, 현재 사용자 전용).
+- 설치: `%LOCALAPPDATA%\Programs\JetAI`(바꿀 수 있음). 앱 + 공식 임베디드 Python 3.12가 들어 있어 **Python을 따로 설치하지 않아도** 됩니다. 시작 메뉴·바탕화면 바로가기, "앱 및 기능" 항목이 생깁니다. 비어 있지 않은 다른 폴더에는 설치를 거부합니다.
+- 제거: "앱 및 기능" 또는 설치 폴더의 `Uninstall.exe`. **데이터 폴더 `~/.agent-workshop`(키·대화·사용 기록)는 지우지 않습니다.**
+- 조용히 설치: `JetAI-Setup.exe /S /D=C:\경로\JetAI /nodesktop /nostart`, 제거: `Uninstall.exe /uninstall /S`.
+- 만들기: `.\scripts\build-installer.ps1` (python.org에서 임베디드 Python zip 약 10 MB를 HTTPS로 한 번 내려받음 → `dist\JetAI-portable.zip` → `dist\JetAI-Setup.exe`, 약 11 MB). 서명하지 않아 SmartScreen 경고가 뜰 수 있습니다.
+- 코드 작업에는 설치 프로그램이 넣지 않는 것이 필요합니다: **git**(필수), 그리고 모델(Ollama 또는 무료 클라우드 서비스, 필요하면 OpenCode). 화면 "설정"에서 연결합니다.
