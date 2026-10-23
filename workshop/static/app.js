@@ -631,6 +631,9 @@
     root.dataset.built = "1"; root.textContent = "";
     var datalist = h("datalist", { id: "code-repos" });
     var repo = h("input", { type: "text", id: "code-repo", list: "code-repos", "aria-label": "프로젝트 폴더", placeholder: "프로젝트 폴더 (git 저장소)  예: D:\\projects\\myapp", value: store("code-repo") || "" });
+    var project = h("select", { id: "code-project", "aria-label": "프로젝트", title: "등록한 프로젝트를 고르거나, 새 git 폴더를 등록합니다. 작업은 항상 그 프로젝트의 복사본에서만 합니다." });
+    project.onchange = function () { codeProjectChanged(); };
+    var settingsBtn = h("button", { type: "button", class: "btn", id: "code-project-settings", text: "⚙", title: "프로젝트 설정", "aria-label": "프로젝트 설정", onclick: function () { if ($("code-project").value) renderProjectSettings($("code-project").value); } });
     var model = h("select", { id: "code-model", "aria-label": "모델" });
     var mode = h("select", { id: "code-mode", "aria-label": "방식", title: "에이전트: OpenCode가 도구를 써서 직접 고칩니다. 직접 모드: JetAI가 단계를 진행하고 모델은 글로 수정안만 씁니다(약한 모델에 적합)." },
       h("option", { value: "agent", text: "에이전트(OpenCode)" }), h("option", { value: "direct", text: "직접 모드(JetAI가 진행)" }));
@@ -649,7 +652,7 @@
       h("span", { text: " 작업 지침" }));
     var menu = h("div", { id: "code-slash", class: "cw-slash", role: "listbox", hidden: true });
     var form = h("form", { id: "code-composer", class: "cw-composer", autocomplete: "off", onsubmit: function (e) { e.preventDefault(); codeSubmit(); } },
-      h("div", { class: "cw-opts" }, repo, mode, attempts, mix, model, guide, validate), h("p", { class: "sub", id: "code-model-note" }), cost, menu,
+      h("div", { class: "cw-opts" }, project, settingsBtn, repo, mode, attempts, mix, model, guide, validate), h("p", { class: "sub", id: "code-model-note" }), cost, menu,
       h("div", { class: "cw-box" }, prompt, send));
     prompt.addEventListener("keydown", function (e) {
       if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); codeSubmit(); }
@@ -666,9 +669,16 @@
     codeBuildShell();
     var d; try { d = await api("GET", "/code"); } catch (e) { var s0 = $("code-stream"); if (s0) s0.textContent = e.message; return; }
     $("code-env").textContent = d.environment.opencode ? "" : "OpenCode를 찾지 못했습니다. 먼저 설치하세요(npm i -g opencode-ai).";
+    var pr; try { pr = (await api("GET", "/projects")).projects; } catch (e) { pr = []; }
+    codeProjects = pr;
+    var psel = $("code-project"), pprev = psel.value || store("code-project") || ""; psel.textContent = "";
+    pr.forEach(function (p) { psel.appendChild(h("option", { value: p.id, text: p.name })); });
+    psel.appendChild(h("option", { value: "", text: "＋ 새 프로젝트(폴더 등록)…" }));
+    psel.value = pr.some(function (p) { return p.id === pprev; }) ? pprev : (pr[0] ? pr[0].id : "");
+    codeProjectChanged();
     var repos = $("code-repos"); repos.textContent = "";
     d.repos.forEach(function (r) { repos.appendChild(h("option", { value: r })); });
-    if (!$("code-repo").value && d.repos[0]) $("code-repo").value = d.repos[0];
+    if (!pr.length && !$("code-repo").value && d.repos[0]) $("code-repo").value = d.repos[0];
     var sel = $("code-model"), prev = sel.value; sel.textContent = "";
     sel.appendChild(h("option", { value: "auto", text: "자동 (무료·로컬 중 코드 작업에 충분한 모델)" }));
     d.models.forEach(function (m) { sel.appendChild(h("option", { value: m.ref, "data-warn": m.warn || "", "data-tier": m.tier, text: m.ref + (m.tier === "local" ? " (내 PC)" : m.tier === "free" ? " (무료)" : " (유료 가능)") + (m.warn ? " ⚠" : "") })); });
@@ -698,6 +708,51 @@
         h("li", { text: "/ 를 입력하면 적용·되돌리기·검사·리뷰 같은 명령이 나옵니다." }))));
   }
   /* (welcome end) */
+  var codeProjects = [];
+  function codeProjectChanged() {
+    var isNew = !$("code-project").value;
+    $("code-repo").hidden = !isNew;
+    $("code-project-settings").hidden = isNew;
+  }
+  async function renderProjectSettings(id) {
+    var p; try { p = await api("GET", "/projects/" + id); } catch (e) { toast(e.message); return; }
+    var s = $("code-stream"); s.textContent = "";
+    function field(label, input) { return h("label", { class: "field" }, h("span", { text: label }), input); }
+    var name = h("input", { type: "text", value: p.name, maxlength: "60" });
+    var branch = h("input", { type: "text", value: p.work_branch || "", placeholder: "예: jetai/work" });
+    var dev = h("input", { type: "text", value: p.dev_url || "", placeholder: "예: http://localhost:5173" });
+    var apps = h("input", { type: "text", value: (p.allowed_apps || []).join(", "), placeholder: "화면 조작을 허용할 앱 이름(쉼표로, 최대 10개)" });
+    var cmds = {};
+    ["build", "test", "run", "lint"].forEach(function (k) {
+      var detected = (p.detected_commands || []).filter(function (c) { return c.kind === k; }).map(function (c) { return c.command; }).join(", ");
+      cmds[k] = h("input", { type: "text", value: (p.commands || {})[k] || "", placeholder: detected ? "감지됨: " + detected : "감지되지 않음" });
+    });
+    var commit = h("select", {}, h("option", { value: "never", text: "커밋 안 함(기본)" }), h("option", { value: "ask", text: "승인을 받은 뒤 작업 브랜치에 커밋" }));
+    commit.value = (p.policy || {}).commit || "never";
+    var cu = h("select", {}, h("option", { value: "observe", text: "관찰만(기본)" }), h("option", { value: "approval", text: "승인 후 실행" }));
+    cu.value = (p.policy || {}).computer_use || "observe";
+    var card = h("div", { class: "cw-card" }, h("h3", { text: "프로젝트 설정: " + p.name }),
+      h("p", { class: "sub", text: p.path + (p.remote ? " · " + p.remote : "") + " · 기본 브랜치 " + (p.default_branch || "-") + " · " + ((p.languages || []).join(", ") || "언어 미감지") }),
+      h("p", { class: "sub", text: "지침 파일: " + ((p.instructions || []).join(", ") || "없음") }),
+      field("이름", name), field("작업 브랜치 이름", branch), field("개발 서버 주소(이 PC만)", dev), field("허용 앱", apps),
+      h("p", { class: "sub", text: "명령(비우면 감지된 명령을 씁니다. git push·삭제·sudo 같은 위험한 명령은 저장되지 않습니다)" }),
+      field("빌드", cmds.build), field("테스트", cmds.test), field("실행", cmds.run), field("린트", cmds.lint),
+      field("커밋 정책", commit), field("화면 조작 모드", cu),
+      h("div", { class: "cw-actions" },
+        h("button", { type: "button", class: "btn primary", text: "저장", onclick: async function () {
+          try {
+            await api("POST", "/projects/" + id, { name: name.value, work_branch: branch.value.trim(), dev_url: dev.value.trim(),
+              allowed_apps: apps.value.split(",").map(function (a) { return a.trim(); }).filter(Boolean),
+              commands: { build: cmds.build.value, test: cmds.test.value, run: cmds.run.value, lint: cmds.lint.value }, policy: { commit: commit.value, computer_use: cu.value } });
+            toast("저장했습니다."); renderCode();
+          } catch (e) { toast(e.message); } } }),
+        h("button", { type: "button", class: "btn", text: "다시 감지", onclick: async function () { try { await api("POST", "/projects/" + id + "/refresh", {}); toast("다시 감지했습니다."); renderProjectSettings(id); } catch (e) { toast(e.message); } } }),
+        h("button", { type: "button", class: "btn", text: "등록 해제", onclick: async function () {
+          if (!confirm("이 프로젝트를 목록에서 뺍니다. 폴더와 작업 기록은 그대로 둡니다.")) return;
+          try { await api("POST", "/projects/" + id + "/remove", {}); store("code-project", ""); toast("목록에서 뺐습니다."); codeOpen = ""; renderCode(); } catch (e) { toast(e.message); } } }),
+        h("button", { type: "button", class: "btn", text: "닫기", onclick: function () { renderCode(); } })));
+    s.appendChild(card);
+  }
   function codeModeChanged() {
     var direct = $("code-mode").value === "direct";
     $("code-validate-row").hidden = !direct;
@@ -740,8 +795,8 @@
     }
     codeBusy = true; $("code-start").disabled = true;
     try {
-      store("code-repo", $("code-repo").value.trim());
-      var r = await api("POST", "/code/start", { repo: $("code-repo").value.trim(), prompt: text, model: $("code-model").value, confirm_cost: $("code-cost").checked, guidance: $("code-guidance").checked, mode: $("code-mode").value, validate: $("code-validate").checked, attempts: $("code-mode").value === "direct" && $("code-validate").checked ? parseInt($("code-attempts").value, 10) : 1,
+      store("code-repo", $("code-repo").value.trim()); store("code-project", $("code-project").value);
+      var r = await api("POST", "/code/start", { project: $("code-project").value || undefined, repo: $("code-repo").value.trim(), prompt: text, model: $("code-model").value, confirm_cost: $("code-cost").checked, guidance: $("code-guidance").checked, mode: $("code-mode").value, validate: $("code-validate").checked, attempts: $("code-mode").value === "direct" && $("code-validate").checked ? parseInt($("code-attempts").value, 10) : 1,
         models: $("code-mode").value === "direct" && $("code-mix").checked && !$("code-mix-row").hidden ? ["auto"] : null });
       codeOpen = r.id; codeStick = true; input.value = ""; toast("작업을 시작했습니다.");
     } catch (e) { toast(e.message); }
@@ -807,7 +862,7 @@
     var keep = box.scrollTop;
     box.textContent = "";
     var you = h("div", { class: "cw-msg you" }, h("div", { class: "cw-who", text: "나" }), h("div", { class: "cw-text", text: r.prompt }),
-      h("p", { class: "sub", text: r.repo + " · " + r.model + " · 작업 지침: " + ({ off: "없음", short: "짧게", full: "전체" }[r.guidance] || "없음") + (r.repo_was_dirty ? " · ⚠ 폴더에 저장하지 않은 변경이 있었습니다(복사본에는 없음)" : "") }));
+      h("p", { class: "sub", text: (r.project_name ? r.project_name + " · " : "") + r.repo + " · " + r.model + " · 작업 지침: " + ({ off: "없음", short: "짧게", full: "전체" }[r.guidance] || "없음") + (r.repo_was_dirty ? " · ⚠ 폴더에 저장하지 않은 변경이 있었습니다(복사본에는 없음)" : "") }));
     if (r.project) you.appendChild(h("details", { class: "cw-fold" }, h("summary", { text: "JetAI가 미리 읽은 프로젝트 요약(에이전트에 함께 전달됨)" }), h("pre", { class: "sub", text: r.project })));
     box.appendChild(you);
     var agent = h("div", { class: "cw-msg agent" }, h("div", { class: "cw-who" }, (r.mode === "direct" ? "직접 모드 " : "에이전트 "), codeBadge(r.status)));

@@ -157,6 +157,7 @@ class CodeRuns:
         self.check_timeout = check_timeout
         self.use_guidance = use_guidance
         self.direct_chat = direct_chat or _default_direct_chat
+        self.projects = None                                         # the project registry (set by the app); None keeps the old folder-only behaviour
         self.review_fn = codereview.review
         self.rules = cmdguard.ProjectRules(self.home / "command-rules.json")
         self._lock = threading.RLock()
@@ -217,7 +218,7 @@ class CodeRuns:
 
     @staticmethod
     def _summary(run):
-        keys = ("id", "repo", "prompt", "model", "status", "started", "finished", "error", "files", "stat", "applied_at", "undone_at", "tier", "repo_was_dirty", "project", "blocked", "approvals", "checks", "review", "guidance", "mode", "attempts", "attempts_log", "models")
+        keys = ("id", "repo", "prompt", "model", "status", "started", "finished", "error", "files", "stat", "applied_at", "undone_at", "tier", "repo_was_dirty", "project", "blocked", "approvals", "checks", "review", "guidance", "mode", "attempts", "attempts_log", "models", "project_id", "project_name")
         return {k: run.get(k) for k in keys}
 
     @staticmethod
@@ -323,6 +324,20 @@ class CodeRuns:
             raise CodeWorkError("시스템 폴더는 쓸 수 없습니다.")
         return repo
 
+    def _overrides(self, run):
+        return self.projects.command_overrides(run["repo"]) if self.projects is not None else {}
+
+    def _register(self, repo, run):
+        """Every run belongs to a registered project: an unregistered folder is registered on first use."""
+        if self.projects is None:
+            return
+        try:
+            project = self.projects.add(repo)
+        except Exception:
+            return
+        run["project_id"], run["project_name"] = project["id"], project["name"]
+        self.projects.touch(project["id"], run["id"])
+
     def start(self, repo_path, prompt, model_ref="auto", confirm_cost=False, guidance_on=None, mode="agent", validate=True, attempts=1, models=None):
         if mode == "direct":
             return self._start_direct(repo_path, prompt, model_ref, confirm_cost, validate, attempts, models)
@@ -351,6 +366,7 @@ class CodeRuns:
                    "started": self.clock(), "finished": None, "error": "", "worktree": str(path), "branch": branch, "base": base_commit,
                    "files": [], "stat": "", "activity": [], "repo_was_dirty": dirty,
                    "cost_ok": confirm_cost is True, "session": "", "once_allow": [], "blocked": [], "approvals": []}
+            self._register(repo, run)
             self._save(run)
             config = build_config(model_ref, provider, self.rules.get(repo))
             env = clean_environment(os.environ, self.opencode_home, config, key=(provider or {}).get("api_key"))
@@ -448,6 +464,7 @@ class CodeRuns:
                    "started": self.clock(), "finished": None, "error": "", "worktree": str(path), "branch": branch, "base": base_commit,
                    "files": [], "stat": "", "activity": [], "repo_was_dirty": dirty, "cost_ok": confirm_cost is True, "session": "",
                    "once_allow": [], "blocked": [], "approvals": [], "guidance": "off", "validate": bool(validate), "attempts": attempts, "models": refs if len(refs) > 1 else None}
+            self._register(repo, run)
             try:
                 run["project"] = projectmap.render(projectmap.read_project(path))
             except Exception:
@@ -496,7 +513,7 @@ class CodeRuns:
                     return self.direct_chat(provider, model, messages, timeout=timeout, max_tokens=max_tokens, temperature=temperature)
 
                 def test_fn(path=path, trial=trial):
-                    verdict, output, items = self._direct_tests(path)
+                    verdict, output, items = self._direct_tests(path, run)
                     trial["checks"] = {"state": "done", "items": items, "verdict": verdict, "planned": [i["command"] for i in items],
                                        "started": self.clock(), "finished": self.clock()}
                     return verdict, output
@@ -575,11 +592,11 @@ class CodeRuns:
         if original != run["worktree"] and best["n"] != 1:
             run["note_adopted_from"] = best["n"]
 
-    def _direct_tests(self, path):
+    def _direct_tests(self, path, run=None):
         """Run the detected build/test commands in the copy (the same fixed, shell-free runner as the manual check)."""
         env = {k: v for k, v in os.environ.items() if k in WINDOWS_ENV_KEEP}
         env.update({"CI": "1", "PYTHONDONTWRITEBYTECODE": "1", "PYTHONUTF8": "1"})
-        items = checks.plan(path)
+        items = checks.plan(path, self._overrides(run) if run is not None else {})
         done = [checks.run_one(item, path, env, self.check_timeout, self.popen, kill_tree) for item in items]
         verdict = checks.verdict(done)
         output = "\n".join("$ %s\n%s" % (c["command"], c["output"]) for c in done if c["status"] in ("failed", "timeout"))
@@ -833,7 +850,7 @@ class CodeRuns:
                 raise CodeWorkError("이 작업의 복사본에서는 지금 검사를 실행할 수 없습니다(실행 중이거나 이미 정리됨).")
             if any(t.is_alive() for t in self._threads.values()):
                 raise CodeWorkError("다른 작업이 실행 중입니다. 끝난 뒤 다시 누르세요.")
-            items = checks.plan(run["worktree"])
+            items = checks.plan(run["worktree"], self._overrides(run))
             run["checks"] = {"state": "running", "started": self.clock(), "items": [], "verdict": "", "planned": [i["command"] for i in items]}
             self._save(run)
             thread = threading.Thread(target=self._run_checks, args=(run, items), name="check-" + run_id, daemon=True)

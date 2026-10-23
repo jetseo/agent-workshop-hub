@@ -21,6 +21,8 @@ Everything below is on `main`; "verified" levels are recorded per item in `docs/
 - **Phone control** (`remote.py`): Telegram bot, mock-tested only.
 - Launchers: `jetai.ps1`, `JetAI.exe`, portable package, WSL scripts, diagnostics.
 
+- **Autonomous agent plan** (`docs/autonomous-agent-plan.md`, decisions D1/D3/D7 approved by the user, D6 JetStudio path pending): Phase 0 is done (audit `docs/architecture/audit.md`, project registry `projects.py`, `docs/project-integration.md`). Next is **Phase 1** (tool layer + policy engine + JSON action-protocol loop, zero new dependencies), then 2 browser via Chrome DevTools Protocol, 3 Windows UI Automation via PowerShell/ctypes (Observe → Approval modes only), 5 model runtime, 4 vision, 6 multi-agent, 7 JetStudio, 8 remote.
+
 ## Next tasks (see the plans for details and acceptance criteria)
 - P0 left: (2) built-in 7B Coder tool-call test (needs the user's OK for a ~4.7 GB download); measure harder tasks with the harness.
 - **Direct mode is built** (`directmode.py`, `docs/direct-mode.md`): a local 7B that cannot drive an agent solved the small harness tasks (9/9 on tasks not used for tuning; harder tasks unmeasured). **Best-of-N is built** (up to N tries in separate copies, stop at the first passing, else best by score; serial only): 40% → 80% on 3 harder tasks × 5 runs with the local 7B. Next: parallel tries across free cloud services (needs rate-limit care), P1-1 orchestrator, larger/vaguer task sets for the harness.
