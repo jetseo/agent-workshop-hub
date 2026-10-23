@@ -1,8 +1,12 @@
-// JetAI.exe - double-click launcher. Starts jetai.ps1 (the local server + app window) from the folder this
-// file sits in. If JetAI is already running it only opens the app window again. No installer, no admin
-// rights, nothing downloaded. Build: .\scripts\build-exe.ps1 (uses the C# compiler that ships with Windows).
+// JetAI.exe - double-click launcher. Starts the local server (python -m workshop.dashboard) in the background with
+// NO console or PowerShell window, opens the app window, and stays as a tray icon ("열기 / 로그 보기 / 종료") that
+// owns the server: quitting from the tray stops it. A second double-click only opens the app window again.
+// Uses the Python bundled next to this exe (python\python.exe) or, in a source checkout, the system Python 3.10+.
+// Server output goes to %USERPROFILE%\.agent-workshop\logs\jetai-server.log. No installer, no admin rights, nothing
+// downloaded. Build: .\scripts\build-exe.ps1 (uses the C# compiler that ships with Windows).
 using System;
 using System.Diagnostics;
+using System.Drawing;
 using System.IO;
 using System.Net.Sockets;
 using System.Threading;
@@ -11,6 +15,9 @@ using System.Windows.Forms;
 static class JetAILauncher
 {
     const int DefaultPort = 8787;
+    static Process server;
+    static NotifyIcon tray;
+    static string logPath;
 
     [STAThread]
     static int Main(string[] args)
@@ -20,41 +27,142 @@ static class JetAILauncher
         if (port < 1024 || port > 65535) port = DefaultPort;
 
         string dir = AppDomain.CurrentDomain.BaseDirectory;
-        string script = Path.Combine(dir, "jetai.ps1");
-        if (!File.Exists(script))
+        if (!File.Exists(Path.Combine(dir, "workshop", "dashboard.py")))
         {
-            Fail("jetai.ps1 을 찾을 수 없습니다.\nJetAI.exe 는 jetai.ps1 과 같은 폴더에 있어야 합니다.\n\n" + dir);
+            Fail("workshop 폴더를 찾을 수 없습니다.\nJetAI.exe 는 workshop 폴더와 같은 위치에 있어야 합니다.\n\n" + dir);
             return 2;
         }
 
-        if (IsListening(port))
+        if (IsListening(port)) { OpenAppWindow(port); return 0; }   // already running: just bring up a window
+
+        bool created;
+        var mutex = new Mutex(true, "JetAI-Launcher-" + port, out created);
+        if (!created) { OpenAppWindow(port); return 0; }              // another launcher is starting the server right now
+
+        string python = FindPython(dir);
+        if (python == null)
         {
-            OpenAppWindow(port);   // already running: just bring up a window
-            return 0;
+            Fail("Python 3.10 이상을 찾지 못했습니다.\n\n설치 프로그램(JetAI-Setup.exe)으로 설치하면 Python이 함께 들어 있습니다.\n소스 폴더에서 실행하는 경우 python.org 에서 Python 3.10+ 를 설치하세요('Add python.exe to PATH' 체크).");
+            return 3;
         }
 
+        string logDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".agent-workshop", "logs");
+        try { Directory.CreateDirectory(logDir); } catch { }
+        logPath = Path.Combine(logDir, "jetai-server.log");
+        try { if (File.Exists(logPath) && new FileInfo(logPath).Length > 1000000) File.Delete(logPath); } catch { }
+
+        // cmd.exe redirects the server's output to the log file; CreateNoWindow keeps every console hidden.
         var psi = new ProcessStartInfo
         {
-            FileName = Path.Combine(Environment.SystemDirectory, @"WindowsPowerShell\v1.0\powershell.exe"),
-            Arguments = "-NoProfile -ExecutionPolicy Bypass -File \"" + script + "\" -Port " + port,
+            FileName = Path.Combine(Environment.SystemDirectory, "cmd.exe"),
+            Arguments = "/c \"\"" + python + "\" -X utf8 -m workshop.dashboard --port " + port + " >> \"" + logPath + "\" 2>&1\"",
             WorkingDirectory = dir,
-            UseShellExecute = true,
-            WindowStyle = ProcessWindowStyle.Minimized   // the console hosts the server; closing it stops JetAI
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            WindowStyle = ProcessWindowStyle.Hidden
         };
-        Process server;
         try { server = Process.Start(psi); }
-        catch (Exception e) { Fail("PowerShell 을 시작하지 못했습니다.\n\n" + e.Message); return 3; }
+        catch (Exception e) { Fail("서버를 시작하지 못했습니다.\n\n" + e.Message); return 4; }
 
-        // jetai.ps1 exits right away when something is wrong (for example Python 3.10+ is missing).
-        if (server.WaitForExit(4000))
+        DateTime deadline = DateTime.UtcNow.AddSeconds(30);
+        while (DateTime.UtcNow < deadline && !IsListening(port))
         {
-            Fail("JetAI 를 시작하지 못했습니다 (종료 코드 " + server.ExitCode + ").\n\n" +
-                 "가장 흔한 원인: Python 3.10 이상이 설치되어 있지 않음 (python.org 에서 설치할 때 'Add python.exe to PATH' 체크),\n" +
-                 "또는 포트 " + port + " 사용 중.\n\n" +
-                 "자세한 메시지는 PowerShell 에서 이 폴더의 .\\jetai.ps1 을 실행하면 볼 수 있습니다.");
-            return 4;
+            if (server.HasExited) break;
+            Thread.Sleep(250);
         }
+        if (!IsListening(port))
+        {
+            string tail = ReadTail(logPath, 600);
+            StopServer();
+            Fail("JetAI 를 시작하지 못했습니다(포트 " + port + " 사용 중이거나 서버 오류).\n\n" + tail + "\n\n로그: " + logPath);
+            return 5;
+        }
+
+        OpenAppWindow(port);
+        Application.EnableVisualStyles();
+        tray = new NotifyIcon { Text = "JetAI", Visible = true };
+        try { tray.Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { tray.Icon = SystemIcons.Application; }
+        var menu = new ContextMenuStrip();
+        menu.Items.Add("JetAI 열기", null, delegate { OpenAppWindow(port); });
+        menu.Items.Add("로그 보기", null, delegate { try { Process.Start("notepad.exe", "\"" + logPath + "\""); } catch { } });
+        menu.Items.Add("종료", null, delegate { Quit(); });
+        tray.ContextMenuStrip = menu;
+        tray.DoubleClick += delegate { OpenAppWindow(port); };
+        var watcher = new System.Windows.Forms.Timer { Interval = 2000 };
+        watcher.Tick += delegate { if (server != null && server.HasExited) Quit(); };   // the server ended by itself: do not leave an orphan icon
+        watcher.Start();
+        Application.Run();
+        GC.KeepAlive(mutex);
         return 0;
+    }
+
+    static void Quit()
+    {
+        if (tray != null) { tray.Visible = false; tray.Dispose(); tray = null; }
+        StopServer();
+        Application.ExitThread();
+    }
+
+    static void StopServer()
+    {
+        try
+        {
+            if (server != null && !server.HasExited)
+            {
+                // cmd.exe is the parent of python.exe: kill the whole tree.
+                var kill = new ProcessStartInfo("taskkill.exe", "/PID " + server.Id + " /T /F") { CreateNoWindow = true, UseShellExecute = false };
+                var p = Process.Start(kill);
+                if (p != null) p.WaitForExit(5000);
+            }
+        }
+        catch { }
+    }
+
+    static string FindPython(string dir)
+    {
+        string bundled = Path.Combine(dir, "python", "python.exe");
+        if (File.Exists(bundled)) return bundled;
+        foreach (string name in new[] { "python.exe", "python3.exe" })
+        {
+            string found = Which(name);
+            if (found != null && RunsPython310(found)) return found;
+        }
+        return null;
+    }
+
+    static string Which(string exe)
+    {
+        string path = Environment.GetEnvironmentVariable("PATH") ?? "";
+        foreach (string part in path.Split(';'))
+        {
+            try
+            {
+                string full = Path.Combine(part.Trim('"'), exe);
+                if (File.Exists(full) && full.IndexOf("WindowsApps", StringComparison.OrdinalIgnoreCase) < 0) return full;   // the Store stub only opens the Store
+            }
+            catch { }
+        }
+        return null;
+    }
+
+    static bool RunsPython310(string exe)
+    {
+        try
+        {
+            var psi = new ProcessStartInfo(exe, "-c \"import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)\"") { CreateNoWindow = true, UseShellExecute = false };
+            using (var p = Process.Start(psi)) { return p.WaitForExit(8000) && p.ExitCode == 0; }
+        }
+        catch { return false; }
+    }
+
+    static string ReadTail(string path, int chars)
+    {
+        try
+        {
+            string text = File.ReadAllText(path);
+            return text.Length > chars ? text.Substring(text.Length - chars) : text;
+        }
+        catch { return ""; }
     }
 
     static bool IsListening(int port)
