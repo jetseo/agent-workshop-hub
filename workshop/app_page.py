@@ -40,6 +40,7 @@ def render(terminal_state, term_token="", csrf=""):
             '</nav>'
             '<div id="chatlist" class="chat-list" role="list"></div>'
             '<div class="side-foot">로컬 전용 · 127.0.0.1</div></aside>'
+            '<div id="side-gutter" class="gutter" role="separator" aria-orientation="vertical" aria-label="메뉴 폭 조절(좌우 화살표, 더블클릭으로 초기화)" tabindex="0"></div>'
             '<div id="scrim" hidden></div>'
             '<section id="stage"><header class="topbar"><button id="side-open" class="icon" aria-label="사이드바 열기" title="사이드바">&#9776;</button>'
             '<div class="model-wrap"><button id="modelbtn" aria-haspopup="listbox" aria-expanded="false">모델 선택<i>&#9662;</i></button>'
