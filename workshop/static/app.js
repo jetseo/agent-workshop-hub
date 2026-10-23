@@ -631,6 +631,8 @@
     root.dataset.built = "1"; root.textContent = "";
     var datalist = h("datalist", { id: "code-repos" });
     var repo = h("input", { type: "text", id: "code-repo", list: "code-repos", "aria-label": "프로젝트 폴더", placeholder: "프로젝트 폴더 (git 저장소)  예: D:\\projects\\myapp", value: store("code-repo") || "" });
+    var pickBtn = h("button", { type: "button", class: "btn", id: "code-pick", text: "폴더 선택…", title: "내 PC의 프로젝트 폴더를 골라 JetAI가 작업할 영역으로 지정합니다(그 폴더의 복사본에서만 작업합니다).",
+      onclick: async function () { try { pickBtn.disabled = true; var r = await api("POST", "/projects/pick", {}); if (r.path) { repo.value = r.path; store("code-repo", r.path); } else toast("폴더를 고르지 않았습니다."); } catch (e) { toast(e.message); } finally { pickBtn.disabled = false; } } });
     var project = h("select", { id: "code-project", "aria-label": "프로젝트", title: "등록한 프로젝트를 고르거나, 새 git 폴더를 등록합니다. 작업은 항상 그 프로젝트의 복사본에서만 합니다." });
     project.onchange = function () { codeProjectChanged(); };
     var settingsBtn = h("button", { type: "button", class: "btn", id: "code-project-settings", text: "⚙", title: "프로젝트 설정", "aria-label": "프로젝트 설정", onclick: function () { if ($("code-project").value) renderProjectSettings($("code-project").value); } });
@@ -652,7 +654,7 @@
       h("span", { text: " 작업 지침" }));
     var menu = h("div", { id: "code-slash", class: "cw-slash", role: "listbox", hidden: true });
     var form = h("form", { id: "code-composer", class: "cw-composer", autocomplete: "off", onsubmit: function (e) { e.preventDefault(); codeSubmit(); } },
-      h("div", { class: "cw-opts" }, project, settingsBtn, repo, mode, attempts, mix, model, guide, validate), h("p", { class: "sub", id: "code-model-note" }), h("button", { type: "button", class: "btn", id: "code-ctx-check", hidden: true, text: "입력 한도 점검", title: "이 모델이 한 번에 받는 입력의 길이를 시험 글 2개로 확인합니다(설정은 바꾸지 않습니다)", onclick: codeCtxCheck }), cost, menu,
+      h("div", { class: "cw-opts" }, project, settingsBtn, repo, pickBtn, mode, attempts, mix, model, guide, validate), h("p", { class: "sub", id: "code-model-note" }), h("button", { type: "button", class: "btn", id: "code-ctx-check", hidden: true, text: "입력 한도 점검", title: "이 모델이 한 번에 받는 입력의 길이를 시험 글 2개로 확인합니다(설정은 바꾸지 않습니다)", onclick: codeCtxCheck }), cost, menu,
       h("div", { class: "cw-box" }, prompt, send));
     prompt.addEventListener("keydown", function (e) {
       if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); codeSubmit(); }

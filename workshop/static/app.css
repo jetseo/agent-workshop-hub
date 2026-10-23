@@ -29,7 +29,7 @@ code,pre{font-family:Consolas,"Cascadia Mono","D2Coding",monospace}
 .chat-item .acts button{background:none;border:0;width:28px;height:28px;border-radius:6px;color:var(--muted)}
 .chat-item .acts button:hover{background:var(--bg);color:var(--fg)}
 .chat-item input{flex:1;min-width:0;font:inherit;padding:6px 8px;border:1px solid var(--accent);border-radius:8px;background:var(--bg);color:var(--fg)}
-.side-nav{display:flex;flex-direction:column;gap:2px;border-top:1px solid var(--border);padding-top:8px}
+.side-nav{display:flex;flex-direction:column;gap:2px;border-bottom:1px solid var(--border);padding:8px 0}
 .side-nav button{display:flex;align-items:center;gap:10px;padding:8px 10px;border:0;background:none;border-radius:10px;text-align:left}
 .side-nav button:hover,.side-nav button.active{background:var(--bg3)}
 .side-foot{font-size:12px;color:var(--muted);padding:2px 8px}
