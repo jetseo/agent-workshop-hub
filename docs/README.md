@@ -50,3 +50,4 @@
 - [jetai-ui-improvement-plan.md](jetai-ui-improvement-plan.md) — UI/UX 고도화·작업 관리 안정화 플랜(체크리스트 포함)
 - [jetai-ui-existing-architecture.md](jetai-ui-existing-architecture.md) — UI 기존 구조 조사
 - [jetai-task-deletion-rca.md](jetai-task-deletion-rca.md) — 작업 삭제 불가 원인 분석
+- [discovery-helper-plan.md](discovery-helper-plan.md) — 발견 도우미 플랜(새 모델·서비스·소식을 추천만 하고 승인 후 추가)

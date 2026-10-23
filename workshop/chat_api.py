@@ -14,7 +14,7 @@ from .explain import explain
 from .chat import chat, chat_stream, list_models
 from .chat_store import DEFAULT_TITLE, CHAT_ID, ChatStore
 from . import arbiter, router
-from . import ctxprobe, folderpick
+from . import ctxprobe, folderpick, catalog_check
 from .codework import CodeRuns, CodeWorkError
 from .projects import ProjectError, ProjectRegistry
 from .engine import Engine, EngineError
@@ -69,6 +69,8 @@ class Context:
                          recorder=lambda model, ok, seconds, kind, tokens: _stats(self).record(model, ok=ok, seconds=seconds, kind=kind, tokens=tokens))                             # coding agent (OpenCode) in throw-away worktrees
 
 
+        self.catalog_check_fn = catalog_check.check_catalog                          # replaced in tests (no real network)
+        self.catalog_busy = threading.Event()                                       # a reachability check (anonymous GETs) is running
         self.projects = ProjectRegistry(providers.path.parent / "projects.json", check_repo=CodeRuns.check_repo)   # the projects JetAI may work on
         self.code.projects = self.projects
         self.ctx_limits = ctxprobe.ContextLimits(providers.path.parent / "ctx-limits.json")   # measured input limits of local services
@@ -320,7 +322,8 @@ def _state(ctx):
     return {"providers": providers, "catalog": setup_page.public_catalog(),
             "onboarded": any(p["models"] for p in providers),
             "news": ctx.watch.news(), "settings": ctx.watch.settings(),
-            "feed": {"fetched_at": ctx.feed.data.get("fetched_at", 0), "count": len(ctx.feed.data["entries"])}}
+            "feed": {"fetched_at": ctx.feed.data.get("fetched_at", 0), "count": len(ctx.feed.data["entries"])},
+            "catalog_status": {**catalog_check.load_status(ctx.providers.path.parent / "catalog-status.json"), "running": ctx.catalog_busy.is_set()}}
 
 
 # Small multilingual models (Qwen especially) drift into Chinese; every chat starts with this rule in one system message.
@@ -609,6 +612,20 @@ def dispatch(ctx, method, path, body):
             return Json(200, _remote_api(ctx, method, parts[1:], body))
         if parts and parts[0] == "engine":
             return Json(200, _engine_api(ctx, method, parts[1:], body))
+        if parts == ["catalog", "check"] and method == "POST":
+            if ctx.catalog_busy.is_set():
+                return Json(200, {"started": False, "running": True})
+            ctx.catalog_busy.set()
+
+            def run_check():
+                try:
+                    catalog_check.save_status(ctx.providers.path.parent / "catalog-status.json", ctx.catalog_check_fn())
+                except Exception:                                               # a failed check must not break the app; the old status stays
+                    pass
+                finally:
+                    ctx.catalog_busy.clear()
+            threading.Thread(target=run_check, name="catalog-check", daemon=True).start()
+            return Json(200, {"started": True, "running": True})
         if parts == ["catalog", "refresh"] and method == "POST":
             result = ctx.refresh_catalog(force=body.get("force") is True)
             return Json(200, {**result, "catalog": setup_page.public_catalog()})

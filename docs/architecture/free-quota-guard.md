@@ -33,3 +33,24 @@
 - 결제수단 미등록은 사용자의 확인이다. 등록해 버리면 보호가 무의미하다(화면에 경고).
 - 다른 프로그램이 같은 키로 토큰을 쓰면 JetAI의 계산이 틀린다 → 만료 시간과 여유분이 완충.
 - 코드 작업(OpenCode)은 보호 밖이라 쓰지 않는다.
+
+## 호출 경로 감사 (2026-10-24, 코드 읽기 + 테스트로 확인)
+모델에 요청을 보내는 곳은 `chat.py`의 `chat()`/`chat_stream()` 한 군데(`/chat/completions`)이고, 보호 대상 서비스는 이 함수 안의 `_guard_begin`에서 **네트워크 호출 전에** 거부된다. 모든 호출 경로가 이 두 함수를 거치는지 확인했다.
+
+| 호출 경로 | 보호 적용 | 근거 |
+|---|---|---|
+| 일반 채팅(스트리밍) | 적용 | `chat_api`가 `stream_fn`=`chat_stream` 사용 |
+| 자동 모델 선택 | 적용(닫힌 서비스는 무료 풀에서 제외) | `usage.tier_for`가 닫힌 보호 서비스를 `other`로 분류, `test_the_router_drops_a_closed_service...` |
+| 직접 모드·리뷰·점검(ctxprobe)·압축(digest)·온보딩 시험 | 적용 | 모두 `chat()` 호출(`codework._default_direct_chat` → `chat_module.chat`) |
+| 액션 루프·작업 대기열·보드·오케스트레이터 | 적용 | 모델 호출은 위 `chat()`를 거치며 자체 HTTP 호출 없음(`grep`: 모델 엔드포인트 문자열은 `chat.py`에만) |
+| 평가 하네스(`agenteval`) | 적용(미설치 보호 = 닫힘) | 설치 안 된 `quotaguard`는 "꺼짐"이라 보호 대상은 모두 거부(`quotaguard._current`) |
+| 실패 후 재시도·대체 | 유료 대체 없음 | 라우터는 무료·로컬만 고르고, 보호 오류는 "서비스 끄기"로 처리 |
+| 코드 작업(OpenCode, 에이전트 방식) | **보호 밖이라 쓰지 않음** | `model_options`·`_resolve_model`이 보호 서비스를 거부(`test_code_work_refuses_guarded_services`) |
+| 로컬 계획기(`planner.py`) | 해당 없음 | loopback Ollama만 허용 |
+
+**감사에서 찾은 실제 결손 (고침)**: `GUARDS["inception"]["hosts"]`에 보호 대상 주소가 적혀 있었지만 **어디서도 쓰이지 않았고**, 보호는 제공자 항목의 `guard` 필드에만 의존했다. 그래서 "직접 입력"으로 같은 주소(`https://api.inceptionlabs.ai/v1`)를 등록하거나 `guard` 없이 등록하면 **보호를 건너뛸 수 있었다**(Mercury 3 크레딧이 보호 없이 쓰일 수 있음). 수정: 주소로도 보호를 찾는다(`quotaguard.guard_for_url`, 호스트 정확히 일치: `...ai.evil.example` 같은 비슷한 주소는 해당 없음), `chat()`가 보는 `guard_id`와 `providers.load()`가 둘 다 이 규칙을 쓰므로 어떤 경로로 등록해도 `guard`가 붙는다. 테스트 4개(`GuardByHostTests`: 주소 판별, `guard` 없이 등록해도 보호됨, 네트워크 호출 전 거부(채팅·스트리밍), 코드 작업 거부).
+
+**남은 한계**
+- 보호는 **주소 목록(현재 Mercury 3 한 곳)**에 있는 서비스에만 걸린다. 같은 방식의 다른 크레딧제 서비스를 추가하려면 `GUARDS`에 항목을 넣어야 한다(자동 발견 안 함).
+- 일반 무료 서비스(Groq·Cerebras 등)는 크레딧이 아니라 **요청 제한**이 있는 무료 구간이라 보호 대신 `ratelimit.py`·429 처리로 다룬다. 요금제가 바뀌어도 JetAI가 알 수 없으므로 서비스 카탈로그의 한도 문구는 **공급자 문서에서 확인한 날짜 없이는 참고용**이다(제공자 항목에 "확인한 날짜" 필드는 아직 없음).
+- OpenCode가 자체 카탈로그(`opencode/...-free`)를 호출하는 경로는 보호 대상이 아니다(사용자가 이름 규칙으로만 구분).
