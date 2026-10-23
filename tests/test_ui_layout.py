@@ -30,7 +30,7 @@ class LayoutStaticTests(unittest.TestCase):
 
     def test_script_wires_resizer_shortcuts_and_the_runs_toggle(self):
         js = (STATIC / "app.js").read_text(encoding="utf-8")
-        for needle in ("function makeResizer", "toggleRuns", "setHidden", "renderRunList", "openRowMenu(row, r", "bulkAct", "toastUndo", "openProjectMenu", "updateProjectChip", "code-adv-btn", "renderChanges", "toggleChanges", "code-toggle-changes", 'key.toLowerCase() !== "b"', "code-toggle-runs"):
+        for needle in ("function makeResizer", "toggleRuns", "setHidden", "runSummaryCard", "buildTimeline", "visibleRuns", "renderRunList", "openRowMenu(row, r", "bulkAct", "toastUndo", "openProjectMenu", "updateProjectChip", "code-adv-btn", "renderChanges", "toggleChanges", "code-toggle-changes", 'key.toLowerCase() !== "b"', "code-toggle-runs"):
             self.assertIn(needle, js)
 
 

@@ -341,3 +341,16 @@ body[data-view="code"] .topbar .help{display:none}
 .cw-rename{width:100%;height:26px;border:1px solid var(--accent);border-radius:6px;padding:0 6px;background:var(--bg);color:var(--fg);font:inherit;font-weight:600}
 
 .cw-shot{display:block;max-width:100%;border:1px solid var(--border);border-radius:10px;margin:6px 0}
+
+/* ---- run detail: summary card + stages ---- */
+.cw-sum{display:flex;flex-wrap:wrap;gap:6px 18px;padding:8px 12px;border:1px solid var(--border);border-radius:12px;background:var(--bg2);font-size:13px}
+.cw-sum-i{display:flex;flex-direction:column;min-width:0}.cw-sum-i b{font-weight:600;overflow-wrap:anywhere}.cw-sum-i.warn b{color:#e0a100}
+.cw-stages{display:flex;flex-direction:column;gap:6px;margin:6px 0}
+.cw-stage{border:1px solid var(--border);border-radius:10px;padding:2px 10px;background:var(--bg)}.cw-stage.bad{border-color:#e5484d55}
+.cw-stage>summary{cursor:pointer;padding:6px 0}
+
+.cw-filters{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.cw-mini{height:26px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--fg);font-size:12px;padding:0 6px}
+.cw-mini.check{display:inline-flex;align-items:center;gap:2px;border:0;background:none}
+.cw-grp{display:flex;align-items:center;gap:4px;width:100%;text-align:left;padding:6px 8px;border:0;background:none;font-size:12.5px;font-weight:600;color:var(--muted)}
+.cw-grp:hover{color:var(--fg)}
