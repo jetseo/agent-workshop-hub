@@ -46,3 +46,4 @@
 |---|---|
 | [branding/logo-prompt.md](branding/logo-prompt.md) | 로고 프롬프트와 확정된 SVG 로고 설명 |
 | [handoff/jet-studio-comfyui-prompt.md](handoff/jet-studio-comfyui-prompt.md) | Jet Studio로 넘긴 이미지·ComfyUI 기능(프롬프트 + 코드 전체) |
+- [ui-plan.md](ui-plan.md) — UI 개선 플랜(패널 접기·폭 조절·팔레트·변경 패널), 참고 프로젝트
