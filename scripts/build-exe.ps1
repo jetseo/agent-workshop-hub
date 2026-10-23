@@ -14,7 +14,7 @@ $csc = Get-ChildItem (Join-Path $env:WINDIR "Microsoft.NET\Framework64") -Recurs
     Sort-Object FullName | Select-Object -Last 1
 if (-not $csc) { throw "The C# compiler (csc.exe) was not found under $env:WINDIR\Microsoft.NET\Framework64. Windows 10/11 normally includes it." }
 $target = Join-Path $OutDir "JetAI.exe"
-$arguments = @("/nologo", "/target:winexe", "/optimize+", "/out:$target", "/r:System.Windows.Forms.dll")
+$arguments = @("/nologo", "/target:winexe", "/optimize+", "/out:$target", "/r:System.Windows.Forms.dll", "/r:System.Drawing.dll")
 if (Test-Path -LiteralPath $icon) { $arguments += "/win32icon:$icon" }
 $arguments += $source
 if ($DryRun) {
