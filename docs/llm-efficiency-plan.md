@@ -95,3 +95,24 @@
 1. **E1의 Ollama 문맥**: 이 PC의 Ollama가 입력을 약 2K토큰에서 자른다. JetAI는 사용자의 Ollama 설정을 **바꾸지 않고** 진단·안내만 하는 것으로 시작한다(바꾸려면 모델 변체 생성이나 `OLLAMA_CONTEXT_LENGTH` 환경 변수가 필요 — 사용자 환경 변경이라 승인 필요). 동의하는가?
 2. **E6 후보 모델 다운로드**: 어떤 모델을 먼저 받을지(크기 확인 후 승인). 제안: Qwen3.5 9B(5.3GiB).
 3. 도구 호출 지원은 모두 `UNVERIFIED`이므로, 직접 모드(글로 답)를 기본으로 두는 방침을 유지한다.
+
+## 감사 매트릭스 (2026-10-24): 무료 LLM·경량 하네스·스킬 고도화 요청과 실제 코드 대조
+상태: COMPLETE(코드·연결·테스트 확인) / PARTIAL / MISSING / UNVERIFIED(구현은 있으나 성능·동작 미확인) / NOT NEEDED. COMPLETE·NOT NEEDED는 개발 대상에서 제외.
+
+| 기능 | 기존 구현 | 상태 | 부족한 부분·판단 | 조치 |
+|---|---|---|---|---|
+| 보호 서비스(Mercury 3) 호출 보호 | `quotaguard.py`, `chat.py::_guard_begin` | **COMPLETE**(2026-10-24 수정 후) | 보호가 `guard` 필드에만 의존해 **주소로 등록하면 우회 가능**했음 | 주소 기반 보호 추가(PR #69), 호출 경로 감사표 `docs/architecture/free-quota-guard.md` |
+| 코드 작업(OpenCode)의 보호 우회 | `codework.model_options/_resolve_model` | COMPLETE(쓰지 않도록 거부) | 보호 밖 경로는 "사용 금지"로만 막음 | 변경 없음 |
+| 일반 무료 서비스의 한도 관리 | `ratelimit.py`, `usage.py`, 카탈로그 `limits` 문구 | PARTIAL | 한도는 **공급자 문서를 읽은 문구**일 뿐 확인 날짜·RPM/TPM 구조화 필드 없음(`rpm` 하나만) | 아래 "제공자 메타데이터" 참고 |
+| 제공자 메타데이터(3.3) | `setup_page.CATALOG`(label, base_url, policy, limits, note, key_url), `providers.py`(rpm, free_all, free_match) | PARTIAL | 컨텍스트 크기·도구 호출 지원·**확인한 날짜**·약관 링크 필드가 없음. 없는 값을 추정하지 않음 | 확인 날짜만 후속(카탈로그 점검 결과를 날짜와 함께 저장·표시) |
+| 새 무료 서비스 발견 | `servicefeed.py`(규칙 기반, 하루 단위) | COMPLETE(미검증 표시) | 모델·소식 발견은 `docs/discovery-helper-plan.md` D1 이후 | 계획 문서·D0(PR #63·#65) |
+| 직접 모드(LOCALIZE→EDIT→VALIDATE→REPAIR) | `directmode.py` | COMPLETE, 품질은 UNVERIFIED→측정함 | 약점은 여러 파일을 일관되게 고치는 작업(three-files 0~1/5) | `docs/agent-eval.md`에 측정 |
+| 작업 분해(4.2, 선택 적용) | 없음(요청 분석·복잡도 판단 없음). 다만 best-of-N, 한 파일씩 편집(#66) | MISSING → **보류(효과 근거 없음)** | 7B에서 "한 파일씩+앞선 변경 전달"은 이득이 없었음(9/20 대 8·10/20). 분해 자체를 목표로 삼지 않는다는 지침과 일치 | 구현하지 않음. 효과 검증 전 추가 금지 |
+| 병렬 실행 제한(4.4) | 코드 작업은 한 번에 1개(`any(t.is_alive())`), best-of-N은 직렬 | COMPLETE | VRAM 12GB에서 큰 모델 2개 동시 로딩은 시도하지 않음(9B는 11.9GB 사용) | 변경 없음 |
+| 스킬 지침(5.x) | `guidance.py`(기본 꺼짐), `projectmap.py`가 AGENTS.md·CLAUDE.md 요약 전달, `docs/skills-research.md` | COMPLETE(작게), 효과는 **측정함: 이득 없음, 시간 2배** | 외부 SKILL.md 실행·스킬 선택·지연 로딩은 없음 | **NOT NEEDED로 판단**(효과 입증 전 확장 금지). 외부 스킬 보안 규칙은 이미 `policy.py`·`cmdguard.py`의 명령 차단이 적용됨 |
+| 평가 지표(6.1) | `agenteval.py`: 성공·시간·추정/실측 토큰·시도 횟수·범위 | PARTIAL | **VRAM·모델 로딩 시간·무료 한도 소모·사용자 개입**은 기록하지 않음 → 문서에서는 "미측정"으로 표기 | 필요 시 `run["stats"]`에 추가(후속) |
+| 비교 실험(6.2) A~F | A 기존 직접 모드, B 최소 문맥(L3), C 검증·복구, D 액션 루프(7B에서 더 나쁨), E 한 파일씩(효과 없음), F 스킬 지침(효과 없음) | PARTIAL(측정됨) | 4개 과제·과제당 5회, 같은 설정도 8~12/20로 흔들림 | `docs/agent-eval.md` |
+| 하드웨어 적응(7) | `engine.detect_hardware/fit_with_context/estimate_memory` | COMPLETE(추정), 벤치는 UNVERIFIED | **RTX 3060 12GB 한 대에서만** 실측(9B가 11.9GB). 저사양 PC·CPU 전용·WSL2는 계산만 있고 실측 없음 | 변경 없음, 실측은 해당 PC에서만 가능 |
+| 기존 UI·데이터 보존(10) | 작업 관리·타임라인·필터 등 | COMPLETE | — | 변경 없음 |
+
+**해석과 우선순위**: 이번 감사에서 확정된 고위험 결손은 하나(주소 기반 보호)였고 고쳤다. 나머지는 "기존으로 충분(NOT NEEDED)"이거나 "효과가 입증돼야 추가"인 항목이며, 측정이 없던 곳에는 측정을 먼저 했다. 다음 후보는 (1) 제공자 확인 날짜 표시, (2) 평가 지표(VRAM·로딩 시간·한도 소모) 기록, (3) three-files형 다파일 작업 개선(더 큰 모델이나 구조 변경이 필요해 사용자 판단 사항).
