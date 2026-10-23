@@ -229,6 +229,56 @@ class TestFileProtectionTests(unittest.TestCase):
         self.assertEqual(result["changed"], ["tests/test_calc.py"])
 
 
+class OneFileAtATimeTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.dir = Path(self.tmp.name)
+        (self.dir / "calc.py").write_text(BUG, encoding="utf-8", newline="\n")
+        (self.dir / "app.py").write_text("from calc import add\n\n\ndef run():\n    return add(1, 2)\n", encoding="utf-8", newline="\n")
+        self.files = ["calc.py", "app.py"]
+
+    def go(self, script):
+        return directmode.run(script, "고쳐줘", self.dir, self.files, "", lambda: ("passed", ""), lambda *a: None)
+
+    def test_a_later_file_sees_what_an_earlier_file_changed_and_new_files_come_first(self):
+        script = Script(localize='{"files": ["calc.py", "app.py"], "new_files": ["helpers.py"]}',
+                        creates=["```python\ndef double(x):\n    return x * 2\n```"],
+                        edits=[blocks("    return a - b", "    return a + b"), blocks("    return add(1, 2)", "    return double(add(1, 2))")])
+        result = self.go(script)
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(result["changed"], ["helpers.py", "calc.py", "app.py"])        # created first, then existing files in order
+        last_edit_prompt = [c for c in script.calls if c[0].startswith("You edit")][-1][1]
+        self.assertIn("def double", last_edit_prompt)                                  # the new file's content
+        self.assertIn("return a + b", last_edit_prompt)                                # the earlier edit's diff
+
+    def test_an_edit_that_breaks_python_syntax_is_retried(self):
+        script = Script(localize='{"files": ["calc.py"], "new_files": []}',
+                        edits=[blocks("    return a - b", "    return a +"), blocks("    return a - b", "    return a + b")])
+        result = self.go(script)
+        self.assertTrue(result["ok"], result)
+        self.assertIn("return a + b", (self.dir / "calc.py").read_text(encoding="utf-8"))
+        self.assertIn("invalid Python", script.calls[2][1])                            # the retry names the problem
+
+
+    def test_the_new_file_prompt_shows_the_files_it_may_copy_from(self):
+        script = Script(localize='{"files": ["calc.py"], "new_files": ["helpers.py"]}',
+                        creates=["```python\ndef add(a, b):\n    return a + b\n```"], edits=[blocks("    return a - b", "    return a + b")])
+        self.go(script)
+        create_prompt = [c for c in script.calls if c[0].startswith("You create")][0][1]
+        self.assertIn("Reference file calc.py", create_prompt)
+        self.assertIn("return a - b", create_prompt)                                   # the original body, so a move keeps every character
+
+    def test_edit_markers_are_never_accepted_as_file_content(self):
+        garbled = "```\nSEARCH\ndef add(a, b):\n    return a - b\n=======\ndef add(a, b):\n    return a + b\n>>>>>>> REPLACE\n```"
+        script = Script(localize='{"files": ["calc.py"], "new_files": []}', edits=[garbled, blocks("    return a - b", "    return a + b")])
+        result = self.go(script)
+        self.assertTrue(result["ok"], result)
+        self.assertEqual((self.dir / "calc.py").read_text(encoding="utf-8"), "def add(a, b):\n    return a + b\n")
+        script2 = Script(localize='{"files": [], "new_files": ["x.py"]}', creates=["```\n<<<<<<< SEARCH\nx\n=======\ny\n>>>>>>> REPLACE\n```"])
+        self.assertFalse(self.go(script2)["ok"])                                       # a created file made of edit markers is refused
+
+
 class ContextHygieneTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

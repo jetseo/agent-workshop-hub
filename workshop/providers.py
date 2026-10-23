@@ -8,6 +8,8 @@ import re
 from pathlib import Path
 from urllib.parse import urlparse
 
+from . import quotaguard
+
 POLICIES = ("local", "cloud-no-train", "cloud-may-train", "unknown")
 NAME = re.compile(r"[a-z0-9][a-z0-9_-]{0,31}")
 MAX_MODELS = 50
@@ -96,7 +98,13 @@ class Providers:
     def load(self):
         if not self.path.exists():
             return {}
-        return json.loads(self.path.read_text(encoding="utf-8")).get("providers", {})
+        data = json.loads(self.path.read_text(encoding="utf-8")).get("providers", {})
+        for entry in data.values():
+            if isinstance(entry, dict) and not entry.get("guard"):
+                gid = quotaguard.guard_for_url(entry.get("base_url"))
+                if gid:
+                    entry["guard"] = gid                  # a guarded service is guarded even when it was added without the field
+        return data
 
     def _save(self, data):
         self.path.parent.mkdir(parents=True, exist_ok=True)
