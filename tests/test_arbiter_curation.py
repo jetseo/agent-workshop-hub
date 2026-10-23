@@ -139,8 +139,10 @@ class ContinuityTests(unittest.TestCase):
     def test_short_chats_are_sent_whole_without_a_note(self):
         from workshop.chat_api import _history
         history = _history({"messages": self.messages(3)})
-        self.assertEqual(len(history), 6)
-        self.assertNotIn("system", [m["role"] for m in history])
+        self.assertEqual(len(history), 7)                                       # the Korean-only rule + 6 messages
+        self.assertEqual([m["role"] for m in history].count("system"), 1)
+        self.assertIn("한국어", history[0]["content"])
+        self.assertNotIn("앞선 대화 메모", history[0]["content"])
 
     def test_long_chats_keep_the_original_goal_for_whichever_model_answers_next(self):
         from workshop.chat_api import _history, HISTORY_CHARS
@@ -150,8 +152,9 @@ class ContinuityTests(unittest.TestCase):
         self.assertIn("요청 0", history[0]["content"])                       # the very first request survives
         self.assertIn("앞선 대화 메모", history[0]["content"])
         self.assertEqual(history[-1], chat["messages"][-1])                    # recent turns are intact
+        self.assertIn("한국어", history[0]["content"])                           # the language rule rides in the same system message
         self.assertLessEqual(sum(len(m["content"]) for m in history[1:]), HISTORY_CHARS + 3500)
-        self.assertLessEqual(len(history[0]["content"]), 1800)
+        self.assertLessEqual(len(history[0]["content"]), 2100)
 
     def test_note_lists_later_dropped_requests_but_stays_short(self):
         from workshop.chat_api import _earlier_note

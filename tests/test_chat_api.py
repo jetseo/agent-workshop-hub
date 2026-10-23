@@ -221,7 +221,8 @@ class ChatFlowTests(ApiBase):
         self.assertEqual([m["role"] for m in chat["messages"]], ["user", "assistant"])
         self.sse(chat_id, {"content": "둘째"})
         sent = [r[3] for r in self.mock.requests if r[0] == "POST"][-1]
-        self.assertEqual([m["role"] for m in sent["messages"]], ["user", "assistant", "user"])   # history is sent
+        self.assertEqual([m["role"] for m in sent["messages"]], ["system", "user", "assistant", "user"])   # Korean-only rule + history
+        self.assertIn("한국어", sent["messages"][0]["content"])
         self.assertTrue(sent["stream"])
 
     def test_chat_management(self):
