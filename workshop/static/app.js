@@ -134,9 +134,35 @@
   Array.prototype.forEach.call(document.querySelectorAll("iframe.view"), function (f) { f.addEventListener("load", syncFrames); });
   applyTheme(store("theme") || (window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"));
   $("theme").addEventListener("click", function () { applyTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark"); });
+  /* Draggable panel edge: pointer drag, arrow keys, double click resets. Width lives in a CSS variable and is remembered. */
+  function makeResizer(gutter, o) {
+    var rootEl = document.documentElement;
+    function apply(w) { w = Math.max(o.min, Math.min(o.max(), Math.round(w))); rootEl.style.setProperty(o.cssVar, w + "px"); return w; }
+    var saved = parseInt(store(o.key), 10); if (saved) apply(saved);
+    function current() { return parseInt(getComputedStyle(rootEl).getPropertyValue(o.cssVar), 10) || o.def; }
+    gutter.addEventListener("pointerdown", function (e) {
+      if (e.button !== 0) return; e.preventDefault();
+      gutter.setPointerCapture(e.pointerId); gutter.classList.add("drag"); body.classList.add("dragging");
+      var left = o.origin();
+      function move(ev) { apply(ev.clientX - left); }
+      function up() { gutter.classList.remove("drag"); body.classList.remove("dragging"); gutter.removeEventListener("pointermove", move); gutter.removeEventListener("pointerup", up); gutter.removeEventListener("pointercancel", up); store(o.key, String(current())); }
+      gutter.addEventListener("pointermove", move); gutter.addEventListener("pointerup", up); gutter.addEventListener("pointercancel", up);
+    });
+    gutter.addEventListener("keydown", function (e) {
+      var step = e.shiftKey ? 48 : 16;
+      if (e.key === "ArrowLeft") apply(current() - step); else if (e.key === "ArrowRight") apply(current() + step); else if (e.key === "Home") apply(o.def); else return;
+      e.preventDefault(); store(o.key, String(current()));
+    });
+    gutter.addEventListener("dblclick", function () { apply(o.def); store(o.key, String(o.def)); });
+  }
+  makeResizer($("side-gutter"), { cssVar: "--side-w", key: "side-w", min: 200, def: 268, max: function () { return Math.min(520, window.innerWidth * 0.5); }, origin: function () { return 0; } });
   function setSide(open) {
+    var desk = window.innerWidth > 760;
     $("side").classList.toggle("collapsed", !open);
     body.classList.toggle("side-closed", !open);
+    $("side-close").textContent = desk ? (open ? "\u2039" : "\u203A") : "\u2715";
+    $("side-close").title = desk ? (open ? "메뉴 접기 (Ctrl+B)" : "메뉴 펴기 (Ctrl+B)") : "사이드바 닫기";
+    $("side-close").setAttribute("aria-label", $("side-close").title);
     $("scrim").hidden = !(open && window.innerWidth <= 760);
     store("side", open ? "1" : "0");
   }
@@ -148,7 +174,12 @@
     else if (!narrow && wasNarrow) setSide(store("side") !== "0");
     wasNarrow = narrow;
   });
-  $("side-close").addEventListener("click", function () { setSide(false); });
+  $("side-close").addEventListener("click", function () { setSide($("side").classList.contains("collapsed")); });
+  document.addEventListener("keydown", function (e) {
+    if (!(e.ctrlKey || e.metaKey) || e.altKey || e.key.toLowerCase() !== "b") return;
+    e.preventDefault();
+    if (e.shiftKey) { if ($("code-root") && !$("view-code").hidden) toggleRuns(); } else setSide($("side").classList.contains("collapsed"));
+  });
   $("side-open").addEventListener("click", function () { setSide(true); });
   $("scrim").addEventListener("click", function () { setSide(false); });
 
@@ -663,10 +694,18 @@
     prompt.addEventListener("input", codeSlashMenu);
     model.onchange = codeModelNote;
     var stream = h("div", { id: "code-stream", class: "cw-stream", onscroll: function () { codeStick = stream.scrollTop + stream.clientHeight >= stream.scrollHeight - 40; } });
+    var gutter = h("div", { class: "gutter", role: "separator", "aria-orientation": "vertical", "aria-label": "작업 목록 폭 조절(좌우 화살표, 더블클릭으로 초기화)", tabindex: "0" });
+    makeResizer(gutter, { cssVar: "--runs-w", key: "runs-w", min: 180, def: 250, max: function () { return Math.min(520, root.clientWidth * 0.5); }, origin: function () { return root.getBoundingClientRect().left; } });
+    var runsOpen = store("runs-open"); root.classList.toggle("runs-closed", runsOpen === "0" || (runsOpen === null && window.innerWidth < 900));
     root.append(datalist,
       h("aside", { class: "cw-side" }, h("button", { type: "button", class: "btn primary cw-new", text: "＋ 새 작업", onclick: function () { codeOpen = ""; renderCode(); } }), h("div", { id: "code-runs", class: "cw-list" })),
-      h("section", { class: "cw-main" }, h("div", { id: "code-env", class: "sub cw-env" }), stream, form));
+      gutter,
+      h("section", { class: "cw-main" }, h("div", { class: "cw-bar" }, h("button", { type: "button", class: "btn", id: "code-toggle-runs", text: "☰ 작업 목록", title: "작업 목록 접기/펴기 (Ctrl+Shift+B)", "aria-controls": "code-runs", onclick: function () { toggleRuns(); } })),
+        h("div", { id: "code-env", class: "sub cw-env" }), stream, form));
+    syncRunsToggle();
   }
+  function syncRunsToggle() { var root = $("code-root"), b = $("code-toggle-runs"); if (root && b) b.setAttribute("aria-expanded", root.classList.contains("runs-closed") ? "false" : "true"); }
+  function toggleRuns() { var root = $("code-root"); if (!root) return; var closed = root.classList.toggle("runs-closed"); store("runs-open", closed ? "0" : "1"); syncRunsToggle(); }
   async function renderCode() {
     codeBuildShell();
     var d; try { d = await api("GET", "/code"); } catch (e) { var s0 = $("code-stream"); if (s0) s0.textContent = e.message; return; }
@@ -691,8 +730,8 @@
     if (!d.runs.length) box.appendChild(h("p", { class: "sub", text: "아직 작업이 없습니다." }));
     d.runs.forEach(function (r) {
       box.appendChild(h("button", { type: "button", class: "cw-run" + (r.id === codeOpen ? " open" : ""), onclick: function () { codeOpen = r.id; codeStick = true; renderCode(); } },
-        h("span", { class: "cw-run-t", text: r.prompt.slice(0, 60) }), codeBadge(r.status),
-        h("span", { class: "sub", text: (r.stat || "") + " · " + new Date((r.started || 0) * 1000).toLocaleString() })));
+        h("span", { class: "cw-run-t", title: r.prompt, text: r.prompt.split("\n")[0].slice(0, 80) }), codeBadge(r.status),
+        h("span", { class: "sub", text: (r.stat || "") + " · " + new Date((r.started || 0) * 1000).toLocaleString("ko-KR", { month: "numeric", day: "numeric", hour: "numeric", minute: "2-digit" }) })));
     });
     if (codeOpen && !d.runs.some(function (r) { return r.id === codeOpen; })) codeOpen = "";
     if (codeOpen) await renderCodeDetail(codeOpen); else codeWelcome();
