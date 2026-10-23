@@ -16,6 +16,7 @@
 | [development/mercury3-integration-progress.md](development/mercury3-integration-progress.md) | Mercury 3 통합 진행·판정·사용자 결정 사항 |
 | [direct-mode.md](direct-mode.md) | 직접 모드(Agentless식): 약한 모델용 코드 수정 흐름·안전·실측 |
 | [architecture/audit.md](architecture/audit.md) | 아키텍처 감사(Phase 0): 모듈 지도·구현 상태·기술 부채 |
+| [llm-efficiency-plan.md](llm-efficiency-plan.md) | LLM 효율 활용 계획(실측 근거 F1~F6, 효율 전략 L0~L10, 후보 모델 5종 확인표, 단계 E0~E8) |
 | [agent-loop.md](agent-loop.md) | 액션 루프(실험): 정책 엔진·도구 계층·JSON 액션 프로토콜, 로컬 7B 실측(직접 모드보다 나쁨) |
 | [project-integration.md](project-integration.md) | 프로젝트 등록·프로젝트별 명령·정책 |
 | [autonomous-agent-plan.md](autonomous-agent-plan.md) | 자율 코딩 에이전트 + Computer Use 통합 계획(프롬프트 대비 현황표·결정 사항·단계·테스트 T01~T18) |
