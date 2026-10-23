@@ -54,7 +54,28 @@ MODELS = [
     {"id": "qwen2.5-coder-14b", "label": "Qwen2.5 Coder 14B (코드, 고성능)", "repo": "bartowski/Qwen2.5-Coder-14B-Instruct-GGUF",
      "file": "Qwen2.5-Coder-14B-Instruct-Q4_K_M.gguf", "alias": "qwen2.5-coder-14b-instruct", "tags": ["코드", "고성능"], "vram_gb": 10, "license": "Apache-2.0"},
 ]
+# Memory facts per model (weights = the Q4_K_M file; KV = bytes per token of an fp16 KV cache, 2 x layers x kv_heads x head_dim x 2,
+# read from each model's config.json on Hugging Face on 2026-10-22). Hybrid/sliding-attention models need less KV than this: upper bound.
+FACTS = {"qwen2.5-0.5b": (0.37, 12288), "qwen2.5-1.5b": (0.92, 28672), "qwen2.5-7b": (4.36, 57344),
+         "qwen2.5-coder-7b": (4.36, 57344), "qwen2.5-coder-14b": (8.37, 196608)}
+for _m in MODELS:
+    _m["weights_gib"], _m["kv_bytes_per_token"] = FACTS[_m["id"]]
 BY_ID = {m["id"]: m for m in MODELS}
+
+# Candidate models checked against Hugging Face (existence, licence, GGUF size) but NOT installable and NOT measured: shown as "측정 전".
+# Tool-calling support is unverified for all of them (JetAI's direct mode does not need it).
+CANDIDATES = [
+    {"id": "qwen3.5-9b", "label": "Qwen3.5 9B", "repo": "unsloth/Qwen3.5-9B-GGUF", "file": "Qwen3.5-9B-Q4_K_M.gguf", "license": "Apache-2.0",
+     "params_b": 9.65, "moe": False, "vision": True, "weights_gib": 5.3, "kv_bytes_per_token": 131072, "tools": None, "reasoning": None},
+    {"id": "gpt-oss-20b", "label": "GPT-OSS 20B", "repo": "unsloth/gpt-oss-20b-GGUF", "file": "gpt-oss-20b-Q4_K_M.gguf", "license": "Apache-2.0",
+     "params_b": 20.9, "moe": True, "vision": False, "weights_gib": 10.8, "kv_bytes_per_token": 49152, "tools": None, "reasoning": True},
+    {"id": "qwen3-coder-30b-a3b", "label": "Qwen3 Coder 30B-A3B", "repo": "unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF", "file": "Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf",
+     "license": "Apache-2.0", "params_b": 30.5, "moe": True, "vision": False, "weights_gib": 17.3, "kv_bytes_per_token": 98304, "tools": None, "reasoning": None},
+    {"id": "glm-4.7-flash", "label": "GLM-4.7-Flash", "repo": "unsloth/GLM-4.7-Flash-GGUF", "file": "GLM-4.7-Flash-Q4_K_M.gguf", "license": "MIT",
+     "params_b": 31.2, "moe": True, "vision": False, "weights_gib": 17.1, "kv_bytes_per_token": None, "tools": None, "reasoning": None},
+]
+OVERHEAD_GIB = 0.6        # runtime buffers (rough); the estimate is a planning aid, not a promise
+SAFETY = 1.08
 
 
 class EngineError(Exception):
@@ -194,10 +215,11 @@ def detect_hardware():
     exe = shutil.which("nvidia-smi")
     if exe:
         try:
-            out = subprocess.run([exe, "--query-gpu=name,memory.total", "--format=csv,noheader,nounits"],
+            out = subprocess.run([exe, "--query-gpu=name,memory.total,memory.free", "--format=csv,noheader,nounits"],
                                  capture_output=True, text=True, timeout=8).stdout.strip().splitlines()[0]
-            name, mib = [p.strip() for p in out.split(",")[:2]]
+            name, mib, free = [p.strip() for p in out.split(",")[:3]]
             info["gpu"], info["vram_gb"] = name, round(float(mib) / 1024, 1)
+            info["vram_free_gb"] = round(float(free) / 1024, 1)
         except (OSError, ValueError, IndexError, subprocess.SubprocessError):
             pass
     return info
@@ -211,6 +233,36 @@ def fit(model, hardware):
     if hardware["ram_gb"] >= need * 2:
         return "cpu", "그래픽 메모리가 부족해 CPU로 실행됩니다(느림)" if hardware["vram_gb"] else "CPU로 실행됩니다(느림)"
     return "no", "메모리가 부족해 권장하지 않습니다"
+
+
+def estimate_memory(model, ctx_tokens):
+    """{"weights_gib", "kv_gib", "total_gib", "kv_known"}: weights + KV cache for `ctx_tokens` + runtime buffers, with a safety margin."""
+    weights, per_token = model.get("weights_gib"), model.get("kv_bytes_per_token")
+    kv = ctx_tokens * per_token / 2**30 if per_token else None
+    total = ((weights or 0) + (kv or 0) + OVERHEAD_GIB) * SAFETY
+    return {"weights_gib": weights, "kv_gib": round(kv, 2) if kv is not None else None, "total_gib": round(total, 2), "kv_known": kv is not None}
+
+
+def fit_with_context(model, hardware, ctx_tokens=8192):
+    """Context-aware fit: ("gpu"|"partial"|"cpu"|"no", note, memory, max_ctx).
+
+    "gpu": weights + KV cache + buffers fit in the VRAM that is FREE now. "partial": the model fits in RAM and part of it on the GPU
+    (slower). "cpu": only RAM. `max_ctx`: the longest context that still fits fully on the GPU (None if unknown or nothing fits).
+    GPU memory and system RAM are never treated as one pool; the integrated GPU is not counted."""
+    memory = estimate_memory(model, ctx_tokens)
+    free = hardware.get("vram_free_gb") or hardware.get("vram_gb") or 0
+    ram, total, weights = hardware.get("ram_gb") or 0, memory["total_gib"], memory["weights_gib"] or 0
+    max_ctx = None
+    if model.get("kv_bytes_per_token") and weights:
+        room = free / SAFETY - weights - OVERHEAD_GIB
+        max_ctx = int(room * 2**30 / model["kv_bytes_per_token"]) if room > 0 else None
+    if free and total <= free:
+        return "gpu", "그래픽 메모리에 모두 올라갑니다(예상 %.1f GiB, 지금 비어 있는 %.1f GiB)" % (total, free), memory, max_ctx
+    if ram and ram >= total * 1.5:
+        if free and weights and free > OVERHEAD_GIB * 2:
+            return "partial", "일부만 그래픽 메모리에 올라가고 나머지는 RAM으로 돌아 느립니다(예상 %.1f GiB, 비어 있는 VRAM %.1f GiB)" % (total, free), memory, max_ctx
+        return "cpu", "CPU/RAM으로만 돌아 느립니다(예상 %.1f GiB)" % total, memory, max_ctx
+    return "no", "메모리가 부족해 권장하지 않습니다(예상 %.1f GiB)" % total, memory, max_ctx
 
 
 def pick_asset(assets, system, has_gpu):
@@ -279,7 +331,9 @@ class Engine:
         for m in MODELS:
             kind, note = fit(m, hardware)
             installed = state["models"].get(m["id"])
+            ctx_fit = fit_with_context(m, hardware)
             models.append({"id": m["id"], "label": m["label"], "tags": m["tags"], "license": m["license"], "fit": kind, "fit_note": note,
+                           "memory": ctx_fit[2], "fit_ctx": {"fit": ctx_fit[0], "note": ctx_fit[1], "ctx_tokens": 8192, "max_ctx": ctx_fit[3]},
                            "installed": bool(installed and (self.home / "models" / installed["file"]).exists()),
                            "bytes": installed["bytes"] if installed else None, "recommended": kind == "gpu"})
         return {"supported": platform.system() in ("Windows", "Linux"), "hardware": hardware,

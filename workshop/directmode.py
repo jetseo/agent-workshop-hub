@@ -14,7 +14,7 @@ import json
 import re
 from pathlib import Path
 
-from . import projectmap
+from . import logsum, projectmap
 
 MAX_FILES = 3
 # Answer budgets are ceilings, not costs. Reasoning ('thinking') models spend several hundred tokens before the answer:
@@ -159,10 +159,18 @@ def is_test_path(path):
     return name.startswith("test_") or name.endswith("_test.py") or path.startswith("tests/") or "/tests/" in path
 
 
-def related_tests(worktree, files, exclude=(), limit=8000):
-    """Read-only context: the project's test files (small ones, up to `limit` characters in all), so the model sees what is expected."""
+def related_tests(worktree, files, exclude=(), limit=8000, targets=()):
+    """Read-only context: the project's test files (small ones, up to `limit` characters in all), so the model sees what is expected.
+
+    With `targets` (the files being edited) only tests that import one of those modules are sent when any do: fewer input tokens."""
     parts, total = [], 0
-    for rel in [f for f in files if is_test_path(f) and f not in exclude][:8]:
+    candidates = [f for f in files if is_test_path(f) and f not in exclude][:30]
+    stems = {rel.rsplit("/", 1)[-1].rsplit(".", 1)[0] for rel in targets}
+    if stems:
+        pattern = re.compile(r"(?:^|\s)(?:import|from)\s+[\w.]*(?<![\w])(?:%s)(?![\w])" % "|".join(re.escape(s) for s in stems), re.M)
+        mentioning = [f for f in candidates if (p := safe_path(worktree, f)) is not None and p.is_file() and pattern.search(read_text(p)[0])]
+        candidates = mentioning or candidates
+    for rel in candidates[:8]:
         path = safe_path(worktree, rel)
         if path is None or not path.is_file():
             continue
@@ -174,7 +182,7 @@ def related_tests(worktree, files, exclude=(), limit=8000):
     return "\n".join(parts)
 
 
-def run(chat, task, worktree, files, summary, test_fn, emit, *, cancelled=lambda: False, validate=True, context="", temperature=None):
+def run(chat, task, worktree, files, summary, test_fn, emit, *, cancelled=lambda: False, validate=True, context="", temperature=None, context_for=None):
     """Run the pipeline in `worktree`. `chat(messages, max_tokens) -> str`, `test_fn() -> (verdict, output)`, `emit(tool, ok, text)`.
 
     Returns {"ok", "error", "changed", "tests", "calls"}; it never raises for model mistakes (they become `error`)."""
@@ -198,6 +206,9 @@ def run(chat, task, worktree, files, summary, test_fn, emit, *, cancelled=lambda
             result["error"] = "요청이 파일 삭제·초기화 같은 위험한 작업이라 이행하지 않았습니다."
             return result
         existing, new = parse_files(answer, files)
+        if context_for is not None:                                  # now that the files are known, send only the tests that matter
+            context = context_for(existing)
+            ctx = ("\n\nRelated tests (read-only, do not edit them):\n" + context) if context else ""
         if not existing and not new:
             emit("localize", False, "수정할 파일을 정하지 못했습니다")
             result["error"] = "모델이 수정할 파일을 정하지 못했습니다(답: %s)" % re.sub(r"\s+", " ", answer or "")[:120]
@@ -309,7 +320,7 @@ def _repair(ask, task, worktree, existing, original, output, emit, ctx=""):
     for rel in existing:
         text, bom, crlf = original[rel]
         prompt = ("Task:\n%s\n\nThe project's tests fail after the change. Test output:\n%s\n\nCurrent file %s:\n```\n%s\n```\n"
-                  "Fix the file so the tests pass. Reply with SEARCH/REPLACE blocks only.") % (task, (output or "")[-2500:], rel, text) + ctx
+                  "Fix the file so the tests pass. Reply with SEARCH/REPLACE blocks only.") % (task, logsum.reduce_log(output or "", 1800)["text"], rel, text) + ctx
         blocks = parse_blocks(ask(EDIT, prompt, WRITE_TOKENS))
         new_text, applied, failed = apply_blocks(text, blocks)
         if applied and not failed:
