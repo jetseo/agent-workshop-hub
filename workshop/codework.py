@@ -193,10 +193,20 @@ class CodeRuns:
                 time.sleep(0.05)
         raise CodeWorkError("알 수 없는 작업입니다.")
 
+    MANAGED = ("title", "archived_at", "deleted_at")
+
     def _save(self, run):
         with self._lock:
             directory = self._path(run["id"])
             directory.mkdir(parents=True, exist_ok=True)
+            if any(k not in run for k in self.MANAGED) and (directory / "run.json").exists():
+                try:
+                    disk = json.loads((directory / "run.json").read_text(encoding="utf-8"))
+                    for key in self.MANAGED:
+                        if key not in run and key in disk:
+                            run[key] = disk[key]
+                except (OSError, ValueError):
+                    pass
             tmp = directory / "run.tmp"
             tmp.write_text(json.dumps(run, ensure_ascii=False, indent=1), encoding="utf-8")
             for attempt in range(5):
@@ -214,19 +224,42 @@ class CodeRuns:
         binary = self.find_binary()
         return {"opencode": bool(binary), "opencode_path": binary or "", "isolated_home": str(self.opencode_home)}
 
-    def list(self):
-        runs = []
+    @staticmethod
+    def _view_of(run):
+        return "trash" if run.get("deleted_at") else "archived" if run.get("archived_at") else "active"
+
+    def _all_runs(self):
+        out = []
         for path in sorted(self.runs_dir.glob("*/run.json"), key=lambda p: p.stat().st_mtime, reverse=True) if self.runs_dir.exists() else []:
             try:
-                run = json.loads(path.read_text(encoding="utf-8"))
+                out.append(json.loads(path.read_text(encoding="utf-8")))
             except (OSError, ValueError):
                 continue
+        return out
+
+    def list(self, view="active", query="", limit=KEEP_RUNS):
+        """Runs of one view (active / archived / trash), newest first, optionally filtered by text. See `counts` for the totals."""
+        if view not in ("active", "archived", "trash"):
+            view = "active"
+        needle = (query or "").strip().lower()[:80]
+        runs = []
+        for run in self._all_runs():
+            if self._view_of(run) != view:
+                continue
+            if needle and needle not in " ".join(str(run.get(k) or "") for k in ("title", "prompt", "project_name", "model", "repo")).lower():
+                continue
             runs.append(self._summary(run))
-        return runs[:KEEP_RUNS]
+        return runs[:max(1, min(int(limit or KEEP_RUNS), 500))]
+
+    def counts(self):
+        totals = {"active": 0, "archived": 0, "trash": 0}
+        for run in self._all_runs():
+            totals[self._view_of(run)] += 1
+        return totals
 
     @staticmethod
     def _summary(run):
-        keys = ("id", "repo", "prompt", "model", "status", "started", "finished", "error", "files", "stat", "applied_at", "undone_at", "tier", "repo_was_dirty", "project", "blocked", "approvals", "checks", "review", "guidance", "mode", "attempts", "attempts_log", "models", "project_id", "project_name", "limits", "stats", "webcheck")
+        keys = ("id", "repo", "prompt", "model", "status", "started", "finished", "error", "files", "stat", "applied_at", "undone_at", "tier", "repo_was_dirty", "project", "blocked", "approvals", "checks", "review", "guidance", "mode", "attempts", "attempts_log", "models", "project_id", "project_name", "limits", "stats", "webcheck", "title", "archived_at", "deleted_at")
         return {k: run.get(k) for k in keys}
 
     @staticmethod
@@ -1049,6 +1082,96 @@ class CodeRuns:
         self._remove_worktree(run)
         run["status"] = "discarded" if run["status"] != "applied" else "applied"
         self._save(run)
+
+    # -- task management: soft delete only; engine, model calls and the user's project folders are never touched ----------
+    def _busy(self, run):
+        """True while something is really working on this run (a crashed run that still says "running" can be cleaned up)."""
+        thread = self._threads.get(run["id"])
+        if run.get("status") == "running" and thread is not None and thread.is_alive():
+            return True
+        now = self.clock()
+        return any((run.get(k) or {}).get("state") == "running" and now - ((run.get(k) or {}).get("started") or 0) < 900 for k in ("checks", "review", "webcheck"))
+
+    def _manage(self, run_id, change):
+        with self._lock:
+            run = self._read(run_id)
+            if self._busy(run):
+                raise CodeWorkError("실행 중인 작업입니다. 먼저 중지한 뒤 다시 시도하세요.")
+            change(run)
+            self._save(run)
+            return self._summary(run)
+
+    def rename(self, run_id, title):
+        text = " ".join(str(title or "").split())[:80]
+        def change(run):
+            run["title"] = text or None
+        return self._manage(run_id, change)
+
+    def archive(self, run_id):
+        def change(run):
+            if run.get("deleted_at"):
+                raise CodeWorkError("휴지통에 있는 작업입니다. 먼저 복원하세요.")
+            run["archived_at"] = self.clock()
+        return self._manage(run_id, change)
+
+    def unarchive(self, run_id):
+        def change(run):
+            run["archived_at"] = None
+        return self._manage(run_id, change)
+
+    def trash(self, run_id):
+        def change(run):
+            run["deleted_at"] = self.clock()
+        return self._manage(run_id, change)
+
+    def restore(self, run_id):
+        def change(run):
+            run["deleted_at"] = None
+        return self._manage(run_id, change)
+
+    def purge(self, run_id, confirm=False):
+        """Delete the run's record folder for good (only from the trash, only with confirmation). The user's project is not touched."""
+        if confirm is not True:
+            raise CodeWorkError("영구 삭제는 확인이 필요합니다.")
+        with self._lock:
+            run = self._read(run_id)
+            if not run.get("deleted_at"):
+                raise CodeWorkError("휴지통에 있는 작업만 영구 삭제할 수 있습니다.")
+            if self._busy(run):
+                raise CodeWorkError("실행 중인 작업입니다. 먼저 중지하세요.")
+            directory = self._path(run_id).resolve()
+            if directory.parent != self.runs_dir.resolve():
+                raise CodeWorkError("알 수 없는 작업입니다.")
+            if run.get("worktree") and Path(run["worktree"]).exists():
+                self._remove_worktree(run)                          # the throw-away copy only; run["repo"] is never deleted
+            shutil.rmtree(directory, ignore_errors=True)
+            self._tails.pop(run_id, None)
+            self._threads.pop(run_id, None)
+
+    def bulk(self, ids, action, confirm=False):
+        """Apply one management action to many runs; every id gets its own result, one failure never stops the rest."""
+        actions = {"archive": self.archive, "unarchive": self.unarchive, "trash": self.trash, "restore": self.restore,
+                   "purge": lambda rid: self.purge(rid, confirm)}
+        if action not in actions:
+            raise CodeWorkError("알 수 없는 동작입니다.")
+        if not isinstance(ids, list) or not ids or len(ids) > 100:
+            raise CodeWorkError("작업을 1~100개 고르세요.")
+        results = []
+        for run_id in ids:
+            try:
+                actions[action](run_id)
+                results.append({"id": run_id, "ok": True})
+            except CodeWorkError as error:
+                results.append({"id": run_id, "ok": False, "error": str(error)})
+        return results
+
+    def rerun(self, run_id):
+        """Start a NEW run with the same request and settings (the old run and its copy are left as they are)."""
+        old = self._read(run_id)
+        if self._busy(old):
+            raise CodeWorkError("이 작업이 아직 실행 중입니다.")
+        return self.start(old["repo"], old["prompt"], old.get("model") or "auto", old.get("cost_ok") is True, None,
+                          old.get("mode") or "agent", old.get("validate", True), old.get("attempts") or 1, old.get("models"), old.get("limits"))
 
     def _remove_worktree(self, run):
         try:

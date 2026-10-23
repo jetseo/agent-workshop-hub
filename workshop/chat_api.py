@@ -126,7 +126,13 @@ def _code_api(ctx, method, rest, body):
             for run in runs:
                 if run["repo"] not in repos:
                     repos.append(run["repo"])
-            return {"environment": code.environment(), "models": code.model_options(), "runs": runs, "repos": repos[:8]}
+            return {"environment": code.environment(), "models": code.model_options(), "runs": runs, "repos": repos[:8], "counts": code.counts()}
+        if rest == ["list"] and method == "POST":
+            view = body.get("view") if body.get("view") in ("active", "archived", "trash") else "active"
+            limit = body["limit"] if isinstance(body.get("limit"), int) else 30
+            return {"runs": code.list(view, str(body.get("q") or ""), limit), "counts": code.counts()}
+        if rest == ["bulk"] and method == "POST":
+            return {"results": code.bulk(body.get("ids"), str(body.get("action") or ""), body.get("confirm") is True), "counts": code.counts()}
         if rest == ["context-probe"] and method == "POST":
             ref = body.get("model")
             name, _, model = (ref if isinstance(ref, str) else "").partition("/")
@@ -171,6 +177,16 @@ def _code_api(ctx, method, rest, body):
                 code.review(run_id, body.get("model") or "auto")
             elif action == "check":
                 code.check(run_id)
+            elif action == "rename":
+                return {"run": code.rename(run_id, body.get("title")), "counts": code.counts()}
+            elif action in ("archive", "unarchive", "trash", "restore"):
+                return {"run": getattr(code, action)(run_id), "counts": code.counts()}
+            elif action == "purge":
+                code.purge(run_id, body.get("confirm") is True)
+                return {"ok": True, "counts": code.counts()}
+            elif action == "rerun":
+                return code.rerun(run_id)
+
             elif action == "webcheck":
                 code.webcheck(run_id, str(body.get("url") or ""))
             elif action == "command":
