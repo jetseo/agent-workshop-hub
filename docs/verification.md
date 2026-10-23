@@ -375,3 +375,8 @@
 ## 브라우저 CDP (2단계 시작, 2026-10-23)
 - `workshop/cdp.py`, `tests/test_cdp.py`(6개, 가짜 CDP 서버: localhost 제한, 본문은 untrusted 데이터, 스크린샷, 콘솔·네트워크 오류, 관찰 모드 클릭 거부, 승인 모드 매번 확인·요소 번호 주입 차단).
 - **이 PC에서 실제 확인(수동 1회)**: Chrome(`Program Files\Google\Chrome`) 헤드리스 + 임시 프로필 + 로컬 HTTP 서버: 열기→요소 목록→승인 후 클릭(제목이 바뀜)→스크린샷 4.5 KB→콘솔 오류 수집. CI에는 브라우저 시험이 없다(가짜 서버만). 인젝션 시험 T14의 브라우저 부분은 "텍스트를 untrusted로 돌려준다"까지만 확인.
+
+## 설치 프로그램 (2026-10-23)
+- 이 PC(Windows 11)에서 확인: `build-installer.ps1`로 빌드(11.1 MB) → **조용한 설치**(`/S /D=…`)로 임시 폴더에 설치(파일 10개 항목, 레지스트리 항목 생성) → 설치된 `jetai.ps1`이 **포함된 Python**으로 서버를 띄워 `/app` 200 → `Uninstall.exe /uninstall /S`로 폴더·레지스트리 항목 제거, 데이터(임시 home)는 그대로.
+- **확인하지 않음**: 설치 마법사 화면(GUI)을 눈으로 본 것, 바탕화면/시작 메뉴 바로가기 생성, Python이 전혀 없는 깨끗한 PC, SmartScreen 동작, CI(자동 테스트 없음; C# 코드라 로컬 빌드로만 확인).
+- 빌드 스크립트 버그 수정: `param()` 기본값의 `$PSScriptRoot`가 이 환경에서 비어 `build-package/build-exe`가 실행되지 않던 문제.

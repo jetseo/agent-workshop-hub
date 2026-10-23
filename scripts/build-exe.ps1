@@ -3,10 +3,11 @@
 # The exe only starts jetai.ps1 from its own folder, so keep it in the repository / package folder.
 [CmdletBinding()]
 param(
-    [string]$OutDir = (Split-Path -Parent $PSScriptRoot),
+    [string]$OutDir = "",
     [switch]$DryRun
 )
 $ErrorActionPreference = "Stop"
+if (-not $OutDir) { $OutDir = Split-Path -Parent $PSScriptRoot }          # a $PSScriptRoot default inside param() is empty on some PowerShell 5.1 hosts
 $source = Join-Path $PSScriptRoot "JetAI.cs"
 $icon = Join-Path (Split-Path -Parent $PSScriptRoot) "workshop/static/jetai.ico"
 $csc = Get-ChildItem (Join-Path $env:WINDIR "Microsoft.NET\Framework64") -Recurse -Filter csc.exe -ErrorAction SilentlyContinue |
