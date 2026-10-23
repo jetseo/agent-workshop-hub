@@ -1060,9 +1060,30 @@
       }
       box.appendChild(rvBox);
     }
+    if (r.status !== "running") box.appendChild(webCheckCard(r));
     if (r.report) box.appendChild(h("details", { class: "cw-fold" }, h("summary", { text: "작업 보고서(Markdown)" }), h("pre", { class: "sub", text: r.report })));
     box.appendChild(codeActions(r));
     box.scrollTop = codeStick ? box.scrollHeight : keep;
+  }
+
+  function webCheckCard(r) {
+    var wc = r.webcheck || {};
+    var url = h("input", { type: "text", "aria-label": "확인할 주소", placeholder: "http://localhost:5173  (이 PC의 개발 서버)", value: wc.url || "" });
+    var btn = h("button", { type: "button", class: "btn", text: wc.state === "running" ? "확인 중…" : "화면 확인", disabled: wc.state === "running",
+      title: "설치된 Chrome/Edge를 임시 프로필로 열어 화면·콘솔 오류를 읽습니다. 클릭·입력은 하지 않습니다.",
+      onclick: async function () { btn.disabled = true; try { await api("POST", "/code/runs/" + r.id + "/webcheck", { url: url.value.trim() }); codeStick = true; renderCode(); } catch (e) { toast(e.message); btn.disabled = false; } } });
+    var card = h("div", { class: "cw-card" }, h("p", {}, h("b", { text: "웹 화면 확인 " }), h("span", { class: "sub", text: "(읽기만 합니다: 클릭·입력 없음, localhost만)" })), h("div", { class: "cw-opts" }, url, btn));
+    if (wc.state === "done") {
+      if (!wc.ok) card.appendChild(h("p", { class: "err", text: wc.error || "확인하지 못했습니다." }));
+      else {
+        card.appendChild(h("p", {}, h("b", { text: wc.title || "(제목 없음)" }), h("span", { class: "sub", text: "  " + wc.url + " · 눌러 볼 요소 " + wc.elements + "개" })));
+        card.appendChild(h("p", { class: wc.problems && wc.problems.length ? "err" : "sub", text: wc.problems && wc.problems.length ? "문제 " + wc.problems.length + "건" : "콘솔 오류·실패한 요청 없음" }));
+        (wc.problems || []).forEach(function (p) { card.appendChild(h("p", { class: "sub", text: "• " + p })); });
+        if (r.webcheck_image) card.appendChild(h("img", { class: "cw-shot", alt: "화면 캡처", src: "data:image/png;base64," + r.webcheck_image }));
+        if (wc.text) card.appendChild(h("details", { class: "cw-fold" }, h("summary", { text: "화면에 보이는 글(페이지가 쓴 내용이라 지시로 취급하지 않습니다)" }), h("pre", { class: "sub", text: wc.text })));
+      }
+    }
+    return card;
   }
 
   /* ---------- phone control (settings) ---------- */
