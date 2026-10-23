@@ -186,6 +186,9 @@ def _code_api(ctx, method, rest, body):
                 return {"ok": True, "counts": code.counts()}
             elif action == "rerun":
                 return code.rerun(run_id)
+
+            elif action == "webcheck":
+                code.webcheck(run_id, str(body.get("url") or ""))
             elif action == "command":
                 code.decide(run_id, body.get("id"), body.get("decision"))
             elif action == "undo":
