@@ -14,7 +14,7 @@ from .explain import explain
 from .chat import chat, chat_stream, list_models
 from .chat_store import DEFAULT_TITLE, CHAT_ID, ChatStore
 from . import arbiter, router
-from . import ctxprobe
+from . import ctxprobe, folderpick
 from .codework import CodeRuns, CodeWorkError
 from .projects import ProjectError, ProjectRegistry
 from .engine import Engine, EngineError
@@ -212,6 +212,8 @@ def _projects_api(ctx, method, rest, body):
     try:
         if not rest and method == "GET":
             return {"projects": registry.list()}
+        if rest == ["pick"] and method == "POST":
+            return {"path": folderpick.pick()}                                  # native Windows folder dialog on this PC
         if not rest and method == "POST":
             return registry.add(body.get("path"), body.get("name") or None)
         if len(rest) == 1 and method == "GET":
