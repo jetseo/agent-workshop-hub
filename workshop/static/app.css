@@ -306,3 +306,25 @@ body{font-size:15.5px}
 .cw-opts input[type=text]{flex:1;min-width:140px}
 .cw-opts .btn:hover,.cw-opts select:hover{background:var(--bg3)}
 .cw-composer #code-start{border-radius:10px;min-width:64px}
+
+/* ---- code screen: tools live in the top bar, the composer shows three chips and one options menu ---- */
+.tb-slot{display:none;align-items:center;gap:6px}
+body[data-view="code"] .tb-slot{display:flex}
+body[data-view="code"] .topbar .help{display:none}
+.topbar{min-height:44px}
+.topbar .btn{padding:4px 12px;font-size:13px;border-radius:8px}
+@media (min-width:761px){#side-close{display:none}}
+.cw-hidden{display:none!important}
+.cw-pop-wrap{position:relative;display:inline-flex}
+.chip-btn{height:30px;display:inline-flex;align-items:center;gap:6px;padding:0 12px;border:1px solid var(--border);border-radius:999px;background:transparent;font-size:13px;color:var(--fg);max-width:260px}
+.chip-btn:hover,.chip-btn[aria-expanded="true"]{background:var(--bg3)}
+.chip-btn .lbl{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cw-pop{position:absolute;left:0;bottom:calc(100% + 8px);min-width:280px;max-width:360px;z-index:25;background:var(--card);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow);padding:6px;display:flex;flex-direction:column;gap:2px}
+.cw-pop[hidden]{display:none}
+.cw-pop button{display:flex;align-items:center;gap:8px;text-align:left;padding:8px 10px;border:0;background:none;border-radius:8px;font-size:14px;color:var(--fg)}
+.cw-pop button:hover{background:var(--bg3)}.cw-pop button.sel{font-weight:600}
+.cw-pop .mh{font-size:12px;color:var(--muted);padding:6px 10px 2px}
+.cw-pop hr{border:0;border-top:1px solid var(--border);margin:4px 0;width:100%}
+.cw-pop input[type=text],.cw-pop select{width:100%;height:32px;border-radius:8px;padding:0 10px;border:1px solid var(--border);background:var(--bg);color:var(--fg);font-size:13px}
+.cw-pop label.check{width:100%;height:auto;border:0;border-radius:8px;padding:6px 10px;gap:8px}
+.cw-pop .btn{height:auto;border-radius:8px;padding:8px 10px;font-size:13px}
