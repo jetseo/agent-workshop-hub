@@ -1175,7 +1175,7 @@
     if (s.cut_calls) card.appendChild(h("div", { class: "cw-sum-i warn" }, h("span", { class: "sub", text: "입력 잘림" }), h("b", { text: s.cut_calls + "회 (모델이 일부를 못 봤을 수 있음)" })));
     return card;
   }
-  function stageOf(text) { var m = /^(✓|✗|…)\s+(\S+)/.exec(text); return m ? (STAGE_OF[m[2]] !== undefined ? STAGE_OF[m[2]] : 1) : -1; }
+  function stageOf(text) { var m = /^(✓|✗|…)\s+(\S+)/.exec(text); return m && m[2] !== "attempt" ? (STAGE_OF[m[2]] !== undefined ? STAGE_OF[m[2]] : 1) : -1; }   // an "attempt" marker stays with the step before it
   function buildTimeline(lines, running) {
     var wrap = h("div", { class: "cw-stages" }), groups = [];
     lines.forEach(function (l, at) {
