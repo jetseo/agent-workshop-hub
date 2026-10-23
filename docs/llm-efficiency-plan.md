@@ -104,7 +104,7 @@
 | 보호 서비스(Mercury 3) 호출 보호 | `quotaguard.py`, `chat.py::_guard_begin` | **COMPLETE**(2026-10-24 수정 후) | 보호가 `guard` 필드에만 의존해 **주소로 등록하면 우회 가능**했음 | 주소 기반 보호 추가(PR #69), 호출 경로 감사표 `docs/architecture/free-quota-guard.md` |
 | 코드 작업(OpenCode)의 보호 우회 | `codework.model_options/_resolve_model` | COMPLETE(쓰지 않도록 거부) | 보호 밖 경로는 "사용 금지"로만 막음 | 변경 없음 |
 | 일반 무료 서비스의 한도 관리 | `ratelimit.py`, `usage.py`, 카탈로그 `limits` 문구 | PARTIAL | 한도는 **공급자 문서를 읽은 문구**일 뿐 확인 날짜·RPM/TPM 구조화 필드 없음(`rpm` 하나만) | 아래 "제공자 메타데이터" 참고 |
-| 제공자 메타데이터(3.3) | `setup_page.CATALOG`(label, base_url, policy, limits, note, key_url), `providers.py`(rpm, free_all, free_match) | PARTIAL | 컨텍스트 크기·도구 호출 지원·**확인한 날짜**·약관 링크 필드가 없음. 없는 값을 추정하지 않음 | 확인 날짜만 후속(카탈로그 점검 결과를 날짜와 함께 저장·표시) |
+| 제공자 메타데이터(3.3) | `setup_page.CATALOG`(label, base_url, policy, limits, note, key_url), `providers.py`(rpm, free_all, free_match), `catalog_check.py`(응답 확인 날짜 저장, 서비스 선택 화면의 "응답 확인" 버튼) | PARTIAL(응답 확인 날짜는 추가됨) | **한도 값의 확인 날짜**·컨텍스트 크기·도구 호출 지원·약관 링크 필드는 여전히 없음(공급자 문서를 읽어야 알 수 있어 추정하지 않음). 응답 확인은 "주소가 지금 응답하는가"만 알려 줌 | 응답 확인 날짜 완료(PR #70), 나머지는 사람이 공급자 문서를 보고 채워야 함 |
 | 새 무료 서비스 발견 | `servicefeed.py`(규칙 기반, 하루 단위) | COMPLETE(미검증 표시) | 모델·소식 발견은 `docs/discovery-helper-plan.md` D1 이후 | 계획 문서·D0(PR #63·#65) |
 | 직접 모드(LOCALIZE→EDIT→VALIDATE→REPAIR) | `directmode.py` | COMPLETE, 품질은 UNVERIFIED→측정함 | 약점은 여러 파일을 일관되게 고치는 작업(three-files 0~1/5) | `docs/agent-eval.md`에 측정 |
 | 작업 분해(4.2, 선택 적용) | 없음(요청 분석·복잡도 판단 없음). 다만 best-of-N, 한 파일씩 편집(#66) | MISSING → **보류(효과 근거 없음)** | 7B에서 "한 파일씩+앞선 변경 전달"은 이득이 없었음(9/20 대 8·10/20). 분해 자체를 목표로 삼지 않는다는 지침과 일치 | 구현하지 않음. 효과 검증 전 추가 금지 |

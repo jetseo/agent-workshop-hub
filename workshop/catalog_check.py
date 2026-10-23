@@ -5,7 +5,10 @@ A 401/403 means the endpoint exists and wants a key; 200 means it also lists mod
 answer means the address in the catalog probably changed. Free limits cannot be checked this way.
 """
 import argparse
+import json
+import os
 import socket
+import time
 import sys
 import urllib.error
 import urllib.request
@@ -42,6 +45,27 @@ def check_catalog(catalog=CATALOG, prober=probe):
         rows.append({"id": entry["id"], "label": entry["label"], "status": status, "ok": ok,
                      "detail": "응답함(익명 /models는 404가 정상)" if (status == 404 and ok) else label})
     return rows
+
+
+def save_status(path, rows, now=None):
+    """Remember when each service last answered (or not), so the wizard can show "응답 확인: 날짜". Only reachability: free limits are never read here."""
+    data = {"checked_at": time.time() if now is None else now,
+            "services": {r["id"]: {"ok": bool(r["ok"]), "status": r["status"], "detail": r["detail"]} for r in rows}}
+    tmp = str(path) + ".tmp"
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    with open(tmp, "w", encoding="utf-8") as handle:
+        json.dump(data, handle, ensure_ascii=False)
+    os.replace(tmp, path)
+    return data
+
+
+def load_status(path):
+    try:
+        with open(path, encoding="utf-8") as handle:
+            data = json.load(handle)
+        return data if isinstance(data, dict) and isinstance(data.get("services"), dict) else {"checked_at": 0, "services": {}}
+    except (OSError, ValueError):
+        return {"checked_at": 0, "services": {}}
 
 
 def main(argv=None):
