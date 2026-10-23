@@ -213,8 +213,11 @@ class RedirectSafetyTests(unittest.TestCase):
 
         class Redirector(BaseHTTPRequestHandler):
             def do_ANY(self):
+                # Read the request body before answering: replying to a POST whose body is still unread can reset the
+                # connection on Windows, and the client then reports a network error instead of "HTTP 307" (flaky CI).
+                self.rfile.read(int(self.headers.get("Content-Length") or 0))
                 self.send_response(307); self.send_header("Location", target_url)
-                self.send_header("Content-Length", "0"); self.end_headers()
+                self.send_header("Content-Length", "0"); self.send_header("Connection", "close"); self.end_headers()
             do_GET = do_POST = do_ANY
             def log_message(self, *a): pass
 
