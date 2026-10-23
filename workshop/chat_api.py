@@ -303,6 +303,11 @@ def _state(ctx):
             "feed": {"fetched_at": ctx.feed.data.get("fetched_at", 0), "count": len(ctx.feed.data["entries"])}}
 
 
+# Small multilingual models (Qwen especially) drift into Chinese; every chat starts with this rule in one system message.
+LANGUAGE_RULE = ("반드시 한국어(한글)로만 답하세요. 한자(漢字)·중국어·일본어 문자를 쓰지 마세요. "
+                 "사용자가 다른 언어로 답해 달라고 직접 요청했을 때만 그 언어를 쓰고, 코드·고유명사·영어 약어는 그대로 둡니다.")
+
+
 def _history(chat_obj):
     kept, total = [], 0
     for message in reversed(chat_obj["messages"]):
@@ -313,7 +318,7 @@ def _history(chat_obj):
     kept.reverse()
     dropped = chat_obj["messages"][:len(chat_obj["messages"]) - len(kept)]
     note = _earlier_note(dropped)
-    return ([{"role": "system", "content": note}] if note else []) + kept
+    return [{"role": "system", "content": LANGUAGE_RULE + ("\n\n" + note if note else "")}] + kept
 
 
 def _earlier_note(dropped):
