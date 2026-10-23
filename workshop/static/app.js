@@ -726,7 +726,10 @@
       h("section", { class: "cw-main" }, h("div", { id: "code-env", class: "sub cw-env" }), stream, form), gutter2, changes);
     var tl = $("tb-left"), tr = $("tb-right");
     if (tl) { tl.textContent = ""; tl.appendChild(h("button", { type: "button", class: "btn", id: "code-toggle-runs", text: "☰ 작업 목록", title: "작업 목록 접기/펴기 (Ctrl+Shift+B)", "aria-controls": "code-runs", onclick: function () { toggleRuns(); } })); }
-    if (tr) { tr.textContent = ""; tr.appendChild(h("button", { type: "button", class: "btn", id: "code-toggle-changes", title: "변경 사항 패널 접기/펴기", "aria-controls": "code-changes", onclick: function () { toggleChanges(); } }, "± 변경 사항", h("span", { id: "code-changes-count", class: "tag", hidden: true }))); }
+    if (tr) { tr.textContent = ""; var sysPop = h("div", { class: "cw-pop cw-sys", id: "code-sys", hidden: true }); var sysBtn = h("button", { type: "button", class: "btn", id: "code-sys-btn", text: "상태", "aria-haspopup": "true", "aria-expanded": "false", title: "Ollama·내장 엔진·OpenCode·메모리·그래픽 상태" });
+      sysBtn.addEventListener("click", function (e) { e.stopPropagation(); openSystemPop(sysBtn, sysPop); });
+      tr.appendChild(h("div", { class: "cw-pop-wrap" }, sysBtn, sysPop));
+      tr.appendChild(h("button", { type: "button", class: "btn", id: "code-toggle-changes", title: "변경 사항 패널 접기/펴기", "aria-controls": "code-changes", onclick: function () { toggleChanges(); } }, "± 변경 사항", h("span", { id: "code-changes-count", class: "tag", hidden: true }))); }
     document.body.dataset.view = document.body.dataset.view || "code";
     syncRunsToggle(); renderChanges(null, {}); updateProjectChip();
   }
@@ -930,6 +933,24 @@
         try { var all = (await api("POST", "/code/list", { view: "trash", limit: 500 })).runs.map(function (r) { return r.id; }); for (var i = 0; i < all.length; i += 100) await bulkAct(all.slice(i, i + 100), "purge", true); } catch (e) { toast(e.message); }
       } }));
     }
+  }
+  /* ---------- system status popover (only values JetAI already reads; nothing is invented) ---------- */
+  async function openSystemPop(btn, pop) {
+    var was = pop.hidden; closePops(); if (!was) return;
+    pop.textContent = ""; pop.appendChild(h("div", { class: "mh", text: "불러오는 중…" })); pop.hidden = false; btn.setAttribute("aria-expanded", "true");
+    var env = null, eng = null;
+    try { env = await api("GET", "/env"); } catch (e) { /* shown as unknown below */ }
+    try { eng = await api("GET", "/engine"); } catch (e) { /* idem */ }
+    pop.textContent = "";
+    function row(label, value, bad) { pop.appendChild(h("div", { class: "cw-sys-row" }, h("span", { class: "sub", text: label }), h("b", { class: bad ? "bad" : "", text: value }))); }
+    pop.appendChild(h("div", { class: "mh", text: "이 PC와 실행 환경" }));
+    row("Ollama", env ? (env.ollama && env.ollama.running ? "실행 중 · 모델 " + (env.ollama.models || []).length + "개" : "꺼져 있음") : "알 수 없음", env && !(env.ollama && env.ollama.running));
+    row("내장 엔진", eng ? (eng.running ? "실행 중" : eng.binary ? "설치됨(꺼져 있음)" : eng.supported === false ? "이 PC에서는 지원하지 않음" : "설치 안 됨") : "알 수 없음");
+    row("OpenCode", env ? (env.opencode ? "있음" : "없음 (에이전트 방식에 필요, 직접 모드는 없어도 됨)") : "알 수 없음", env && !env.opencode);
+    var hw = eng && eng.hardware;
+    row("메모리", hw && hw.ram_gb ? hw.ram_gb + " GB" : "알 수 없음");
+    row("그래픽", hw && hw.gpu ? hw.gpu + " · " + hw.vram_gb + " GB" + (hw.vram_free_gb ? " (지금 비어 있는 " + hw.vram_free_gb + " GB)" : "") : "그래픽 카드 없음(CPU로 실행)");
+    pop.appendChild(h("div", { class: "mh", text: "실시간 사용률은 측정하지 않습니다. 위 값은 조회 시점의 값입니다." }));
   }
   async function renderCode() {
     codeBuildShell();
