@@ -209,6 +209,87 @@ HARD_TASK_IDS = ["slugify", "merge-intervals", "roman", "lru-cache", "csv-line",
 TASK_IDS = [t.id for t in TASKS]
 
 
+# ---- multi-file and vaguer tasks (added 2026-10-23): the tests are the oracle and must stay untouched ----
+GREETING_TESTS = (
+    "import unittest\n"
+    "from app import banner\n"
+    "from greeting import welcome\n\n\n"
+    "class T(unittest.TestCase):\n"
+    "    def test_normal(self):\n"
+    "        self.assertEqual(welcome('  kim minsu '), 'Hello, Kim Minsu!')\n"
+    "    def test_empty_and_missing(self):\n"
+    "        self.assertEqual(welcome(''), 'Hello, Guest!')\n"
+    "        self.assertEqual(welcome('   '), 'Hello, Guest!')\n"
+    "        self.assertEqual(welcome(None), 'Hello, Guest!')\n"
+    "    def test_banner_uses_it(self):\n"
+    "        self.assertEqual(banner(None), '*** Hello, Guest! ***')\n"
+    "        self.assertEqual(banner('ann'), '*** Hello, Ann! ***')\n")
+
+CART_TESTS = (
+    "import unittest\n"
+    "from cart import Cart\n"
+    "from pricing import discounted\n\n\n"
+    "class T(unittest.TestCase):\n"
+    "    def test_discount_rules(self):\n"
+    "        self.assertEqual(discounted(100, 0), 100)\n"
+    "        self.assertEqual(discounted(100, 10), 90)\n"
+    "        self.assertEqual(discounted(250, 20), 200)\n"
+    "    def test_cart_total_with_member_discount(self):\n"
+    "        cart = Cart(member=True)\n"
+    "        cart.add('pen', 100, 2)\n"
+    "        cart.add('book', 300, 1)\n"
+    "        self.assertEqual(cart.total(), 450)\n"
+    "    def test_cart_total_without_discount(self):\n"
+    "        cart = Cart()\n"
+    "        cart.add('pen', 100, 2)\n"
+    "        self.assertEqual(cart.total(), 200)\n")
+
+SPLIT_TESTS = (
+    "import unittest\n"
+    "import text_utils\n"
+    "from report import title_line\n\n\n"
+    "class T(unittest.TestCase):\n"
+    "    def test_helper_moved(self):\n"
+    "        self.assertEqual(text_utils.shout('hi'), 'HI!')\n"
+    "    def test_report_still_works(self):\n"
+    "        self.assertEqual(title_line('hi'), '== HI! ==')\n"
+    "    def test_report_no_longer_defines_it(self):\n"
+    "        import report\n"
+    "        self.assertIs(report.shout, text_utils.shout)\n")
+
+TOKEN_TESTS = (
+    "import unittest\n"
+    "from parser import parse\n\n\n"
+    "class T(unittest.TestCase):\n"
+    "    def test_simple(self):\n"
+    "        self.assertEqual(parse('1 + 2'), 3)\n"
+    "    def test_chain(self):\n"
+    "        self.assertEqual(parse('10 - 3 - 2'), 5)\n"
+    "    def test_single_number(self):\n"
+    "        self.assertEqual(parse('7'), 7)\n")
+
+TASKS += [
+    Task("vague-bug", "모호한 요구(이름이 없을 때)", "이름이 비어 있거나 없을 때 인사가 이상하게 나와요. 손님(Guest)으로 나오게 해 주세요. 테스트가 통과해야 하고 테스트 파일은 고치지 마세요.",
+         {"greeting.py": "def welcome(name):\n    return 'Hello, ' + name.strip().title() + '!'\n",
+          "app.py": "from greeting import welcome\n\n\ndef banner(name):\n    return '*** ' + welcome(name) + ' ***'\n", "tests/test_greeting.py": GREETING_TESTS},
+         _tests_pass_and_untouched("tests/test_greeting.py", GREETING_TESTS), allowed={"greeting.py", "app.py"}),
+    Task("three-files", "세 파일에 걸친 기능(할인)", "회원(member=True)인 장바구니는 총액에서 10% 할인해 주세요. pricing.py에 discounted(price, percent)를 만들고 cart.py가 그것을 쓰게 해서 tests/test_cart.py가 통과하게 해 주세요. 테스트 파일은 고치지 마세요.",
+         {"pricing.py": "# TODO: discounted(price, percent)\n",
+          "cart.py": "class Cart:\n    def __init__(self, member=False):\n        self.member = member\n        self.items = []\n\n    def add(self, name, price, qty=1):\n        self.items.append((name, price, qty))\n\n    def total(self):\n        return sum(p * q for _, p, q in self.items)\n",
+          "tests/test_cart.py": CART_TESTS},
+         _tests_pass_and_untouched("tests/test_cart.py", CART_TESTS), allowed={"pricing.py", "cart.py"}),
+    Task("move-helper", "함수를 새 파일로 옮기기", "report.py의 shout 함수를 새 파일 text_utils.py로 옮기고, report.py는 text_utils에서 가져다 쓰게 해 주세요. tests/test_split.py가 통과해야 하고 테스트 파일은 고치지 마세요.",
+         {"report.py": "def shout(text):\n    return text.upper() + '!'\n\n\ndef title_line(text):\n    return '== ' + shout(text) + ' =='\n", "tests/test_split.py": SPLIT_TESTS},
+         _tests_pass_and_untouched("tests/test_split.py", SPLIT_TESTS), allowed={"report.py", "text_utils.py"}),
+    Task("log-bug", "실패 로그를 보고 고치기", "tests/test_parse.py의 test_chain이 실패합니다(10 - 3 - 2가 5여야 하는데 다른 값이 나옵니다). parser.py를 고쳐서 모든 테스트가 통과하게 해 주세요. 테스트 파일은 고치지 마세요.",
+         {"parser.py": "def parse(text):\n    parts = text.split()\n    total = int(parts[0])\n    i = 1\n    while i < len(parts):\n        op, num = parts[i], int(parts[i + 1])\n        if op == '+':\n            total = total + num\n        else:\n            total = num - total\n        i += 2\n    return total\n",
+          "tests/test_parse.py": TOKEN_TESTS.replace("from parser import parse", "from parser import parse")},
+         _tests_pass_and_untouched("tests/test_parse.py", TOKEN_TESTS), allowed={"parser.py"}),
+]
+MULTI_TASK_IDS = ["vague-bug", "three-files", "move-helper", "log-bug"]
+TASK_IDS = [t.id for t in TASKS]
+
+
 def build_repo(task, root):
     repo = Path(root)
     repo.mkdir(parents=True)
