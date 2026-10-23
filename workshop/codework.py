@@ -27,6 +27,7 @@ from pathlib import Path
 
 from . import adapters, checks, cmdguard, codereport, codereview, directmode, guidance, modelpick, projectmap, usage, worktree
 
+MAX_ATTEMPTS = 5                                               # direct mode: tries per task (each in its own copy)
 CHECK_TIMEOUT = 300                                             # seconds per build/test command
 MAX_PROMPT = 8000
 MAX_RUNTIME = 20 * 60
@@ -96,9 +97,9 @@ def opencode_command(binary, model_arg, prompt, session=None):
     return command + [prompt]
 
 
-def _default_direct_chat(provider, model, messages, *, timeout, max_tokens):
+def _default_direct_chat(provider, model, messages, *, timeout, max_tokens, temperature=None):
     from . import chat as chat_module
-    return chat_module.chat(provider, model, messages, timeout=timeout, max_tokens=max_tokens)
+    return chat_module.chat(provider, model, messages, timeout=timeout, max_tokens=max_tokens, temperature=temperature)
 
 
 def _git_bytes(*args, cwd):
@@ -215,7 +216,7 @@ class CodeRuns:
 
     @staticmethod
     def _summary(run):
-        keys = ("id", "repo", "prompt", "model", "status", "started", "finished", "error", "files", "stat", "applied_at", "undone_at", "tier", "repo_was_dirty", "project", "blocked", "approvals", "checks", "review", "guidance", "mode")
+        keys = ("id", "repo", "prompt", "model", "status", "started", "finished", "error", "files", "stat", "applied_at", "undone_at", "tier", "repo_was_dirty", "project", "blocked", "approvals", "checks", "review", "guidance", "mode", "attempts", "attempts_log")
         return {k: run.get(k) for k in keys}
 
     @staticmethod
@@ -321,9 +322,9 @@ class CodeRuns:
             raise CodeWorkError("시스템 폴더는 쓸 수 없습니다.")
         return repo
 
-    def start(self, repo_path, prompt, model_ref="auto", confirm_cost=False, guidance_on=None, mode="agent", validate=True):
+    def start(self, repo_path, prompt, model_ref="auto", confirm_cost=False, guidance_on=None, mode="agent", validate=True, attempts=1):
         if mode == "direct":
-            return self._start_direct(repo_path, prompt, model_ref, confirm_cost, validate)
+            return self._start_direct(repo_path, prompt, model_ref, confirm_cost, validate, attempts)
         if mode != "agent":
             raise CodeWorkError("알 수 없는 방식입니다.")
         with self._lock:
@@ -406,7 +407,11 @@ class CodeRuns:
             raise CodeWorkError("요금이 나올 수 있거나 무료 한도 보호가 닫혀 있는 모델입니다. 비용을 확인하고 체크해야 실행됩니다.")
         return provider, model, tier
 
-    def _start_direct(self, repo_path, prompt, model_ref, confirm_cost, validate):
+    def _start_direct(self, repo_path, prompt, model_ref, confirm_cost, validate, attempts=1):
+        if not isinstance(attempts, int) or isinstance(attempts, bool) or not 1 <= attempts <= MAX_ATTEMPTS:
+            raise CodeWorkError("시도 횟수는 1~%d 사이로 정하세요." % MAX_ATTEMPTS)
+        if attempts > 1 and not validate:
+            raise CodeWorkError("여러 번 시도해 고르려면 테스트 확인이 켜져 있어야 합니다(테스트 결과로 고르기 때문).")
         with self._lock:
             if any(t.is_alive() for t in self._threads.values()):
                 raise CodeWorkError("다른 코드 작업이 실행 중입니다. 끝나거나 취소한 뒤 시작하세요.")
@@ -426,7 +431,7 @@ class CodeRuns:
             run = {"id": run_id, "repo": str(repo), "prompt": prompt.strip(), "model": model_ref, "tier": tier, "status": "running", "mode": "direct",
                    "started": self.clock(), "finished": None, "error": "", "worktree": str(path), "branch": branch, "base": base_commit,
                    "files": [], "stat": "", "activity": [], "repo_was_dirty": dirty, "cost_ok": confirm_cost is True, "session": "",
-                   "once_allow": [], "blocked": [], "approvals": [], "guidance": "off", "validate": bool(validate)}
+                   "once_allow": [], "blocked": [], "approvals": [], "guidance": "off", "validate": bool(validate), "attempts": attempts}
             try:
                 run["project"] = projectmap.render(projectmap.read_project(path))
             except Exception:
@@ -438,10 +443,14 @@ class CodeRuns:
             return self._summary(run)
 
     def _run_direct(self, run, provider, model):
+        """Up to `attempts` tries, each in its own copy; stops at the first one whose tests pass, else keeps the best by score."""
         run_id, directory = run["id"], self._path(run["id"])
         tail = self._tails.setdefault(run_id, [])
         events = open(directory / "events.jsonl", "ab")
         timeout = 300 if provider.get("data_policy") == "local" else 120
+        total = max(1, int(run.get("attempts", 1)))
+        validate = run.get("validate", True)
+        trials = []
 
         def emit(tool, ok, text):
             tail.append("%s %s %s" % ("✓" if ok else "✗", tool, text))
@@ -449,23 +458,63 @@ class CodeRuns:
             line = {"type": "tool_use", "part": {"tool": tool, "state": {"status": "completed" if ok else "error", "input": {"filePath": text[:200]}}}}
             events.write((json.dumps(line, ensure_ascii=False) + "\n").encode("utf-8"))
             events.flush()
-
-        def ask(messages, max_tokens):
-            return self.direct_chat(provider, model, messages, timeout=timeout, max_tokens=max_tokens)
-
-        def test_fn():
-            return self._direct_tests(run)
-        result = {"ok": False, "error": "", "changed": []}
         try:
-            files = projectmap.list_files(Path(run["worktree"]))
-            result = directmode.run(ask, run["prompt"], run["worktree"], files, run.get("project", ""), test_fn, emit,
-                                    cancelled=lambda: bool(self._cancel_flags.get(run_id)), validate=run.get("validate", True))
+            for number in range(1, total + 1):
+                if self._cancel_flags.get(run_id):
+                    break
+                if number == 1:
+                    path, branch = Path(run["worktree"]), run["branch"]
+                else:
+                    try:
+                        path, branch = worktree.create(run["repo"], self.worktree_base, "code", "%s-a%d" % (run_id, number))
+                    except (RuntimeError, ValueError) as error:
+                        emit("attempt", False, "%d번째 복사본을 만들지 못함: %s" % (number, str(error)[:80]))
+                        break
+                if total > 1:
+                    emit("attempt", True, "%d/%d 시작" % (number, total))
+                trial = {"n": number, "path": path, "branch": branch, "checks": None, "result": {"ok": False, "error": "", "changed": []}}
+                temperature = None if number == 1 else min(1.0, 0.5 + 0.15 * number)       # later tries need some variety to differ from the first
+
+                def ask(messages, max_tokens, temperature=temperature):
+                    return self.direct_chat(provider, model, messages, timeout=timeout, max_tokens=max_tokens, temperature=temperature)
+
+                def test_fn(path=path, trial=trial):
+                    verdict, output, items = self._direct_tests(path)
+                    trial["checks"] = {"state": "done", "items": items, "verdict": verdict, "planned": [i["command"] for i in items],
+                                       "started": self.clock(), "finished": self.clock()}
+                    return verdict, output
+                try:
+                    files = projectmap.list_files(path)
+                    trial["result"] = directmode.run(ask, run["prompt"], path, files, run.get("project", ""), test_fn, emit,
+                                                     cancelled=lambda: bool(self._cancel_flags.get(run_id)), validate=validate,
+                                                     context=directmode.related_tests(path, files), temperature=temperature if number > 1 else None)
+                except Exception as error:
+                    trial["result"]["error"] = "실행 중 오류: " + str(error)[:200]
+                trial["verdict"] = (trial["checks"] or {}).get("verdict", "skipped")
+                trial["lines"] = self._changed_lines(path)
+                trials.append(trial)
+                if total > 1:
+                    emit("attempt", trial["result"]["ok"], "%d 결과: %s, 바뀐 줄 %d" % (number, trial["verdict"] if trial["result"]["ok"] else "실패", trial["lines"]))
+                if trial["result"]["ok"] and trial["verdict"] == "passed":
+                    break
         except Exception as error:
-            result["error"] = "실행 중 오류: " + str(error)[:200]
+            if not trials:
+                trials.append({"n": 1, "path": Path(run["worktree"]), "branch": run["branch"], "checks": None, "verdict": "skipped", "lines": 0,
+                               "result": {"ok": False, "error": "실행 중 오류: " + str(error)[:200], "changed": []}})
         finally:
             events.close()
+        best = max(trials, key=self._trial_score) if trials else None
+        if best is not None:
+            self._adopt_trial(run, best, trials)
+            result = best["result"]
+        else:
+            result = {"ok": False, "error": "시도하지 못했습니다.", "changed": []}
+        if total > 1:
+            run["attempts_log"] = [{"n": t["n"], "verdict": t["verdict"], "ok": t["result"]["ok"], "lines": t["lines"], "error": t["result"]["error"], "chosen": t is best} for t in trials]
         run["finished"] = self.clock()
         run["activity"] = list(tail)[-60:]
+        if best is not None and best["checks"] is not None:
+            run["checks"] = best["checks"]
         if self._cancel_flags.get(run_id):
             run["status"], run["error"] = "cancelled", "사용자가 취소했습니다."
         elif not result["ok"]:
@@ -473,16 +522,51 @@ class CodeRuns:
         self._collect(run, keep_status=run["status"] in ("cancelled", "failed"))
         self._save(run)
 
-    def _direct_tests(self, run):
+    @staticmethod
+    def _trial_score(trial):
+        """Higher is better: tests passed > nothing to run > tests failed > pipeline failed; then fewer changed lines, then the earlier try."""
+        rank = 0
+        if trial["result"]["ok"]:
+            rank = {"passed": 3, "failed": 1}.get(trial["verdict"], 2)
+        return (rank, -trial["lines"], -trial["n"])
+
+    def _changed_lines(self, path):
+        try:
+            worktree._git("add", "-A", "--", ".", *[":(exclude,glob)" + pattern for pattern in NOISE_PATHS], cwd=path)
+            out = worktree._git("diff", "--cached", "--numstat", "HEAD", cwd=path)
+        except RuntimeError:
+            return 0
+        total = 0
+        for line in out.splitlines():
+            parts = line.split("\t")
+            if len(parts) >= 2:
+                total += (int(parts[0]) if parts[0].isdigit() else 0) + (int(parts[1]) if parts[1].isdigit() else 0)
+        return total
+
+    def _adopt_trial(self, run, best, trials):
+        """The chosen copy becomes the run's copy; every other copy is removed."""
+        original = run["worktree"]
+        for trial in trials:
+            if trial is best or str(trial["path"]) == str(best["path"]):
+                continue
+            try:
+                worktree.remove(run["repo"], trial["path"])
+            except (RuntimeError, ValueError, OSError):
+                shutil.rmtree(trial["path"], ignore_errors=True)
+                subprocess.run(["git", "worktree", "prune"], cwd=run["repo"], capture_output=True, check=False)
+        run["worktree"], run["branch"] = str(best["path"]), best["branch"]
+        if original != run["worktree"] and best["n"] != 1:
+            run["note_adopted_from"] = best["n"]
+
+    def _direct_tests(self, path):
         """Run the detected build/test commands in the copy (the same fixed, shell-free runner as the manual check)."""
         env = {k: v for k, v in os.environ.items() if k in WINDOWS_ENV_KEEP}
         env.update({"CI": "1", "PYTHONDONTWRITEBYTECODE": "1", "PYTHONUTF8": "1"})
-        items = checks.plan(run["worktree"])
-        done = [checks.run_one(item, run["worktree"], env, self.check_timeout, self.popen, kill_tree) for item in items]
+        items = checks.plan(path)
+        done = [checks.run_one(item, path, env, self.check_timeout, self.popen, kill_tree) for item in items]
         verdict = checks.verdict(done)
-        run["checks"] = {"state": "done", "items": done, "verdict": verdict, "planned": [i["command"] for i in items], "started": self.clock(), "finished": self.clock()}
         output = "\n".join("$ %s\n%s" % (c["command"], c["output"]) for c in done if c["status"] in ("failed", "timeout"))
-        return verdict, output
+        return verdict, output, done
 
     def _run(self, run, command, env):
         run_id, directory = run["id"], self._path(run["id"])

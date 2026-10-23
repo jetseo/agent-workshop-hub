@@ -23,7 +23,7 @@ Everything below is on `main`; "verified" levels are recorded per item in `docs/
 
 ## Next tasks (see the plans for details and acceptance criteria)
 - P0 left: (2) built-in 7B Coder tool-call test (needs the user's OK for a ~4.7 GB download); measure harder tasks with the harness.
-- **Direct mode is built** (`directmode.py`, `docs/direct-mode.md`): a local 7B that cannot drive an agent solved the small harness tasks (9/9 on tasks not used for tuning; harder tasks unmeasured). Next: **P1-12 best-of-N** on top of it (several attempts in separate copies, pick by tests/scope/review; `docs/multi-agent-plan.md` M2) and measuring harder tasks. Adopt only if the harness shows a gain.
+- **Direct mode is built** (`directmode.py`, `docs/direct-mode.md`): a local 7B that cannot drive an agent solved the small harness tasks (9/9 on tasks not used for tuning; harder tasks unmeasured). **Best-of-N is built** (up to N tries in separate copies, stop at the first passing, else best by score; serial only): 40% → 80% on 3 harder tasks × 5 runs with the local 7B. Next: parallel tries across free cloud services (needs rate-limit care), P1-1 orchestrator, larger/vaguer task sets for the harness.
 - Other P1: goal-input orchestrator (P1-1), work-branch commit (P1-5, changes the "never commit" default: ask first), retry/escalation (P1-6), diff secret scan (P1-7).
 - Ask the user before: merging, paid calls, downloads, real-hardware or live-service runs, the Telegram token.
 

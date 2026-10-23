@@ -21,10 +21,12 @@ class Script:
         self.localize = localize if localize is not None else '{"files": ["calc.py"], "new_files": []}'
         self.edits, self.creates = list(edits), list(creates)
         self.calls = []
+        self.temperatures = []
 
-    def __call__(self, messages, max_tokens=0):
+    def __call__(self, messages, max_tokens=0, temperature=None):
         system, user = messages[0]["content"], messages[1]["content"]
         self.calls.append((system[:20], user))
+        self.temperatures.append(temperature)
         if system.startswith("You are a careful"):
             return self.localize
         if system.startswith("You create"):
@@ -204,7 +206,7 @@ class RunsIntegrationTests(Base):
         self.runs.shutdown()
         self.script = script
         self.runs = CodeRuns(self.providers, find_binary=lambda: None, worktree_base=self.dir / "wt",
-                             direct_chat=lambda provider, model, messages, timeout, max_tokens: script(messages, max_tokens))
+                             direct_chat=lambda provider, model, messages, timeout, max_tokens, temperature=None: script(messages, max_tokens, temperature))
         self.addCleanup(self.runs.shutdown)
 
     def test_a_direct_run_produces_a_reviewable_patch_checks_report_and_needs_no_opencode(self):

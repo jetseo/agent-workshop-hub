@@ -91,6 +91,40 @@ def _default_param(path):
     return _python(path, "from hello import greet\nassert greet('a') == 'hi a!' and greet('a', '?') == 'hi a?'")
 
 
+SLUG_TESTS = (
+    "import unittest\nfrom slug import slugify\n\n\nclass SlugTests(unittest.TestCase):\n"
+    "    def test_cases(self):\n"
+    "        self.assertEqual(slugify('Hello World'), 'hello-world')\n"
+    "        self.assertEqual(slugify('  Multiple   spaces  '), 'multiple-spaces')\n"
+    "        self.assertEqual(slugify('Rock & Roll!'), 'rock-roll')\n"
+    "        self.assertEqual(slugify('a--b'), 'a-b')\n"
+    "        self.assertEqual(slugify('C++ 101'), 'c-101')\n")
+INTERVAL_TESTS = (
+    "import unittest\nfrom intervals import merge_intervals\n\n\nclass IntervalTests(unittest.TestCase):\n"
+    "    def test_cases(self):\n"
+    "        self.assertEqual(merge_intervals([]), [])\n"
+    "        self.assertEqual(merge_intervals([[1, 3], [2, 6], [8, 10]]), [[1, 6], [8, 10]])\n"
+    "        self.assertEqual(merge_intervals([[8, 10], [1, 3], [2, 6]]), [[1, 6], [8, 10]])\n"
+    "        self.assertEqual(merge_intervals([[1, 4], [4, 5]]), [[1, 5]])\n"
+    "        self.assertEqual(merge_intervals([[1, 10], [2, 3]]), [[1, 10]])\n")
+ROMAN_TESTS = (
+    "import unittest\nfrom roman import to_roman\n\n\nclass RomanTests(unittest.TestCase):\n"
+    "    def test_cases(self):\n"
+    "        self.assertEqual(to_roman(3), 'III')\n"
+    "        self.assertEqual(to_roman(4), 'IV')\n"
+    "        self.assertEqual(to_roman(9), 'IX')\n"
+    "        self.assertEqual(to_roman(58), 'LVIII')\n"
+    "        self.assertEqual(to_roman(1994), 'MCMXCIV')\n")
+
+
+def _tests_pass_and_untouched(test_file, original):
+    def check(path):
+        if (path / test_file).read_text(encoding="utf-8", errors="replace").replace("\r\n", "\n") != original:
+            return False, "테스트 파일을 고침"
+        return _python(path, "import sys, unittest\nr = unittest.TextTestRunner(verbosity=0).run(unittest.defaultTestLoader.discover('tests'))\nsys.exit(0 if r.wasSuccessful() and r.testsRun else 1)")
+    return check
+
+
 TASKS = [
     Task("fix-bug", "버그 수정", "calc.py의 add 함수가 뺄셈을 합니다. 덧셈으로 고쳐 주세요.",
          {"calc.py": "def add(a, b):\n    return a - b\n"}, _fix_bug, allowed={"calc.py"}),
@@ -109,6 +143,15 @@ TASKS = [
          {"sums.py": "def total(n):\n    result = 0\n    for i in range(n):\n        result += i\n    return result\n"}, _off_by_one, allowed={"sums.py"}),
     Task("default-param", "기본값 인자 추가", "hello.py의 greet 함수에 선택 인자 punct(기본값 '!')를 추가해 인사 끝에 붙이게 해 주세요. 기존 호출은 그대로 동작해야 합니다.",
          {"hello.py": "def greet(name):\n    return 'hi ' + name\n"}, _default_param, allowed={"hello.py"}),
+    Task("slugify", "테스트를 보고 구현(slugify)", "slug.py의 slugify를 구현해서 tests/test_slug.py가 통과하게 해 주세요. 테스트 파일은 고치지 마세요.",
+         {"slug.py": "def slugify(text):\n    raise NotImplementedError\n", "tests/test_slug.py": SLUG_TESTS},
+         _tests_pass_and_untouched("tests/test_slug.py", SLUG_TESTS), allowed={"slug.py"}),
+    Task("merge-intervals", "테스트를 보고 구현(구간 합치기)", "intervals.py의 merge_intervals를 구현해서 tests/test_intervals.py가 통과하게 해 주세요. 테스트 파일은 고치지 마세요.",
+         {"intervals.py": "def merge_intervals(intervals):\n    raise NotImplementedError\n", "tests/test_intervals.py": INTERVAL_TESTS},
+         _tests_pass_and_untouched("tests/test_intervals.py", INTERVAL_TESTS), allowed={"intervals.py"}),
+    Task("roman", "테스트를 보고 구현(로마 숫자)", "roman.py의 to_roman을 구현해서 tests/test_roman.py가 통과하게 해 주세요. 테스트 파일은 고치지 마세요.",
+         {"roman.py": "def to_roman(number):\n    raise NotImplementedError\n", "tests/test_roman.py": ROMAN_TESTS},
+         _tests_pass_and_untouched("tests/test_roman.py", ROMAN_TESTS), allowed={"roman.py"}),
 ]
 TASK_IDS = [t.id for t in TASKS]
 
@@ -118,6 +161,7 @@ def build_repo(task, root):
     repo.mkdir(parents=True)
     _git(repo, "init", "-q")
     for name, text in task.files.items():
+        (repo / name).parent.mkdir(parents=True, exist_ok=True)
         (repo / name).write_text(text, encoding="utf-8", newline="\n")
     for name, data in task.binary_files.items():
         (repo / name).write_bytes(data)
@@ -154,10 +198,10 @@ def score(task, run):
             "changed": sorted(changed), "extra_tests": sorted(extra_tests)}
 
 
-def run_task(runs, task, model, workdir, wait=1200, sleep=time.sleep, clock=time.time, guidance=None, label=None, mode="agent"):
+def run_task(runs, task, model, workdir, wait=1200, sleep=time.sleep, clock=time.time, guidance=None, label=None, mode="agent", attempts=1):
     repo = build_repo(task, workdir)
     began = clock()
-    run_id = runs.start(str(repo), task.prompt, model, False, guidance, mode)["id"]
+    run_id = runs.start(str(repo), task.prompt, model, False, guidance, mode, True, attempts)["id"]
     cancelled = False
     while runs.get(run_id)["status"] == "running":
         if not cancelled and clock() - began > wait:
@@ -184,7 +228,7 @@ GUIDANCE_VARIANTS = {"default": [("", None)], "on": [(" [지침 있음]", True)]
                      "both": [(" [지침 없음]", False), (" [지침 있음]", True)]}
 
 
-def evaluate(runs, models, task_ids=None, guidance="default", mode="agent", **kwargs):
+def evaluate(runs, models, task_ids=None, guidance="default", mode="agent", attempts=1, **kwargs):
     chosen = [t for t in TASKS if not task_ids or t.id in task_ids]
     results = []
     with tempfile.TemporaryDirectory(prefix="jetai-eval-") as tmp:
@@ -192,7 +236,7 @@ def evaluate(runs, models, task_ids=None, guidance="default", mode="agent", **kw
             for suffix, flag in GUIDANCE_VARIANTS[guidance]:
                 for task in chosen:
                     results.append(run_task(runs, task, model, Path(tmp) / ("m%d%s-%s" % (number, "g" if flag else "n" if flag is False else "", task.id)),
-                                            guidance=flag, label=model + suffix + (" [직접 모드]" if mode == "direct" else ""), mode=mode, **kwargs))
+                                            guidance=flag, label=model + suffix + (" [직접 모드" + ("·%d회 시도]" % attempts if attempts > 1 else "]") if mode == "direct" else ""), mode=mode, attempts=attempts, **kwargs))
     return results
 
 
@@ -217,13 +261,14 @@ def main(argv=None):
     parser.add_argument("--guidance", choices=sorted(GUIDANCE_VARIANTS), default="default",
                         help="작업 지침: on/off, both는 같은 모델·작업을 지침 없음/있음으로 둘 다 실행해 비교, default는 설정을 따름")
     parser.add_argument("--mode", choices=("agent", "direct"), default="agent", help="agent: OpenCode 에이전트, direct: JetAI가 단계를 진행하는 직접 모드(도구 호출 불필요)")
+    parser.add_argument("--attempts", type=int, default=1, help="직접 모드에서 작업당 최대 시도 횟수(1~5): 테스트가 통과하는 첫 시도에서 멈춤")
     parser.add_argument("--out", help="결과 표를 쓸 Markdown 파일")
     args = parser.parse_args(argv)
     from .codework import CodeRuns
     from .providers import Providers
     runs = CodeRuns(Providers())
     try:
-        results = evaluate(runs, args.model, args.tasks.split(",") if args.tasks else None, guidance=args.guidance, mode=args.mode)
+        results = evaluate(runs, args.model, args.tasks.split(",") if args.tasks else None, guidance=args.guidance, mode=args.mode, attempts=args.attempts)
     finally:
         runs.shutdown()
     text = table(results)

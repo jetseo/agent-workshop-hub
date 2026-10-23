@@ -123,7 +123,8 @@ def _code_api(ctx, method, rest, body):
         if rest == ["start"] and method == "POST":
             return code.start(body.get("repo"), body.get("prompt"), body.get("model") or "auto", body.get("confirm_cost") is True,
                               body["guidance"] if isinstance(body.get("guidance"), bool) else None,
-                              "direct" if body.get("mode") == "direct" else "agent", body.get("validate") is not False)
+                              "direct" if body.get("mode") == "direct" else "agent", body.get("validate") is not False,
+                              body["attempts"] if isinstance(body.get("attempts"), int) else 1)
         if rest == ["rules", "remove"] and method == "POST":
             repo = code.check_repo(body.get("repo"))
             code.rules.remove(repo, str(body.get("command") or ""))

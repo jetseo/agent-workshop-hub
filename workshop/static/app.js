@@ -635,6 +635,8 @@
     var mode = h("select", { id: "code-mode", "aria-label": "방식", title: "에이전트: OpenCode가 도구를 써서 직접 고칩니다. 직접 모드: JetAI가 단계를 진행하고 모델은 글로 수정안만 씁니다(약한 모델에 적합)." },
       h("option", { value: "agent", text: "에이전트(OpenCode)" }), h("option", { value: "direct", text: "직접 모드(JetAI가 진행)" }));
     var validate = h("label", { class: "check cw-guide", id: "code-validate-row", hidden: true }, h("input", { type: "checkbox", id: "code-validate", checked: true }), h("span", { text: " 테스트로 확인" }));
+    var attempts = h("select", { id: "code-attempts", hidden: true, "aria-label": "시도 횟수", title: "테스트가 통과하는 첫 시도에서 멈추고, 아니면 최대 이 횟수까지 새 복사본에서 다시 시도해 가장 나은 결과를 고릅니다(무료·로컬 한도를 더 씁니다)." },
+      [1, 2, 3, 5].map(function (n) { return h("option", { value: String(n), text: n === 1 ? "시도 1회" : "최대 " + n + "회 시도" }); }));
     mode.onchange = codeModeChanged;
     var prompt = h("textarea", { id: "code-prompt", rows: "2", maxlength: "8000", "aria-label": "할 일", placeholder: "할 일을 적으세요. / 를 입력하면 명령이 나옵니다. (Ctrl+Enter로 보내기)" });
     var send = h("button", { type: "submit", class: "btn primary", id: "code-start", "aria-label": "시작", text: "시작" });
@@ -644,7 +646,7 @@
       h("span", { text: " 작업 지침" }));
     var menu = h("div", { id: "code-slash", class: "cw-slash", role: "listbox", hidden: true });
     var form = h("form", { id: "code-composer", class: "cw-composer", autocomplete: "off", onsubmit: function (e) { e.preventDefault(); codeSubmit(); } },
-      h("div", { class: "cw-opts" }, repo, mode, model, guide, validate), h("p", { class: "sub", id: "code-model-note" }), cost, menu,
+      h("div", { class: "cw-opts" }, repo, mode, attempts, model, guide, validate), h("p", { class: "sub", id: "code-model-note" }), cost, menu,
       h("div", { class: "cw-box" }, prompt, send));
     prompt.addEventListener("keydown", function (e) {
       if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); codeSubmit(); }
@@ -696,6 +698,7 @@
   function codeModeChanged() {
     var direct = $("code-mode").value === "direct";
     $("code-validate-row").hidden = !direct;
+    $("code-attempts").hidden = !direct;
     [].forEach.call($("code-model").options, function (o) { o.disabled = direct && o.value.indexOf("opencode/") === 0; });
     if ($("code-model").selectedOptions[0] && $("code-model").selectedOptions[0].disabled) $("code-model").value = "auto";
     codeModelNote();
@@ -734,7 +737,7 @@
     codeBusy = true; $("code-start").disabled = true;
     try {
       store("code-repo", $("code-repo").value.trim());
-      var r = await api("POST", "/code/start", { repo: $("code-repo").value.trim(), prompt: text, model: $("code-model").value, confirm_cost: $("code-cost").checked, guidance: $("code-guidance").checked, mode: $("code-mode").value, validate: $("code-validate").checked });
+      var r = await api("POST", "/code/start", { repo: $("code-repo").value.trim(), prompt: text, model: $("code-model").value, confirm_cost: $("code-cost").checked, guidance: $("code-guidance").checked, mode: $("code-mode").value, validate: $("code-validate").checked, attempts: $("code-mode").value === "direct" && $("code-validate").checked ? parseInt($("code-attempts").value, 10) : 1 });
       codeOpen = r.id; codeStick = true; input.value = ""; toast("작업을 시작했습니다.");
     } catch (e) { toast(e.message); }
     codeBusy = false; renderCode();
@@ -777,7 +780,7 @@
   function toolLine(text) {
     var m = /^(✓|✗|…)\s+(\S+)\s*(.*)$/.exec(text);
     if (!m) return null;
-    var icons = { localize: "🔎", create: "✏️", test: "🧪", repair: "🔧", read: "📄", edit: "✏️", write: "✏️", bash: "⌨️", grep: "🔎", glob: "🔎", list: "📁", patch: "✏️" };
+    var icons = { attempt: "🔁", localize: "🔎", create: "✏️", test: "🧪", repair: "🔧", read: "📄", edit: "✏️", write: "✏️", bash: "⌨️", grep: "🔎", glob: "🔎", list: "📁", patch: "✏️" };
     return h("div", { class: "cw-tool " + (m[1] === "✗" ? "bad" : m[1] === "…" ? "wait" : "ok") },
       h("span", { class: "cw-ico", text: icons[m[2]] || "🛠" }), h("b", { text: m[2] }), h("span", { class: "cw-target", text: m[3] }), h("span", { class: "cw-mark", text: m[1] }));
   }
