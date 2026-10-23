@@ -144,13 +144,14 @@
       if (e.button !== 0) return; e.preventDefault();
       gutter.setPointerCapture(e.pointerId); gutter.classList.add("drag"); body.classList.add("dragging");
       var left = o.origin();
-      function move(ev) { apply(ev.clientX - left); }
+      function move(ev) { apply(o.invert ? left - ev.clientX : ev.clientX - left); }
       function up() { gutter.classList.remove("drag"); body.classList.remove("dragging"); gutter.removeEventListener("pointermove", move); gutter.removeEventListener("pointerup", up); gutter.removeEventListener("pointercancel", up); store(o.key, String(current())); }
       gutter.addEventListener("pointermove", move); gutter.addEventListener("pointerup", up); gutter.addEventListener("pointercancel", up);
     });
     gutter.addEventListener("keydown", function (e) {
       var step = e.shiftKey ? 48 : 16;
-      if (e.key === "ArrowLeft") apply(current() - step); else if (e.key === "ArrowRight") apply(current() + step); else if (e.key === "Home") apply(o.def); else return;
+      var grow = o.invert ? "ArrowLeft" : "ArrowRight", shrink = o.invert ? "ArrowRight" : "ArrowLeft";
+      if (e.key === shrink) apply(current() - step); else if (e.key === grow) apply(current() + step); else if (e.key === "Home") apply(o.def); else return;
       e.preventDefault(); store(o.key, String(current()));
     });
     gutter.addEventListener("dblclick", function () { apply(o.def); store(o.key, String(o.def)); });
@@ -699,15 +700,49 @@
     prompt.addEventListener("input", codeSlashMenu);
     model.onchange = codeModelNote;
     var stream = h("div", { id: "code-stream", class: "cw-stream", onscroll: function () { codeStick = stream.scrollTop + stream.clientHeight >= stream.scrollHeight - 40; } });
-    var gutter = h("div", { class: "gutter", role: "separator", "aria-orientation": "vertical", "aria-label": "작업 목록 폭 조절(좌우 화살표, 더블클릭으로 초기화)", tabindex: "0" });
+    var gutter = h("div", { class: "gutter g-runs", role: "separator", "aria-orientation": "vertical", "aria-label": "작업 목록 폭 조절(좌우 화살표, 더블클릭으로 초기화)", tabindex: "0" });
     makeResizer(gutter, { cssVar: "--runs-w", key: "runs-w", min: 180, def: 250, max: function () { return Math.min(520, root.clientWidth * 0.5); }, origin: function () { return root.getBoundingClientRect().left; } });
     var runsOpen = store("runs-open"); root.classList.toggle("runs-closed", runsOpen === "0" || (runsOpen === null && window.innerWidth < 900));
+    var gutter2 = h("div", { class: "gutter g-changes", role: "separator", "aria-orientation": "vertical", "aria-label": "변경 사항 폭 조절(좌우 화살표, 더블클릭으로 초기화)", tabindex: "0" });
+    makeResizer(gutter2, { cssVar: "--chg-w", key: "chg-w", min: 260, def: 380, invert: true, max: function () { return Math.min(760, root.clientWidth * 0.6); }, origin: function () { return root.getBoundingClientRect().right; } });
+    var chgOpen = store("changes-open"); root.classList.toggle("changes-closed", chgOpen === "0" || (chgOpen === null && window.innerWidth < 1200));
+    var changes = h("aside", { class: "cw-changes", id: "code-changes", "aria-label": "변경 사항" });
     root.append(datalist,
       h("aside", { class: "cw-side" }, h("button", { type: "button", class: "btn primary cw-new", text: "＋ 새 작업", onclick: function () { codeOpen = ""; renderCode(); } }), h("div", { id: "code-runs", class: "cw-list" })),
       gutter,
-      h("section", { class: "cw-main" }, h("div", { class: "cw-bar" }, h("button", { type: "button", class: "btn", id: "code-toggle-runs", text: "☰ 작업 목록", title: "작업 목록 접기/펴기 (Ctrl+Shift+B)", "aria-controls": "code-runs", onclick: function () { toggleRuns(); } })),
-        h("div", { id: "code-env", class: "sub cw-env" }), stream, form));
-    syncRunsToggle();
+      h("section", { class: "cw-main" }, h("div", { class: "cw-bar" }, h("button", { type: "button", class: "btn", id: "code-toggle-runs", text: "☰ 작업 목록", title: "작업 목록 접기/펴기 (Ctrl+Shift+B)", "aria-controls": "code-runs", onclick: function () { toggleRuns(); } }),
+          h("span", { class: "spacer" }), h("button", { type: "button", class: "btn", id: "code-toggle-changes", title: "변경 사항 패널 접기/펴기", "aria-controls": "code-changes", onclick: function () { toggleChanges(); } }, "± 변경 사항", h("span", { id: "code-changes-count", class: "tag", hidden: true }))),
+        h("div", { id: "code-env", class: "sub cw-env" }), stream, form), gutter2, changes);
+    syncRunsToggle(); renderChanges(null, {});
+  }
+  var changeSel = "", changeSig = "";
+  function toggleChanges(force) { var root = $("code-root"); if (!root) return; var closed = force === undefined ? !root.classList.contains("changes-closed") : !force; root.classList.toggle("changes-closed", closed); store("changes-open", closed ? "0" : "1"); var b = $("code-toggle-changes"); if (b) b.setAttribute("aria-expanded", closed ? "false" : "true"); }
+  function renderChanges(r, per) {
+    var box = $("code-changes"); if (!box) return;
+    var files = (r && r.files) || [];
+    var count = $("code-changes-count"); if (count) { count.textContent = String(files.length); count.hidden = !files.length; }
+    var sig = (r ? r.id : "") + "|" + changeSel + "|" + files.map(function (f) { return f.path + f.added + f.deleted; }).join(",") + "|" + (r && r.patch ? r.patch.length : 0);
+    if (sig === changeSig && box.childNodes.length) return;          // the 1.5 s refresh must not reset scrolling for an unchanged run
+    changeSig = sig; box.textContent = "";
+    var close = h("button", { type: "button", class: "icon", title: "패널 닫기", "aria-label": "변경 사항 패널 닫기", text: "✕", onclick: function () { toggleChanges(false); } });
+    box.appendChild(h("div", { class: "chg-head" }, h("b", { text: "변경 사항" }), r && r.stat ? h("span", { class: "sub", text: r.stat }) : "", close));
+    if (!files.length) { box.appendChild(h("p", { class: "sub", text: r ? "바뀐 파일이 없습니다." : "작업을 열면 바뀐 파일과 변경 내용이 여기에 나옵니다." })); return; }
+    if (!files.some(function (f) { return f.path === changeSel; })) changeSel = files[0].path;
+    var list = h("div", { class: "chg-list", role: "listbox" });
+    files.forEach(function (f) {
+      var kind = { A: "추가", M: "수정", D: "삭제", R: "이름변경" }[f.status] || f.status;
+      list.appendChild(h("button", { type: "button", class: "chg-file" + (f.path === changeSel ? " sel" : ""), role: "option", "aria-selected": f.path === changeSel ? "true" : "false", title: f.path,
+        onclick: function () { changeSel = f.path; renderChanges(r, per); } },
+        h("span", { class: "cw-fk", text: kind }), h("span", { class: "p", text: "\u200E" + f.path }),
+        f.binary ? h("span", { class: "sub", text: "바이너리" }) : h("span", {}, h("span", { class: "add", text: "+" + f.added }), " ", h("span", { class: "del", text: "−" + f.deleted }))));
+    });
+    box.appendChild(list);
+    var chosen = files.filter(function (f) { return f.path === changeSel; })[0];
+    var diff = h("div", { class: "chg-diff" });
+    if (chosen && per[chosen.path]) diff.appendChild(diffView(per[chosen.path].join("\n")));
+    else diff.appendChild(h("p", { class: "sub", text: chosen && chosen.binary ? "바이너리 파일은 내용을 보여 주지 않습니다." : "이 파일의 변경 내용을 불러오지 못했습니다(diff가 길어 일부만 보관됩니다)." }));
+    box.appendChild(diff);
+    if (r.patch_truncated) box.appendChild(h("p", { class: "sub", text: "(diff가 길어 앞부분만 보입니다. 적용하면 전체가 적용됩니다.)" }));
   }
   function syncRunsToggle() { var root = $("code-root"), b = $("code-toggle-runs"); if (root && b) b.setAttribute("aria-expanded", root.classList.contains("runs-closed") ? "false" : "true"); }
   function toggleRuns() { var root = $("code-root"); if (!root) return; var closed = root.classList.toggle("runs-closed"); store("runs-open", closed ? "0" : "1"); syncRunsToggle(); }
@@ -739,7 +774,7 @@
         h("span", { class: "sub", text: (r.stat || "") + " · " + new Date((r.started || 0) * 1000).toLocaleString("ko-KR", { month: "numeric", day: "numeric", hour: "numeric", minute: "2-digit" }) })));
     });
     if (codeOpen && !d.runs.some(function (r) { return r.id === codeOpen; })) codeOpen = "";
-    if (codeOpen) await renderCodeDetail(codeOpen); else codeWelcome();
+    if (codeOpen) await renderCodeDetail(codeOpen); else { codeWelcome(); renderChanges(null, {}); }
     var running = d.runs.some(function (r) { return r.status === "running" || (r.checks && r.checks.state === "running") || (r.review && r.review.state === "running"); });
     if (running && !codeTimer) codeTimer = setInterval(function () { if ($("view-code").hidden) return; renderCode(); }, 1500);
     if (!running && codeTimer) { clearInterval(codeTimer); codeTimer = null; }
@@ -945,8 +980,12 @@
       }
       box.appendChild(card);
     });
-    if (r.files && r.files.length) {
-      var per = splitPatch(r.patch);
+    var per = splitPatch(r.patch);
+    renderChanges(r, per);
+    if (r.files && r.files.length && window.innerWidth > 800) {
+      box.appendChild(h("div", { class: "cw-card" }, h("p", {}, h("b", { text: "바뀐 파일 " + r.files.length + "개 " }), h("span", { class: "sub", text: r.stat })),
+        h("button", { type: "button", class: "btn", text: "변경 사항 보기", onclick: function () { toggleChanges(true); } })));
+    } else if (r.files && r.files.length) {
       var panel = h("div", { class: "cw-card" }, h("p", {}, h("b", { text: "바뀐 파일 " }), h("span", { class: "sub", text: r.stat })));
       r.files.forEach(function (f) {
         var kind = { A: "추가", M: "수정", D: "삭제", R: "이름변경" }[f.status] || f.status;
