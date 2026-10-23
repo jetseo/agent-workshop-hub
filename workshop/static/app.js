@@ -161,7 +161,7 @@
     $("side").classList.toggle("collapsed", !open);
     body.classList.toggle("side-closed", !open);
     $("side-close").textContent = desk ? (open ? "\u2039" : "\u203A") : "\u2715";
-    $("side-close").title = desk ? (open ? "메뉴 접기 (Ctrl+B)" : "메뉴 펴기 (Ctrl+B)") : "사이드바 닫기";
+    $("side-close").title = desk ? (open ? "아이콘만 보기" : "메뉴 펴기") : "사이드바 닫기";
     $("side-close").setAttribute("aria-label", $("side-close").title);
     $("scrim").hidden = !(open && window.innerWidth <= 760);
     store("side", open ? "1" : "0");
@@ -178,9 +178,14 @@
   document.addEventListener("keydown", function (e) {
     if (!(e.ctrlKey || e.metaKey) || e.altKey || e.key.toLowerCase() !== "b") return;
     e.preventDefault();
-    if (e.shiftKey) { if ($("code-root") && !$("view-code").hidden) toggleRuns(); } else setSide($("side").classList.contains("collapsed"));
+    if (e.shiftKey) { if ($("code-root") && !$("view-code").hidden) toggleRuns(); }
+    else if (window.innerWidth > 760) setHidden(!body.classList.contains("side-hidden"));
+    else setSide($("side").classList.contains("collapsed"));
   });
-  $("side-open").addEventListener("click", function () { setSide(true); });
+  function setHidden(hide) { body.classList.toggle("side-hidden", hide && window.innerWidth > 760); store("side-hidden", hide ? "1" : "0"); }
+  setHidden(store("side-hidden") === "1");
+  $("side-hide").addEventListener("click", function () { setHidden(true); });
+  $("side-open").addEventListener("click", function () { if (window.innerWidth > 760) setHidden(false); else setSide(true); });
   $("scrim").addEventListener("click", function () { setSide(false); });
 
   /* External links (token pages) open in the user's default browser. The app window is an Edge --app window,

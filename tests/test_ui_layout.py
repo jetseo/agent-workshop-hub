@@ -18,6 +18,8 @@ class LayoutStaticTests(unittest.TestCase):
         self.assertIn('id="side-gutter"', html)
         self.assertIn('role="separator"', html)
         self.assertIn('id="side-close"', html)
+        self.assertIn('id="side-hide"', html)                       # hide completely (Ctrl+B)
+        self.assertIn('id="modelbtn"', html[html.index('id="composer"'):])   # model picker lives in the composer
 
     def test_css_defines_the_width_variables_rail_mode_and_the_gutter(self):
         css = (STATIC / "app.css").read_text(encoding="utf-8")
@@ -26,7 +28,7 @@ class LayoutStaticTests(unittest.TestCase):
 
     def test_script_wires_resizer_shortcuts_and_the_runs_toggle(self):
         js = (STATIC / "app.js").read_text(encoding="utf-8")
-        for needle in ("function makeResizer", "toggleRuns", 'key.toLowerCase() !== "b"', "code-toggle-runs"):
+        for needle in ("function makeResizer", "toggleRuns", "setHidden", 'key.toLowerCase() !== "b"', "code-toggle-runs"):
             self.assertIn(needle, js)
 
 
