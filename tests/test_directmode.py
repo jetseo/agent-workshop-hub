@@ -201,6 +201,34 @@ class PipelineTests(unittest.TestCase):
         self.assertIn("너무 커서", result["error"])
 
 
+class TestFileProtectionTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.dir = Path(self.tmp.name)
+        (self.dir / "tests").mkdir()
+        (self.dir / "calc.py").write_text(BUG, encoding="utf-8", newline="\n")
+        self.test_text = "from calc import add\n# the yardstick\n"
+        (self.dir / "tests" / "test_calc.py").write_text(self.test_text, encoding="utf-8", newline="\n")
+        self.files = ["calc.py", "tests/test_calc.py"]
+
+    def run_with(self, localize, edits):
+        script = Script(localize=localize, edits=edits)
+        lines = []
+        result = directmode.run(script, "고쳐줘", self.dir, self.files, "", lambda: ("passed", ""), lambda *a: lines.append(a))
+        return result, lines
+
+    def test_an_existing_test_is_left_out_when_an_implementation_file_can_be_edited(self):
+        result, lines = self.run_with('{"files": ["calc.py", "tests/test_calc.py"], "new_files": []}', [blocks("    return a - b", "    return a + b")])
+        self.assertEqual(result["changed"], ["calc.py"])
+        self.assertEqual((self.dir / "tests" / "test_calc.py").read_text(encoding="utf-8"), self.test_text)
+        self.assertTrue(any("고치지 않음" in str(a) for a in lines))
+
+    def test_a_task_that_only_names_a_test_file_may_still_edit_it(self):
+        result, _ = self.run_with('{"files": ["tests/test_calc.py"], "new_files": []}', [blocks("# the yardstick", "# changed on request")])
+        self.assertEqual(result["changed"], ["tests/test_calc.py"])
+
+
 class ContextHygieneTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

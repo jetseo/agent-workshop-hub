@@ -35,7 +35,8 @@ LOCALIZE = ("You are a careful software engineer. Given a task and a list of rep
 EDIT = ("You edit one file. Reply ONLY with SEARCH/REPLACE blocks, in this exact format, one block per change:\n"
         "<<<<<<< SEARCH\n(lines copied exactly from the file)\n=======\n(the new lines)\n>>>>>>> REPLACE\n"
         "Each SEARCH text must appear exactly once in the file and be long enough to be unique. Keep changes minimal and in the "
-        "existing style. Do not change anything the task does not ask for. No explanations.")
+        "existing style. Do not change anything the task does not ask for. If your new code uses a name that is defined in another "
+        "file, add the import. When you move or rename code, copy its body exactly (every character, punctuation included). No explanations.")
 CREATE = ("You create one new file. Reply ONLY with the complete file content inside a single fenced code block. No explanations.")
 
 
@@ -206,6 +207,11 @@ def run(chat, task, worktree, files, summary, test_fn, emit, *, cancelled=lambda
             result["error"] = "요청이 파일 삭제·초기화 같은 위험한 작업이라 이행하지 않았습니다."
             return result
         existing, new = parse_files(answer, files)
+        protected = [f for f in existing if is_test_path(f)]
+        if protected and (len(existing) > len(protected) or new):       # tests are the yardstick: keep existing ones read-only when other files can be edited
+            existing = [f for f in existing if f not in protected]
+        else:
+            protected = []
         if context_for is not None:                                  # now that the files are known, send only the tests that matter
             context = context_for(existing)
             ctx = ("\n\nRelated tests (read-only, do not edit them):\n" + context) if context else ""
@@ -213,7 +219,7 @@ def run(chat, task, worktree, files, summary, test_fn, emit, *, cancelled=lambda
             emit("localize", False, "수정할 파일을 정하지 못했습니다")
             result["error"] = "모델이 수정할 파일을 정하지 못했습니다(답: %s)" % re.sub(r"\s+", " ", answer or "")[:120]
             return result
-        emit("localize", True, ", ".join(existing + new))
+        emit("localize", True, ", ".join(existing + new) + (" (기존 테스트 파일은 고치지 않음: %s)" % ", ".join(protected) if protected else ""))
         if stopped():
             return result
         original = {}
