@@ -187,7 +187,10 @@ static class JetAISetup
                 Install(delegate (int p) { bar.Value = Math.Min(100, p); Application.DoEvents(); });
                 status.Text = "설치가 끝났습니다.";
                 if (launch.Checked) { try { Process.Start(new ProcessStartInfo(Path.Combine(target, "JetAI.exe")) { WorkingDirectory = target }); } catch { } }
-                MessageBox.Show("JetAI를 설치했습니다.\n\n" + target, AppName);
+                string desktopNote = desktopLink ? "\n바탕화면에 'JetAI' 바로가기를 만들었습니다." : "";
+                string startNote = startLink ? "\n시작 메뉴에서 'JetAI'를 검색해도 됩니다." : "";
+                MessageBox.Show("JetAI를 설치했습니다.\n\n실행 파일: " + Path.Combine(target, "JetAI.exe") + desktopNote + startNote + "\n\n확인을 누르면 설치 폴더를 엽니다.", AppName);
+                try { Process.Start("explorer.exe", "\"" + target + "\""); } catch { }
                 Close();
             }
             catch (Exception e)
