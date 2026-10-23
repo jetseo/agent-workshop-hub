@@ -132,9 +132,10 @@ def _code_api(ctx, method, rest, body):
                     raise ApiError(400, str(error))
             return code.start(repo, body.get("prompt"), body.get("model") or "auto", body.get("confirm_cost") is True,
                               body["guidance"] if isinstance(body.get("guidance"), bool) else None,
-                              "direct" if body.get("mode") == "direct" else "agent", body.get("validate") is not False,
+                              body["mode"] if body.get("mode") in ("direct", "loop") else "agent", body.get("validate") is not False,
                               body["attempts"] if isinstance(body.get("attempts"), int) else 1,
-                              body["models"] if isinstance(body.get("models"), list) else None)
+                              body["models"] if isinstance(body.get("models"), list) else None,
+                              body["limits"] if isinstance(body.get("limits"), dict) else None)
         if rest == ["rules", "remove"] and method == "POST":
             repo = code.check_repo(body.get("repo"))
             code.rules.remove(repo, str(body.get("command") or ""))

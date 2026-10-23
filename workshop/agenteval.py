@@ -273,7 +273,8 @@ def run_task(runs, task, model, workdir, wait=1200, sleep=time.sleep, clock=time
     except Exception:
         pass
     result.update({"task": task.id, "model": label or model, "seconds": round(clock() - began, 1), "status": run["status"],
-                   "tokens": metrics.get("tokens"), "tool_calls": metrics.get("tool_calls")})
+                   "tokens": metrics.get("tokens"), "tool_calls": metrics.get("tool_calls"),
+                   "tokens_est": (run.get("stats") or {}).get("tokens_est"), "calls": (run.get("stats") or {}).get("calls")})
     return result
 
 
@@ -297,19 +298,22 @@ def evaluate(runs, models, task_ids=None, guidance="default", mode="agent", atte
             for suffix, flag in GUIDANCE_VARIANTS[guidance]:
                 for task in chosen:
                     results.append(run_task(runs, task, model, Path(tmp) / ("m%d%s-%s" % (number, "g" if flag else "n" if flag is False else "", task.id)),
-                                            guidance=flag, label=model + suffix + (" [직접 모드" + ("·%d회 시도]" % attempts if attempts > 1 else "]") if mode == "direct" else ""), mode=mode, attempts=attempts, **kwargs))
+                                            guidance=flag, label=model + suffix + (" [" + {"direct": "직접 모드", "loop": "액션 루프"}[mode] + ("·%d회 시도]" % attempts if attempts > 1 else "]") if mode in ("direct", "loop") else ""), mode=mode, attempts=attempts, **kwargs))
     return results
 
 
 def table(results):
     """Markdown table: one row per model, one column per task, plus totals."""
     tasks = [t for t in TASKS if any(r["task"] == t.id for r in results)]
-    lines = ["| 모델 | " + " | ".join(t.title for t in tasks) + " | 성공 | 평균 시간 |", "|---|" + "---|" * (len(tasks) + 2)]
+    with_tokens = any(r.get("tokens_est") for r in results)
+    lines = ["| 모델 | " + " | ".join(t.title for t in tasks) + " | 성공 | 평균 시간 |" + (" 평균 추정 토큰 |" if with_tokens else ""), "|---|" + "---|" * (len(tasks) + 2 + with_tokens)]
     for model in sorted({r["model"] for r in results}):
         mine = {r["task"]: r for r in results if r["model"] == model}
         cells = [("✅" if mine[t.id]["ok"] else "❌") if t.id in mine else "-" for t in tasks]
-        lines.append("| `%s` | %s | %d/%d | %.0f초 |" % (model, " | ".join(cells), sum(r["ok"] for r in mine.values()), len(mine),
-                                                       sum(r["seconds"] for r in mine.values()) / max(1, len(mine))))
+        used = [r["tokens_est"] for r in mine.values() if r.get("tokens_est")]
+        lines.append("| `%s` | %s | %d/%d | %.0f초 |%s" % (model, " | ".join(cells), sum(r["ok"] for r in mine.values()), len(mine),
+                                                       sum(r["seconds"] for r in mine.values()) / max(1, len(mine)),
+                                                       (" %d |" % (sum(used) / len(used)) if used else " - |") if with_tokens else ""))
     lines += ["", "실패 이유:"]
     lines += ["- `%s` / %s: %s" % (r["model"], r["task"], r["reason"]) for r in results if not r["ok"]] or ["- 없음"]
     return "\n".join(lines)
@@ -321,7 +325,7 @@ def main(argv=None):
     parser.add_argument("--tasks", help="쉼표로 구분한 작업 id (기본: 전부). 가능: " + ", ".join(TASK_IDS))
     parser.add_argument("--guidance", choices=sorted(GUIDANCE_VARIANTS), default="default",
                         help="작업 지침: on/off, both는 같은 모델·작업을 지침 없음/있음으로 둘 다 실행해 비교, default는 설정을 따름")
-    parser.add_argument("--mode", choices=("agent", "direct"), default="agent", help="agent: OpenCode 에이전트, direct: JetAI가 단계를 진행하는 직접 모드(도구 호출 불필요)")
+    parser.add_argument("--mode", choices=("agent", "direct", "loop"), default="agent", help="agent: OpenCode 에이전트, direct: JetAI가 단계를 진행하는 직접 모드, loop: JSON 액션 프로토콜 루프(도구 호출 불필요)")
     parser.add_argument("--attempts", type=int, default=1, help="직접 모드에서 작업당 최대 시도 횟수(1~5): 테스트가 통과하는 첫 시도에서 멈춤")
     parser.add_argument("--mix", action="store_true", help="여러 --model을 한 묶음으로: 시도(--attempts)마다 모델을 번갈아 씀(직접 모드)")
     parser.add_argument("--out", help="결과 표를 쓸 Markdown 파일")
