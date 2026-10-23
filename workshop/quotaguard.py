@@ -283,9 +283,22 @@ def get():
     return _current
 
 
+def guard_for_url(url):
+    """The guard that owns this address (exact host match), or None. A guarded service must stay guarded however it was registered:
+    by the wizard, by "직접 입력" with its URL, or by hand-editing providers.json without the `guard` field."""
+    from urllib.parse import urlparse
+    host = (urlparse(url).hostname or "").lower() if isinstance(url, str) else ""
+    for gid, info in GUARDS.items():
+        if host in info["hosts"]:
+            return gid
+    return None
+
+
 def guard_id(provider):
     gid = (provider or {}).get("guard")
-    return gid if gid in GUARDS else None
+    if gid in GUARDS:
+        return gid
+    return guard_for_url((provider or {}).get("base_url"))
 
 
 def estimate_tokens(messages):

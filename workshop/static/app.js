@@ -302,7 +302,7 @@
   }
   async function loadState() {
     var s = await api("GET", "/state");
-    state.providers = s.providers; state.catalog = s.catalog; state.onboarded = s.onboarded;
+    state.providers = s.providers; state.catalog = s.catalog; state.catalog_status = s.catalog_status; state.onboarded = s.onboarded;
     state.settings = s.settings || { auto_add_models: true };
     if (!state.feedTried) {                        // a (re)load looks for newly listed free services; the server throttles it
       state.feedTried = true;
@@ -1651,7 +1651,15 @@
       onclick: function () { w.service = c.id; w.step = 2; w.error = ""; renderWizard(); } },
       h("b", { text: c.label }), h("span", { text: c.policy === "local" ? "토큰 불필요 · 내 PC에서 실행" : "클라우드 · 토큰 필요" }),
       c.is_new ? h("span", { class: "tag free", text: "NEW" }) : null,
-      c.limits ? h("span", { class: "lim", text: "무료 한도: " + c.limits }) : null);
+      c.limits ? h("span", { class: "lim", text: "무료 한도: " + c.limits }) : null,
+      reachNote(c));
+  }
+  function reachNote(c) {
+    var st = (state.catalog_status && state.catalog_status.services || {})[c.id];
+    if (c.policy === "local") return null;
+    if (!st) return h("span", { class: "lim", text: "응답 확인: 아직 안 함" });
+    var day = new Date(state.catalog_status.checked_at * 1000).toLocaleDateString("ko-KR", { month: "numeric", day: "numeric" });
+    return h("span", { class: "lim", text: "응답 확인 " + day + ": " + (st.ok ? "응답함" : "응답 없음·주소 확인 필요") + " (무료 한도는 이 확인으로 알 수 없음)" });
   }
   function wizStep1(card, w) {
     var boxes = [];
@@ -1669,6 +1677,20 @@
       Array.prototype.forEach.call(document.querySelectorAll("#wizard .svc-group"), function (g) { g.hidden = !g.querySelector(".svc:not([hidden])"); });
     } });
     card.appendChild(h("div", { class: "row", style: "align-items:center;gap:8px" }, search,
+      h("button", { type: "button", class: "btn mini", id: "w-reach", text: "응답 확인", title: "서비스마다 키 없이 주소 하나(/models)만 익명으로 요청해 지금 응답하는지 봅니다. 무료 한도는 알 수 없고, 아무것도 저장되지 않는 내용은 보내지 않습니다.",
+        onclick: async function () {
+          var b = this; b.disabled = true; b.textContent = "확인 중…";
+          try {
+            await api("POST", "/catalog/check", {});
+            for (var i = 0; i < 40; i++) {                                           // the check runs in the background (a slow service can take a while)
+              await new Promise(function (r) { setTimeout(r, 3000); });
+              await loadState();
+              if (!(state.catalog_status && state.catalog_status.running)) break;
+            }
+            toast("응답 확인을 마쳤습니다.");
+          } catch (e) { toast(e.message); }
+          renderWizard();
+        } }),
       h("button", { type: "button", class: "btn mini", id: "w-refresh", text: "목록 새로 고침", title: "공개 목록에서 새로 생긴 무료 서비스를 찾아 목록에 더합니다", onclick: async function () {
         var b = this; b.disabled = true; b.textContent = "찾는 중…";
         try {
