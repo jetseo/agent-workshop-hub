@@ -652,7 +652,7 @@
       h("span", { text: " 작업 지침" }));
     var menu = h("div", { id: "code-slash", class: "cw-slash", role: "listbox", hidden: true });
     var form = h("form", { id: "code-composer", class: "cw-composer", autocomplete: "off", onsubmit: function (e) { e.preventDefault(); codeSubmit(); } },
-      h("div", { class: "cw-opts" }, project, settingsBtn, repo, mode, attempts, mix, model, guide, validate), h("p", { class: "sub", id: "code-model-note" }), cost, menu,
+      h("div", { class: "cw-opts" }, project, settingsBtn, repo, mode, attempts, mix, model, guide, validate), h("p", { class: "sub", id: "code-model-note" }), h("button", { type: "button", class: "btn", id: "code-ctx-check", hidden: true, text: "입력 한도 점검", title: "이 모델이 한 번에 받는 입력의 길이를 시험 글 2개로 확인합니다(설정은 바꾸지 않습니다)", onclick: codeCtxCheck }), cost, menu,
       h("div", { class: "cw-box" }, prompt, send));
     prompt.addEventListener("keydown", function (e) {
       if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); codeSubmit(); }
@@ -681,7 +681,7 @@
     if (!pr.length && !$("code-repo").value && d.repos[0]) $("code-repo").value = d.repos[0];
     var sel = $("code-model"), prev = sel.value; sel.textContent = "";
     sel.appendChild(h("option", { value: "auto", text: "자동 (무료·로컬 중 코드 작업에 충분한 모델)" }));
-    d.models.forEach(function (m) { sel.appendChild(h("option", { value: m.ref, "data-warn": m.warn || "", "data-tier": m.tier, text: m.ref + (m.tier === "local" ? " (내 PC)" : m.tier === "free" ? " (무료)" : " (유료 가능)") + (m.warn ? " ⚠" : "") })); });
+    d.models.forEach(function (m) { sel.appendChild(h("option", { value: m.ref, "data-warn": m.warn || "", "data-tier": m.tier, "data-ctx": m.ctx_limit || "", text: m.ref + (m.tier === "local" ? " (내 PC)" : m.tier === "free" ? " (무료)" : " (유료 가능)") + (m.warn ? " ⚠" : "") })); });
     d.environment.opencode && sel.appendChild(h("option", { value: "opencode/deepseek-v4.1-flash-free", "data-warn": "OpenCode의 무료 서비스입니다. 코드가 그 서비스로 전송됩니다.", "data-tier": "free", text: "opencode/deepseek-v4.1-flash-free (OpenCode 무료)" }));
     if (prev) sel.value = prev; codeModeChanged();
     $("code-start").disabled = (!d.environment.opencode && $("code-mode").value === "agent") || codeBusy;
@@ -762,9 +762,19 @@
     if ($("code-model").selectedOptions[0] && $("code-model").selectedOptions[0].disabled) $("code-model").value = "auto";
     codeModelNote();
   }
+  async function codeCtxCheck() {
+    var b = $("code-ctx-check"); b.disabled = true;
+    try {
+      var r = await api("POST", "/code/context-probe", { model: $("code-model").value });
+      toastLong(r.ok ? (r.truncated ? "입력이 약 " + r.limit_tokens + "토큰에서 잘립니다. " + r.advice : "입력이 잘리지 않습니다(큰 입력 " + r.big_tokens + "토큰 확인).") : r.error);
+      renderCode();
+    } catch (e) { toast(e.message); }
+    b.disabled = false;
+  }
   function codeModelNote() {
     var o = $("code-model").selectedOptions[0]; if (!o) return;
-    $("code-model-note").textContent = o.dataset.warn || "";
+    $("code-model-note").textContent = (o.dataset.warn || "") + (o.dataset.ctx ? " ⚠ 이 모델은 입력이 약 " + o.dataset.ctx + "토큰에서 잘립니다(점검 결과)." : "");
+    $("code-ctx-check").hidden = o.dataset.tier !== "local" || o.value === "auto";
     $("code-cost-row").hidden = o.dataset.tier !== "other";
   }
   function codeSlashMenu() {
@@ -875,6 +885,7 @@
     });
     if (r.status === "running" && !(r.activity || []).length) agent.appendChild(h("div", { class: "sub", text: "시작하는 중…" }));
     if (r.status === "running") agent.appendChild(h("div", { class: "cw-typing", "aria-label": "작업 중" }, h("i"), h("i"), h("i")));
+    if (r.stats && r.stats.cut_calls) box.appendChild(h("div", { class: "cw-card warn" }, h("p", { text: "⚠ 입력이 잘렸을 수 있습니다(" + r.stats.cut_calls + "회). 모델이 일부를 보지 못했을 수 있어요. 모델 옆 \"입력 한도 점검\"으로 확인하세요." })));
     if (r.error) agent.appendChild(h("p", { class: r.status === "failed" ? "err" : "sub", text: r.error }));
     box.appendChild(agent);
     (r.blocked || []).forEach(function (b) {

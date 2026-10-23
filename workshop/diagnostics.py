@@ -74,6 +74,30 @@ def inspect_runtime(*, check_services=True):
     return _add_hints(checks)
 
 
+def _context_probe(ref):
+    from . import chat, ctxprobe
+    from .providers import Providers
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
+    name, _, model = ref.partition("/")
+    provider = Providers().get(name)
+    if provider is None or not model:
+        print("등록되지 않은 서비스/모델입니다: " + ref)
+        return 2
+    if provider["data_policy"] != "local":
+        print("이 PC의 로컬 서비스만 점검합니다(클라우드 서비스에는 테스트 글을 보내지 않습니다).")
+        return 2
+    result = ctxprobe.probe(chat.chat, provider, model)
+    if not result.get("ok"):
+        print(result["error"])
+        return 1
+    print("작은 입력 %s토큰, 큰 입력(%d자) %s토큰 → %s" % (result["small_tokens"], result["big_chars"], result["big_tokens"],
+                                                       "잘림(한도 약 %d토큰)" % result["limit_tokens"] if result["truncated"] else "잘리지 않음"))
+    if result["advice"]:
+        print(result["advice"])
+    return 0
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Non-destructive AI workshop diagnostics")
     parser.add_argument("--json", action="store_true", help="Machine-readable JSON output")
@@ -81,7 +105,11 @@ def main(argv=None):
                         help="Require enabled optional integrations to be reachable")
     parser.add_argument("--no-services", action="store_true",
                         help="Skip loopback Ollama connectivity check")
+    parser.add_argument("--context", metavar="SERVICE/MODEL",
+                        help="Probe how much input a LOCAL model service really accepts (two small test prompts; changes nothing)")
     args = parser.parse_args(argv)
+    if args.context:
+        return _context_probe(args.context)
     # Korean hints must not crash legacy Windows code pages (cp1252/cp949 pipes).
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")

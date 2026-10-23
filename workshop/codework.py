@@ -25,7 +25,7 @@ import time
 import uuid
 from pathlib import Path
 
-from . import adapters, agentloop, checks, cmdguard, codereport, codereview, directmode, guidance, modelpick, projectmap, usage, worktree
+from . import adapters, agentloop, ctxprobe, checks, cmdguard, codereport, codereview, directmode, guidance, modelpick, projectmap, usage, worktree
 
 MAX_MIX = 3                                                    # direct mode: models that take turns across the tries
 MAX_ATTEMPTS = 5                                               # direct mode: tries per task (each in its own copy)
@@ -98,9 +98,12 @@ def opencode_command(binary, model_arg, prompt, session=None):
     return command + [prompt]
 
 
-def _default_direct_chat(provider, model, messages, *, timeout, max_tokens, temperature=None):
+def _default_direct_chat(provider, model, messages, *, timeout, max_tokens, temperature=None, usage=None):
     from . import chat as chat_module
-    return chat_module.chat(provider, model, messages, timeout=timeout, max_tokens=max_tokens, temperature=temperature)
+    return chat_module.chat(provider, model, messages, timeout=timeout, max_tokens=max_tokens, temperature=temperature, usage=usage)
+
+
+_default_direct_chat.accepts_usage = True      # test doubles without this attribute are called the old way
 
 
 def _git_bytes(*args, cwd):
@@ -157,6 +160,7 @@ class CodeRuns:
         self.check_timeout = check_timeout
         self.use_guidance = use_guidance
         self.direct_chat = direct_chat or _default_direct_chat
+        self.ctx_limits = None                                       # ctxprobe.ContextLimits (set by the app): known input limits of local services
         self.projects = None                                         # the project registry (set by the app); None keeps the old folder-only behaviour
         self.review_fn = codereview.review
         self.rules = cmdguard.ProjectRules(self.home / "command-rules.json")
@@ -269,7 +273,8 @@ class CodeRuns:
             warn = "작은 로컬 모델은 파일을 고치는 도구 호출을 자주 틀립니다(시험에서 확인). 더 큰 모델을 권합니다."
         elif tier == "other":
             warn = "요금이 나올 수 있는 모델입니다."
-        return {"ref": name + "/" + model, "tier": tier, "level": cap["level"], "warn": warn}
+        limit = self.ctx_limits.limit_tokens(name + "/" + model) if self.ctx_limits is not None else None
+        return {"ref": name + "/" + model, "tier": tier, "level": cap["level"], "warn": warn, "ctx_limit": limit}
 
     def _resolve_model(self, model_ref, confirm_cost):
         """-> (model_arg for OpenCode, provider dict or None, tier). Raises CodeWorkError for anything not allowed."""
@@ -486,7 +491,7 @@ class CodeRuns:
         events = open(directory / "events.jsonl", "ab")
         audit_file = open(directory / "audit.jsonl", "ab") if run.get("mode") == "loop" else None
         total = max(1, int(run.get("attempts", 1)))
-        meter = {"calls": 0, "tokens_est": 0}
+        meter = {"calls": 0, "tokens_est": 0, "prompt_tokens": 0, "completion_tokens": 0, "cut_calls": 0}
         validate = run.get("validate", True)
         trials = []
 
@@ -516,9 +521,19 @@ class CodeRuns:
                 temperature = None if number == 1 else min(1.0, 0.5 + 0.15 * number)       # later tries need some variety to differ from the first
 
                 def ask(messages, max_tokens, temperature=temperature, provider=provider, model=model, timeout=timeout):
-                    reply = self.direct_chat(provider, model, messages, timeout=timeout, max_tokens=max_tokens, temperature=temperature)
+                    seen = {}
+                    if getattr(self.direct_chat, "accepts_usage", False):
+                        reply = self.direct_chat(provider, model, messages, timeout=timeout, max_tokens=max_tokens, temperature=temperature, usage=seen)
+                    else:
+                        reply = self.direct_chat(provider, model, messages, timeout=timeout, max_tokens=max_tokens, temperature=temperature)
+                    chars = sum(len(m["content"]) for m in messages)
                     meter["calls"] += 1                                    # rough size of what was sent and received (about 2 characters per token)
-                    meter["tokens_est"] += sum(len(m["content"]) for m in messages) // 2 + len(reply or "") // 2
+                    meter["tokens_est"] += chars // 2 + len(reply or "") // 2
+                    if seen.get("prompt_tokens") is not None:              # what the service itself counted (the honest number)
+                        meter["prompt_tokens"] += seen["prompt_tokens"]
+                        meter["completion_tokens"] += seen.get("completion_tokens") or 0
+                        if ctxprobe.looks_cut(chars, seen["prompt_tokens"]):
+                            meter["cut_calls"] += 1
                     return reply
 
                 def test_fn(path=path, trial=trial):
@@ -536,7 +551,7 @@ class CodeRuns:
                                  "popen": self.popen, "kill": kill_tree, "env": self._check_env(), "on_blocked": lambda command: self._record_blocked(run, command)}
                     trial["result"] = runner(ask, run["prompt"], path, files, run.get("project", ""), test_fn, emit,
                                              cancelled=lambda: bool(self._cancel_flags.get(run_id)), validate=validate,
-                                             context=directmode.related_tests(path, files), temperature=temperature if number > 1 else None, **extra)
+                                             context=directmode.related_tests(path, files, limit=self._context_chars(run)), temperature=temperature if number > 1 else None, **extra)
                 except Exception as error:
                     trial["result"]["error"] = "실행 중 오류: " + str(error)[:200]
                 trial["verdict"] = (trial["checks"] or {}).get("verdict", "skipped")
@@ -609,6 +624,11 @@ class CodeRuns:
         run["worktree"], run["branch"] = str(best["path"]), best["branch"]
         if original != run["worktree"] and best["n"] != 1:
             run["note_adopted_from"] = best["n"]
+
+    def _context_chars(self, run):
+        """Room for read-only context: 8,000 characters, less when a probe found that the model keeps only a few thousand tokens."""
+        limit = self.ctx_limits.limit_tokens(run.get("model")) if self.ctx_limits is not None else None
+        return 8000 if not limit else max(1500, int(limit * 1.2))
 
     def _check_env(self):
         env = {k: v for k, v in os.environ.items() if k in WINDOWS_ENV_KEEP}

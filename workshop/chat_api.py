@@ -14,6 +14,7 @@ from .explain import explain
 from .chat import chat, chat_stream, list_models
 from .chat_store import DEFAULT_TITLE, CHAT_ID, ChatStore
 from . import arbiter, router
+from . import ctxprobe
 from .codework import CodeRuns, CodeWorkError
 from .projects import ProjectError, ProjectRegistry
 from .engine import Engine, EngineError
@@ -69,6 +70,8 @@ class Context:
 
         self.projects = ProjectRegistry(providers.path.parent / "projects.json", check_repo=CodeRuns.check_repo)   # the projects JetAI may work on
         self.code.projects = self.projects
+        self.ctx_limits = ctxprobe.ContextLimits(providers.path.parent / "ctx-limits.json")   # measured input limits of local services
+        self.code.ctx_limits = self.ctx_limits
         self.remote = RemoteControl(self)                            # phone control; the server attaches the job queue and starts it
         self.engine = Engine(providers.path.parent / "engine", providers)      # built-in local engine (llama.cpp), off until installed
         self.active = set()
@@ -123,6 +126,21 @@ def _code_api(ctx, method, rest, body):
                 if run["repo"] not in repos:
                     repos.append(run["repo"])
             return {"environment": code.environment(), "models": code.model_options(), "runs": runs, "repos": repos[:8]}
+        if rest == ["context-probe"] and method == "POST":
+            ref = body.get("model")
+            name, _, model = (ref if isinstance(ref, str) else "").partition("/")
+            provider = ctx.providers.get(name) if name else None
+            if provider is None or not model:
+                raise ApiError(400, "연결된 서비스의 모델을 고르세요.")
+            if provider["data_policy"] != "local":
+                raise ApiError(400, "이 PC의 로컬 서비스만 점검합니다(클라우드 서비스에는 테스트 글을 보내지 않습니다).")
+            try:
+                result = ctxprobe.probe(chat, provider, model)
+            except Exception as error:
+                raise ApiError(400, "점검하지 못했습니다: " + str(error)[:160])
+            if result.get("ok"):
+                ctx.ctx_limits.set(ref, result)
+            return result
         if rest == ["start"] and method == "POST":
             repo = body.get("repo")
             if isinstance(body.get("project"), str) and body["project"]:        # a registered project wins over a typed path
