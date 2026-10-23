@@ -4,10 +4,11 @@
 [CmdletBinding()]
 param(
     [ValidatePattern('^\d+\.\d+\.\d+$')][string]$PythonVersion = "3.12.8",
-    [string]$OutDir = (Join-Path $PSScriptRoot "../dist"),
+    [string]$OutDir = "",
     [switch]$DryRun
 )
 $ErrorActionPreference = "Stop"
+if (-not $OutDir) { $OutDir = Join-Path $PSScriptRoot "../dist" }          # a $PSScriptRoot default inside param() is empty on some PowerShell 5.1 hosts
 $repo = Split-Path -Parent $PSScriptRoot
 $url = "https://www.python.org/ftp/python/$PythonVersion/python-$PythonVersion-embed-amd64.zip"
 $name = "JetAI-portable"
@@ -37,6 +38,9 @@ try {
         if (Test-Path -LiteralPath (Join-Path $repo $file)) { Copy-Item -LiteralPath (Join-Path $repo $file) -Destination $stage }
     }
     Copy-Item -Recurse -LiteralPath (Join-Path $repo "docs") -Destination (Join-Path $stage "docs")
+    # Launcher exe (built with the C# compiler that ships with Windows) and the icon; falls back to JetAI.cmd only.
+    & (Join-Path $PSScriptRoot "build-exe.ps1") -OutDir $stage | Out-Null
+    Set-Content -LiteralPath (Join-Path $stage "VERSION.txt") -Value (Get-Date -Format "yyyy.MM.dd") -Encoding ASCII
     $cmd = "@echo off`r`ncd /d `"%~dp0`"`r`npowershell.exe -NoProfile -ExecutionPolicy Bypass -File `"%~dp0jetai.ps1`" %*`r`n"
     Set-Content -LiteralPath (Join-Path $stage "JetAI.cmd") -Value $cmd -Encoding ASCII -NoNewline
     $manifest = "JetAI portable package`r`nPython: $PythonVersion embeddable (amd64), downloaded over HTTPS from python.org`r`nPython zip SHA256: $hash`r`nBuilt: $((Get-Date).ToUniversalTime().ToString('yyyy-MM-dd HH:mm')) UTC`r`n"
