@@ -47,3 +47,6 @@
 | [branding/logo-prompt.md](branding/logo-prompt.md) | 로고 프롬프트와 확정된 SVG 로고 설명 |
 | [handoff/jet-studio-comfyui-prompt.md](handoff/jet-studio-comfyui-prompt.md) | Jet Studio로 넘긴 이미지·ComfyUI 기능(프롬프트 + 코드 전체) |
 - [ui-plan.md](ui-plan.md) — UI 개선 플랜(패널 접기·폭 조절·팔레트·변경 패널), 참고 프로젝트
+- [jetai-ui-improvement-plan.md](jetai-ui-improvement-plan.md) — UI/UX 고도화·작업 관리 안정화 플랜(체크리스트 포함)
+- [jetai-ui-existing-architecture.md](jetai-ui-existing-architecture.md) — UI 기존 구조 조사
+- [jetai-task-deletion-rca.md](jetai-task-deletion-rca.md) — 작업 삭제 불가 원인 분석
