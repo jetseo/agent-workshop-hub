@@ -42,6 +42,7 @@ All PRs append to `docs/verification.md`, so merges conflict there: keep **both*
 - Extra git worktrees next to the repo (clean, all pushed): `wt-disc` (#65), `wt-seq` (#66), `wt-eval` (#68), `wt-handoff` (#67). Remove them with `git worktree remove` after the PRs are merged. The main checkout was left on `feat/engine-qwen35-9b`.
 
 ## Next tasks (priority order; see the plans for acceptance criteria)
+0. **Done since the last refresh (in PR #66, not merged)**: move-helper was failing with *both* models for a reason in the direct-mode pipeline, not the model: a new file was created without the original code (so the `!` was lost), and edit markers (`SEARCH`/`=======`) were accepted as file content. Fixed in `directmode.py` (reference files shown when creating a new file; marker lines refused). move-helper went 0-1/5 -> 4/5 (5/5 alone). Total 7B 12/20 (was 8-10/20). three-files stays 0/5: invented variable names (`total_price`) in the call site.
 1. Ask the user whether the 9B (13/20, much slower) should become a selectable/default code model, and investigate why **move-helper** fails with both models (read an actual output first). A thinking model needs the answer ceilings `LOCALIZE_TOKENS/WRITE_TOKENS` to stay generous.
 2. Merge the open PRs when the user asks (order #62 → #66 and #68, then #64, #65, #63, #67), rebuild the installer (`powershell -File scripts/build-installer.ps1`, ~11 MB, writes `dist\JetAI-Setup.exe`, git-ignored) and tell the user to quit the running JetAI from the tray first.
 3. Discovery helper D1 onward (`docs/discovery-helper-plan.md`): Hugging Face model candidates with the PC-fit check, then "add" through the existing exact-size flow. Recommend only; never auto-install; external text is data, not instructions.
@@ -50,6 +51,8 @@ All PRs append to `docs/verification.md`, so merges conflict there: keep **both*
 6. Computer use: wire the browser into policy/audit (observe → approval), then Windows UI Automation, then vision. Login/payment screen detection is missing.
 7. Existing P1 items: work-branch commit (ask first), retry/escalation, diff secret scan, route code runs by recorded outcomes (L7).
 - Ask the user before: merging, paid calls, downloads (state the exact size), real-hardware or live-service runs, touching `~/.agent-workshop` data (the user's own run records were soft-deleted by us only for **eval** runs, 384 of them, now in the trash tab), the Telegram token.
+
+**Needs Sonnet review before anyone changes it (do not do alone):** (a) whether to route three-files-style failures back with the exact `NameError` line (touches the repair loop in `directmode.py`); (b) making 9B a default code model (model routing); (c) any change to how `engine.py` lists or installs models; (d) the move/rename prompt wording (affects all direct-mode edits; verify with 4 tasks x 5 runs before keeping it).
 
 ## Essential safety and design constraints
 - No automatic paid API calls, credentials overwrite, model downloads without the user's confirmed size, destructive installation, or automatic merges. Existing subscriptions (Codex, Claude Code, OpenAI login, OpenCode Zen key) must not be used by automation unless verified and explicitly confirmed.
