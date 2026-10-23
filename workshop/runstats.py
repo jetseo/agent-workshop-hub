@@ -22,8 +22,9 @@ class RunStats:
         self.path = Path(path) if path else default_path()
         self._lock = threading.Lock()
 
-    def record(self, model, *, ok, seconds, kind="text", when=None):
-        line = json.dumps({"ts": when if when is not None else time.time(), "model": str(model),
+    def record(self, model, *, ok, seconds, kind="text", when=None, tokens=None):
+        extra = {"tokens": int(tokens)} if isinstance(tokens, (int, float)) else {}
+        line = json.dumps({**extra, "ts": when if when is not None else time.time(), "model": str(model),
                            "ok": bool(ok), "seconds": round(max(0.0, float(seconds)), 2), "kind": kind})
         with self._lock:
             self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -50,7 +51,7 @@ class RunStats:
                 continue
         return out
 
-    def load(self, days=RECENT_WINDOW_DAYS, now=None):
+    def load(self, days=RECENT_WINDOW_DAYS, now=None, kind=None):
         """{model: {"runs", "failures", "seconds", "streak_fail", "last_ts"}} for the recent window; matches
         router.route(stats=). streak_fail counts the failures at the very end of the history (0 after a success)."""
         cutoff = (time.time() if now is None else now) - days * 86400
@@ -58,6 +59,9 @@ class RunStats:
         for r in sorted(self._records(), key=lambda rec: rec["ts"]):
             if r["ts"] < cutoff:
                 continue
+            is_code = str(r.get("kind", "text")).startswith("code:")
+            if is_code != (kind == "code"):
+                continue                                       # default view = chat routing only; code runs via kind="code"
             entry = stats.setdefault(r["model"], {"runs": 0, "failures": 0, "seconds": 0.0, "streak_fail": 0, "last_ts": 0.0})
             entry["runs"] += 1
             entry["failures"] += 0 if r.get("ok") else 1
