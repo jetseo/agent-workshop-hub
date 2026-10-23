@@ -77,6 +77,8 @@ python -m workshop.diagnostics --no-services  # read-only environment check
 python -m workshop.catalog_check              # do the catalog services still answer (anonymous GET, no keys)
 .\jetai.ps1 -DryRun                           # what the launcher would do
 .\scripts\build-exe.ps1                       # build JetAI.exe next to jetai.ps1
+.\scriptsuild-installer.ps1                 # dist\JetAI-Setup.exe (downloads the embeddable Python once; JetAI.exe is built inside)
+python -m workshop.agenteval --model ollama/qwen2.5-coder:7b --mode direct --attempts 3 --tasks vague-bug,three-files,move-helper,log-bug --out result.md   # eval harness (writes runs into the real data folder: trash them afterwards)
 ```
 Test fixtures: fake OpenAI-compatible, GitHub/Hugging Face and Telegram servers and a fake OpenCode live in `tests/`; real-service checks are done by hand and recorded as such.
 
