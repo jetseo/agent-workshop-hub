@@ -37,7 +37,9 @@ EDIT = ("You edit one file. Reply ONLY with SEARCH/REPLACE blocks, in this exact
         "Each SEARCH text must appear exactly once in the file and be long enough to be unique. Keep changes minimal and in the "
         "existing style. Do not change anything the task does not ask for. If your new code uses a name that is defined in another "
         "file, add the import. When you move or rename code, copy its body exactly (every character, punctuation included). No explanations.")
-CREATE = ("You create one new file. Reply ONLY with the complete file content inside a single fenced code block. No explanations.")
+CREATE = ("You create one new file. Reply ONLY with the complete file content inside a single fenced code block. No explanations. "
+          "If the task moves or copies code into this file, copy it exactly from the reference files (every character, punctuation included).")
+MARKER_LINE = re.compile(r"^\s*(?:<{5,9}\s*SEARCH|={5,9}\s*$|>{5,9}\s*REPLACE|SEARCH\s*$|FILE:)", re.M)       # edit-block syntax is never file content
 
 
 class DirectError(Exception):
@@ -244,10 +246,11 @@ def run(chat, task, worktree, files, summary, test_fn, emit, *, cancelled=lambda
                 emit("create", False, rel + " (허용되지 않는 경로 또는 이미 있음)")
                 result["error"] = "만들 수 없는 파일 경로입니다: " + rel
                 return result
-            answer = ask(CREATE, "Task:\n%s\n\nNew file path: %s\nExisting files:\n%s" % (task, rel, "\n".join(files[:80])), WRITE_TOKENS)
+            refs = "".join("\n\nReference file %s (current content):\n```\n%s\n```" % (r, original[r][0][:3000]) for r in existing)   # the new file may need code that lives in these
+            answer = ask(CREATE, "Task:\n%s\n\nNew file path: %s\nExisting files:\n%s%s" % (task, rel, "\n".join(files[:80]), refs), WRITE_TOKENS)
             match = FENCE.search(answer or "")
             body = match.group(1) if match else ""
-            if not body.strip() or len(body) > MAX_NEW_FILE_CHARS:
+            if not body.strip() or len(body) > MAX_NEW_FILE_CHARS or MARKER_LINE.search(body):
                 emit("create", False, rel + " (내용을 읽지 못함)")
                 result["error"] = "새 파일 내용을 읽지 못했습니다: " + rel
                 return result
@@ -320,6 +323,8 @@ def _edit_file(ask, task, worktree, rel, current, emit, retry, ctx=""):
             whole = FENCE.search(answer or "")          # the model rewrote the whole file instead: accept it for a small file, the diff shows the result
             if not whole or not whole.group(1).strip() or len(whole.group(1)) > MAX_FILE_CHARS:
                 return None, "Your reply had no SEARCH/REPLACE blocks in the required format.", ""
+            if MARKER_LINE.search(whole.group(1)):
+                return None, "Your reply put SEARCH/REPLACE markers inside file content. Reply with proper SEARCH/REPLACE blocks only.", ""
             candidate, note = whole.group(1).replace("\r\n", "\n"), "파일 전체를 다시 씀"
             candidate = candidate if candidate.endswith("\n") else candidate + "\n"
         if rel.endswith(".py"):

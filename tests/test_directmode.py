@@ -261,6 +261,24 @@ class OneFileAtATimeTests(unittest.TestCase):
         self.assertIn("invalid Python", script.calls[2][1])                            # the retry names the problem
 
 
+    def test_the_new_file_prompt_shows_the_files_it_may_copy_from(self):
+        script = Script(localize='{"files": ["calc.py"], "new_files": ["helpers.py"]}',
+                        creates=["```python\ndef add(a, b):\n    return a + b\n```"], edits=[blocks("    return a - b", "    return a + b")])
+        self.go(script)
+        create_prompt = [c for c in script.calls if c[0].startswith("You create")][0][1]
+        self.assertIn("Reference file calc.py", create_prompt)
+        self.assertIn("return a - b", create_prompt)                                   # the original body, so a move keeps every character
+
+    def test_edit_markers_are_never_accepted_as_file_content(self):
+        garbled = "```\nSEARCH\ndef add(a, b):\n    return a - b\n=======\ndef add(a, b):\n    return a + b\n>>>>>>> REPLACE\n```"
+        script = Script(localize='{"files": ["calc.py"], "new_files": []}', edits=[garbled, blocks("    return a - b", "    return a + b")])
+        result = self.go(script)
+        self.assertTrue(result["ok"], result)
+        self.assertEqual((self.dir / "calc.py").read_text(encoding="utf-8"), "def add(a, b):\n    return a + b\n")
+        script2 = Script(localize='{"files": [], "new_files": ["x.py"]}', creates=["```\n<<<<<<< SEARCH\nx\n=======\ny\n>>>>>>> REPLACE\n```"])
+        self.assertFalse(self.go(script2)["ok"])                                       # a created file made of edit markers is refused
+
+
 class ContextHygieneTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
