@@ -53,11 +53,13 @@ MODELS = [
      "file": "Qwen2.5-Coder-7B-Instruct-Q4_K_M.gguf", "alias": "qwen2.5-coder-7b-instruct", "tags": ["코드"], "vram_gb": 6, "license": "Apache-2.0"},
     {"id": "qwen2.5-coder-14b", "label": "Qwen2.5 Coder 14B (코드, 고성능)", "repo": "bartowski/Qwen2.5-Coder-14B-Instruct-GGUF",
      "file": "Qwen2.5-Coder-14B-Instruct-Q4_K_M.gguf", "alias": "qwen2.5-coder-14b-instruct", "tags": ["코드", "고성능"], "vram_gb": 10, "license": "Apache-2.0"},
+    {"id": "qwen3.5-9b", "label": "Qwen3.5 9B (새 세대, 측정 전)", "repo": "unsloth/Qwen3.5-9B-GGUF",
+     "file": "Qwen3.5-9B-Q4_K_M.gguf", "alias": "qwen3.5-9b", "tags": ["새 모델", "측정 전"], "vram_gb": 8, "license": "Apache-2.0"},
 ]
 # Memory facts per model (weights = the Q4_K_M file; KV = bytes per token of an fp16 KV cache, 2 x layers x kv_heads x head_dim x 2,
 # read from each model's config.json on Hugging Face on 2026-10-22). Hybrid/sliding-attention models need less KV than this: upper bound.
 FACTS = {"qwen2.5-0.5b": (0.37, 12288), "qwen2.5-1.5b": (0.92, 28672), "qwen2.5-7b": (4.36, 57344),
-         "qwen2.5-coder-7b": (4.36, 57344), "qwen2.5-coder-14b": (8.37, 196608)}
+         "qwen2.5-coder-7b": (4.36, 57344), "qwen2.5-coder-14b": (8.37, 196608), "qwen3.5-9b": (5.3, 131072)}
 for _m in MODELS:
     _m["weights_gib"], _m["kv_bytes_per_token"] = FACTS[_m["id"]]
 BY_ID = {m["id"]: m for m in MODELS}
@@ -65,8 +67,6 @@ BY_ID = {m["id"]: m for m in MODELS}
 # Candidate models checked against Hugging Face (existence, licence, GGUF size) but NOT installable and NOT measured: shown as "측정 전".
 # Tool-calling support is unverified for all of them (JetAI's direct mode does not need it).
 CANDIDATES = [
-    {"id": "qwen3.5-9b", "label": "Qwen3.5 9B", "repo": "unsloth/Qwen3.5-9B-GGUF", "file": "Qwen3.5-9B-Q4_K_M.gguf", "license": "Apache-2.0",
-     "params_b": 9.65, "moe": False, "vision": True, "weights_gib": 5.3, "kv_bytes_per_token": 131072, "tools": None, "reasoning": None},
     {"id": "gpt-oss-20b", "label": "GPT-OSS 20B", "repo": "unsloth/gpt-oss-20b-GGUF", "file": "gpt-oss-20b-Q4_K_M.gguf", "license": "Apache-2.0",
      "params_b": 20.9, "moe": True, "vision": False, "weights_gib": 10.8, "kv_bytes_per_token": 49152, "tools": None, "reasoning": True},
     {"id": "qwen3-coder-30b-a3b", "label": "Qwen3 Coder 30B-A3B", "repo": "unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF", "file": "Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf",
