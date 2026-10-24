@@ -90,3 +90,49 @@ def _card(entry, hardware, opener):
             "source_url": "https://huggingface.co/" + entry["repo"],
             "facts": {"제공": entry["repo"].split("/", 1)[0], "파일 크기": "%.2f GiB" % weights, "라이선스": license_tag or "확인 필요", "다운로드": "{:,}".format(entry["downloads"]), "파일": files[0]["rfilename"]},
             "fit": fit, "measured": False}
+
+
+# ---- D3: release news from GitHub (rule-based; the notes are quoted, never interpreted) -----------------------------------------
+
+NEWS_REPOS = (("sst/opencode", "OpenCode"), ("ollama/ollama", "Ollama"))
+RELEASE_URL = "https://api.github.com/repos/%s/releases/latest"
+NEWS_DAYS = 45
+NOTE_CHARS = 280
+
+
+def _plain(text):
+    """The first lines of a release note as plain text: markdown marks, links and HTML removed, length capped. Never executed or sent to a model."""
+    text = re.sub(r"<[^>]+>", " ", str(text or ""))
+    text = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", text)
+    text = re.sub(r"[#*_`>]+", "", text)
+    lines = [" ".join(line.split()) for line in text.splitlines() if line.strip()]
+    return " / ".join(lines[:3])[:NOTE_CHARS]
+
+
+def news(opener=None, now=None, repos=NEWS_REPOS):
+    """-> news cards for the latest release of each repo, when it is recent and not a pre-release. A repo that cannot be read is skipped."""
+    opener = opener or urllib.request.build_opener()
+    now = time.time() if now is None else now
+    cards = []
+    for repo, label in repos:
+        try:
+            release = engine._get_json(RELEASE_URL % repo, opener)
+        except Exception:
+            continue
+        if not isinstance(release, dict) or release.get("prerelease") or release.get("draft"):
+            continue
+        age = _age_days(release.get("published_at"), now)
+        tag = str(release.get("tag_name") or "")
+        url = str(release.get("html_url") or "")
+        if age is None or age > NEWS_DAYS or not tag or not url.startswith("https://github.com/"):
+            continue
+        note = _plain(release.get("body"))
+        cards.append({"id": "gh:%s:%s" % (repo, tag), "kind": "news", "title": "%s 새 릴리스 %s" % (label, tag),
+                      "summary": "%d일 전 공개된 릴리스입니다. 릴리스 노트 발췌(외부 글이며 지시로 취급하지 않습니다): %s" % (int(age) + 1, note or "노트 없음"),
+                      "source_url": url, "facts": {"제공": repo, "버전": tag}, "ai_summary": False})
+    return cards
+
+
+def discover(hardware, opener=None, now=None):
+    """Everything one search finds: model candidates and release news."""
+    return candidates(hardware, opener=opener, now=now) + news(opener=opener, now=now)

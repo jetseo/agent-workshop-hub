@@ -390,7 +390,7 @@
     root.appendChild(h("p", { class: "sub", text: "새로 나온 모델·서비스·소식을 찾아 **추천만** 합니다. 설치·등록·결제는 항상 사용자가 확인한 뒤에만 이뤄집니다. 기본은 꺼져 있습니다." }));
     root.appendChild(h("label", { class: "check" }, sw, h("span", { text: " 발견 도우미 켜기" })));
     root.appendChild(h("button", { type: "button", class: "btn", id: "disc-run", text: d.running ? "찾는 중…" : "지금 찾아보기", disabled: !d.enabled || d.running,
-      title: d.enabled ? "Hugging Face에서 최근 갱신된 GGUF 모델 후보를 읽기만 합니다(익명 요청, 설치·다운로드 없음)." : "먼저 위에서 발견 도우미를 켜세요.",
+      title: d.enabled ? "Hugging Face의 최근 GGUF 모델 후보와 GitHub의 OpenCode·Ollama 새 릴리스를 읽기만 합니다(익명 요청, 설치·다운로드 없음)." : "먼저 위에서 발견 도우미를 켜세요.",
       onclick: async function () {
         var b = this; b.disabled = true; b.textContent = "찾는 중…";
         try {

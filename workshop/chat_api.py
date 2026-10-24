@@ -72,7 +72,7 @@ class Context:
                          recorder=lambda model, ok, seconds, kind, tokens: _stats(self).record(model, ok=ok, seconds=seconds, kind=kind, tokens=tokens))                             # coding agent (OpenCode) in throw-away worktrees
 
 
-        self.discovery_fn = discoverysrc.candidates                                 # replaced in tests (no real network)
+        self.discovery_fn = discoverysrc.discover                                 # replaced in tests (no real network)
         self.discovery_busy = threading.Event()
         self.discovery = Discovery(providers.path.parent / "discovery.json")        # recommendation inbox, off by default (see docs/discovery-helper-plan.md)
         self.catalog_check_fn = catalog_check.check_catalog                          # replaced in tests (no real network)
