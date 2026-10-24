@@ -361,3 +361,11 @@ body[data-view="code"] .topbar .help{display:none}
 /* ---- discovery inbox ---- */
 .nav-dot{margin-left:auto;min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:var(--accent);color:var(--accent-fg);font-size:11px;line-height:18px;text-align:center}
 .disc-card{margin:10px 0}.disc-facts{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0}
+
+/* ---- command palette ---- */
+.pal-wrap{position:fixed;inset:0;z-index:80;background:rgba(0,0,0,.4);display:flex;justify-content:center;align-items:flex-start;padding-top:12vh}
+.pal-box{width:min(620px,92vw);max-height:68vh;display:flex;flex-direction:column;background:var(--card);border:1px solid var(--border);border-radius:14px;box-shadow:var(--shadow);overflow:hidden}
+.pal-input{border:0;border-bottom:1px solid var(--border);padding:14px 16px;font:inherit;font-size:16px;background:transparent;color:var(--fg);outline:0}
+.pal-list{overflow:auto;padding:6px}.pal-group{font-size:12px;color:var(--muted);padding:8px 10px 2px}
+.pal-item{display:flex;justify-content:space-between;gap:12px;width:100%;text-align:left;padding:9px 10px;border:0;border-radius:8px;background:none;color:var(--fg);font-size:14.5px}
+.pal-item.on{background:var(--bg3)}.pal-item span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.pal-empty{padding:12px}
