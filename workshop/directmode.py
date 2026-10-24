@@ -24,7 +24,7 @@ WRITE_TOKENS = 6000
 MAX_BLOCKS = 8
 MAX_FILE_CHARS = 40_000
 MAX_NEW_FILE_CHARS = 60_000
-BLOCK = re.compile(r"<{5,9} SEARCH\r?\n(.*?)\r?\n={5,9}\r?\n(.*?)\r?\n?>{5,9} REPLACE", re.S)
+BLOCK = re.compile(r"^(?:<{5,9} )?SEARCH\r?\n(.*?)\r?\n={5,9}\r?\n(.*?)\r?\n?>{5,9} REPLACE", re.S | re.M)
 FENCE = re.compile(r"```[a-zA-Z0-9_+-]*\r?\n(.*?)```", re.S)
 
 LOCALIZE = ("You are a careful software engineer. Given a task and a list of repository files, decide which EXISTING files must be "
@@ -38,7 +38,8 @@ EDIT = ("You edit one file. Reply ONLY with SEARCH/REPLACE blocks, in this exact
         "existing style. Do not change anything the task does not ask for. If your new code uses a name that is defined in another "
         "file, add the import. When you move or rename code, copy its body exactly (every character, punctuation included). No explanations.")
 CREATE = ("You create one new file. Reply ONLY with the complete file content inside a single fenced code block. No explanations. "
-          "If the task moves or copies code into this file, copy it exactly from the reference files (every character, punctuation included).")
+          "If the task moves or copies code into this file, copy it exactly from the reference files (every character, punctuation included). "
+          "Write ONLY what the task says belongs in this new file: never copy other code from the reference files into it.")
 MARKER_LINE = re.compile(r"^\s*(?:<{5,9}\s*SEARCH|={5,9}\s*$|>{5,9}\s*REPLACE|SEARCH\s*$|FILE:)", re.M)       # edit-block syntax is never file content
 
 
@@ -119,6 +120,18 @@ def _append(text, addition):
     return text + gap + addition + ("" if addition.endswith("\n") else "\n")
 
 
+def _reindent(text, start, search, replace):
+    """The 7B often copies a ONE-line SEARCH without its leading spaces. The match then starts mid-line, after the indentation, so the
+    extra lines of REPLACE would land in column 0 and break the file (seen in the held-out measurement). Give them the same indentation."""
+    if "\n" in search.strip("\n") or "\n" not in replace.strip("\n"):
+        return replace
+    prefix = text[text.rfind("\n", 0, start) + 1:start]
+    if not prefix or prefix.strip() or search[:1] in " \t":
+        return replace
+    first, *rest = replace.split("\n")
+    return "\n".join([first] + [(prefix + line if line.strip() else line) for line in rest])
+
+
 def apply_blocks(text, blocks):
     """-> (new_text, applied, failed_blocks). Text uses \\n only; the caller restores BOM and line endings."""
     applied, failed = 0, []
@@ -134,7 +147,7 @@ def apply_blocks(text, blocks):
         if found is None:
             failed.append(search[:120])
             continue
-        text = text[:found[0]] + replace + text[found[1]:]
+        text = text[:found[0]] + _reindent(text, found[0], search, replace) + text[found[1]:]
         applied += 1
     return text, applied, failed
 
@@ -262,7 +275,7 @@ def run(chat, task, worktree, files, summary, test_fn, emit, *, cancelled=lambda
         for rel in existing:
             if stopped():
                 return result
-            ok = _edit_file(ask, task, worktree, rel, original[rel], emit, retry=True, ctx=ctx + _earlier(done_notes))
+            ok = _edit_file(ask, task, worktree, rel, original[rel], emit, retry=True, ctx=ctx + _earlier(done_notes), several=len(existing) + len(new) > 1)
             if not ok:
                 result["error"] = "%s 에 수정안을 적용하지 못했습니다." % rel
                 return result
@@ -305,10 +318,42 @@ def _diff_note(before, after, rel):
     return "\n".join(lines)[:1200]
 
 
-def _edit_file(ask, task, worktree, rel, current, emit, retry, ctx=""):
+def _undefined_names(source):
+    """Names that are read but defined nowhere in the file (no import, def, class, assignment, argument, loop/with/except target) and are
+    not builtins. Coarse on purpose (scopes are ignored), so it only misses mistakes and does not invent them. -> set, or empty on a syntax error."""
+    import ast
+    import builtins
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return set()
+    known, used = set(dir(builtins)) | {"__file__", "__name__", "__doc__"}, set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name):
+            (used if isinstance(node.ctx, ast.Load) else known).add(node.id)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            known.add(node.name)
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            for alias in node.names:
+                if alias.name == "*":
+                    return set()                                # a star import defines names we cannot see
+                known.add((alias.asname or alias.name).split(".")[0])
+        elif isinstance(node, ast.arg):
+            known.add(node.arg)
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            known.add(node.name)
+        elif isinstance(node, (ast.Global, ast.Nonlocal)):
+            known.update(node.names)
+    return used - known
+
+
+def _edit_file(ask, task, worktree, rel, current, emit, retry, ctx="", several=False):
+    """`several`: the task touches more than one file. The model then often also writes blocks for the OTHER files in the same answer
+    (seen in the held-out measurement); those cannot match this file. They are ignored as long as at least one block did apply here."""
     text, bom, crlf = current
     path = safe_path(worktree, rel)
-    prompt = "Task:\n%s\n\nFile: %s\n```\n%s\n```%s" % (task, rel, text, ctx)
+    only = "\n\n(This step edits ONLY %s. The other files of the task are edited in their own steps: write no blocks for them.)" % rel if several else ""
+    prompt = "Task:\n%s\n\nFile: %s\n```\n%s\n```%s%s" % (task, rel, text, only, ctx)
 
     def attempt(extra=""):
         """-> (new_text or None, problem, note). new_text is set only for a usable change."""
@@ -316,9 +361,9 @@ def _edit_file(ask, task, worktree, rel, current, emit, retry, ctx=""):
         blocks = parse_blocks(answer)
         if blocks:
             candidate, applied, failed = apply_blocks(text, blocks)
-            if failed or not applied:
+            if not applied or (failed and not several):
                 return None, "These SEARCH blocks did not match exactly once, copy the lines exactly: " + " | ".join(f.replace("\n", "\\n") for f in failed), ""
-            note = "%d개 블록" % applied
+            note = "%d개 블록" % applied + (" (다른 파일용으로 보이는 %d개는 무시)" % len(failed) if failed else "")
         else:
             whole = FENCE.search(answer or "")          # the model rewrote the whole file instead: accept it for a small file, the diff shows the result
             if not whole or not whole.group(1).strip() or len(whole.group(1)) > MAX_FILE_CHARS:
@@ -332,6 +377,10 @@ def _edit_file(ask, task, worktree, rel, current, emit, retry, ctx=""):
                 compile(candidate, rel, "exec")
             except SyntaxError as error:                       # catch a broken file now, while the model still has the context
                 return None, "Your change makes the file invalid Python (line %s: %s). Fix it." % (error.lineno, error.msg), ""
+            fresh = sorted(_undefined_names(candidate) - _undefined_names(text))
+            if fresh:                                              # e.g. MAX_RETRIES used after moving it to another file, but never imported
+                return None, "Your change uses %s without defining or importing %s in this file. Add the import (or the definition)." % (
+                    ", ".join(fresh[:4]), "it" if len(fresh) == 1 else "them"), ""
         if candidate == text:
             return None, "Your change left the file unchanged. Make the change the task asks for.", ""
         if len(text) > 200 and len(candidate.strip()) < len(text.strip()) * 0.2:

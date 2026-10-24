@@ -1,4 +1,5 @@
 import json
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -244,7 +245,7 @@ class OneFileAtATimeTests(unittest.TestCase):
     def test_a_later_file_sees_what_an_earlier_file_changed_and_new_files_come_first(self):
         script = Script(localize='{"files": ["calc.py", "app.py"], "new_files": ["helpers.py"]}',
                         creates=["```python\ndef double(x):\n    return x * 2\n```"],
-                        edits=[blocks("    return a - b", "    return a + b"), blocks("    return add(1, 2)", "    return double(add(1, 2))")])
+                        edits=[blocks("    return a - b", "    return a + b"), blocks("from calc import add", "from calc import add\nfrom helpers import double") + "\n" + blocks("    return add(1, 2)", "    return double(add(1, 2))")])
         result = self.go(script)
         self.assertTrue(result["ok"], result)
         self.assertEqual(result["changed"], ["helpers.py", "calc.py", "app.py"])        # created first, then existing files in order
@@ -277,6 +278,92 @@ class OneFileAtATimeTests(unittest.TestCase):
         self.assertEqual((self.dir / "calc.py").read_text(encoding="utf-8"), "def add(a, b):\n    return a + b\n")
         script2 = Script(localize='{"files": [], "new_files": ["x.py"]}', creates=["```\n<<<<<<< SEARCH\nx\n=======\ny\n>>>>>>> REPLACE\n```"])
         self.assertFalse(self.go(script2)["ok"])                                       # a created file made of edit markers is refused
+
+
+class UndefinedNameTests(unittest.TestCase):
+    def test_finds_a_name_that_is_used_but_never_imported(self):
+        self.assertEqual(directmode._undefined_names("def f(a):\n    return a < MAX_RETRIES\n"), {"MAX_RETRIES"})
+
+    def test_imports_definitions_arguments_and_builtins_are_known(self):
+        src = ("import os.path\nfrom settings import MAX_RETRIES as M\n\nclass C:\n    pass\n\n"
+               "def f(a, *rest, **kw):\n    try:\n        x = len(a) + M\n    except ValueError as e:\n        return str(e), C, os, rest, kw\n"
+               "    for i in range(3):\n        print(i, x)\n    return [y for y in a]\n")
+        self.assertEqual(directmode._undefined_names(src), set())
+
+    def test_a_star_import_or_a_syntax_error_gives_no_verdict(self):
+        self.assertEqual(directmode._undefined_names("from m import *\nprint(Z)\n"), set())
+        self.assertEqual(directmode._undefined_names("def f(:\n"), set())
+
+    def test_the_edit_step_asks_again_when_the_change_introduces_an_undefined_name(self):
+        d = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, d, True)
+        (d / "client.py").write_text("def should_retry(attempt):\n    return attempt < 3\n", encoding="utf-8", newline="\n")
+        bad = blocks("    return attempt < 3", "    return attempt < MAX_RETRIES")
+        good = blocks("def should_retry(attempt):", "from settings import MAX_RETRIES\n\n\ndef should_retry(attempt):") + "\n" + blocks("    return attempt < 3", "    return attempt < MAX_RETRIES")
+        script = Script(localize='{"files": ["client.py"], "new_files": []}', edits=[bad, good])
+        result = directmode.run(script, "상수를 쓰게 해줘", d, ["client.py"], "", lambda: ("passed", ""), lambda *a: None)
+        self.assertTrue(result["ok"], result)
+        self.assertIn("from settings import MAX_RETRIES", (d / "client.py").read_text(encoding="utf-8"))
+        self.assertIn("MAX_RETRIES", script.calls[2][1])                   # the retry names the missing name
+
+
+class LenientHeaderTests(unittest.TestCase):
+    def test_a_block_whose_first_marker_lost_its_arrows_still_parses(self):
+        answer = "```\nSEARCH\nreturn 1\n=======\nreturn 2\n>>>>>>> REPLACE\n```"
+        self.assertEqual(directmode.parse_blocks(answer), [("return 1", "return 2")])
+
+    def test_the_word_search_inside_a_line_is_not_a_block(self):
+        self.assertEqual(directmode.parse_blocks("do SEARCH\nx\n=======\ny\n>>>>>>> REPLACE"), [])
+
+
+class IndentTests(unittest.TestCase):
+    def test_a_one_line_search_without_its_indentation_keeps_the_extra_lines_indented(self):
+        text = "def f(line):\n    name, age = parse(line)\n    return name\n"
+        new, applied, failed = directmode.apply_blocks(text, [("name, age = parse(line)", "info = parse(line)\nname = info['name']\nage = info['age']")])
+        self.assertEqual(applied, 1)
+        self.assertEqual(new, "def f(line):\n    info = parse(line)\n    name = info['name']\n    age = info['age']\n    return name\n")
+        compile(new, "f.py", "exec")
+
+    def test_an_exact_indented_search_is_left_alone(self):
+        text = "def f():\n    a = 1\n"
+        new, _, _ = directmode.apply_blocks(text, [("    a = 1", "    a = 1\n    b = 2")])
+        self.assertEqual(new, "def f():\n    a = 1\n    b = 2\n")
+
+    def test_a_multi_line_search_is_not_touched(self):
+        text = "if x:\n    a = 1\n    b = 2\n"
+        new, _, _ = directmode.apply_blocks(text, [("a = 1\n    b = 2", "a = 3\n    b = 4")])
+        self.assertEqual(new, "if x:\n    a = 3\n    b = 4\n")
+
+
+class PartialBlocksTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.dir = Path(self.tmp.name)
+        (self.dir / "calc.py").write_text(BUG, encoding="utf-8", newline="\n")
+        (self.dir / "other.py").write_text("X = 1\n", encoding="utf-8", newline="\n")
+
+    def go(self, script, files):
+        return directmode.run(script, "고쳐줘", self.dir, files, "", lambda: ("passed", ""), lambda *a: None)
+
+    def test_blocks_meant_for_another_file_are_ignored_when_the_task_touches_several_files(self):
+        mixed = blocks("    return a - b", "    return a + b") + "\n" + blocks("Y = 2", "Y = 3")           # the second block belongs to some other file
+        script = Script(localize='{"files": ["calc.py", "other.py"], "new_files": []}', edits=[mixed, blocks("X = 1", "X = 2")])
+        result = self.go(script, ["calc.py", "other.py"])
+        self.assertTrue(result["ok"], result)
+        self.assertIn("return a + b", (self.dir / "calc.py").read_text(encoding="utf-8"))
+        self.assertIn("only calc.py".upper()[:0] + "ONLY calc.py", script.calls[1][1])                        # the step says which file it edits
+
+    def test_a_single_file_task_stays_strict_when_a_block_does_not_match(self):
+        mixed = blocks("    return a - b", "    return a + b") + "\n" + blocks("Y = 2", "Y = 3")
+        script = Script(localize='{"files": ["calc.py"], "new_files": []}', edits=[mixed, mixed])
+        result = self.go(script, ["calc.py"])
+        self.assertFalse(result["ok"])                                                                       # nothing is guessed
+        self.assertEqual((self.dir / "calc.py").read_text(encoding="utf-8"), BUG)
+
+    def test_no_matching_block_at_all_still_fails_in_a_multi_file_task(self):
+        script = Script(localize='{"files": ["calc.py", "other.py"], "new_files": []}', edits=[blocks("Y = 2", "Y = 3"), blocks("Y = 2", "Y = 3")])
+        self.assertFalse(self.go(script, ["calc.py", "other.py"])["ok"])
 
 
 class ContextHygieneTests(unittest.TestCase):
