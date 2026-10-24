@@ -119,6 +119,18 @@ def _append(text, addition):
     return text + gap + addition + ("" if addition.endswith("\n") else "\n")
 
 
+def _reindent(text, start, search, replace):
+    """The 7B often copies a ONE-line SEARCH without its leading spaces. The match then starts mid-line, after the indentation, so the
+    extra lines of REPLACE would land in column 0 and break the file (seen in the held-out measurement). Give them the same indentation."""
+    if "\n" in search.strip("\n") or "\n" not in replace.strip("\n"):
+        return replace
+    prefix = text[text.rfind("\n", 0, start) + 1:start]
+    if not prefix or prefix.strip() or search[:1] in " \t":
+        return replace
+    first, *rest = replace.split("\n")
+    return "\n".join([first] + [(prefix + line if line.strip() else line) for line in rest])
+
+
 def apply_blocks(text, blocks):
     """-> (new_text, applied, failed_blocks). Text uses \\n only; the caller restores BOM and line endings."""
     applied, failed = 0, []
@@ -134,7 +146,7 @@ def apply_blocks(text, blocks):
         if found is None:
             failed.append(search[:120])
             continue
-        text = text[:found[0]] + replace + text[found[1]:]
+        text = text[:found[0]] + _reindent(text, found[0], search, replace) + text[found[1]:]
         applied += 1
     return text, applied, failed
 
