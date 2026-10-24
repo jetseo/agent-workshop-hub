@@ -1,4 +1,5 @@
 import json
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -244,7 +245,7 @@ class OneFileAtATimeTests(unittest.TestCase):
     def test_a_later_file_sees_what_an_earlier_file_changed_and_new_files_come_first(self):
         script = Script(localize='{"files": ["calc.py", "app.py"], "new_files": ["helpers.py"]}',
                         creates=["```python\ndef double(x):\n    return x * 2\n```"],
-                        edits=[blocks("    return a - b", "    return a + b"), blocks("    return add(1, 2)", "    return double(add(1, 2))")])
+                        edits=[blocks("    return a - b", "    return a + b"), blocks("from calc import add", "from calc import add\nfrom helpers import double") + "\n" + blocks("    return add(1, 2)", "    return double(add(1, 2))")])
         result = self.go(script)
         self.assertTrue(result["ok"], result)
         self.assertEqual(result["changed"], ["helpers.py", "calc.py", "app.py"])        # created first, then existing files in order
@@ -277,6 +278,33 @@ class OneFileAtATimeTests(unittest.TestCase):
         self.assertEqual((self.dir / "calc.py").read_text(encoding="utf-8"), "def add(a, b):\n    return a + b\n")
         script2 = Script(localize='{"files": [], "new_files": ["x.py"]}', creates=["```\n<<<<<<< SEARCH\nx\n=======\ny\n>>>>>>> REPLACE\n```"])
         self.assertFalse(self.go(script2)["ok"])                                       # a created file made of edit markers is refused
+
+
+class UndefinedNameTests(unittest.TestCase):
+    def test_finds_a_name_that_is_used_but_never_imported(self):
+        self.assertEqual(directmode._undefined_names("def f(a):\n    return a < MAX_RETRIES\n"), {"MAX_RETRIES"})
+
+    def test_imports_definitions_arguments_and_builtins_are_known(self):
+        src = ("import os.path\nfrom settings import MAX_RETRIES as M\n\nclass C:\n    pass\n\n"
+               "def f(a, *rest, **kw):\n    try:\n        x = len(a) + M\n    except ValueError as e:\n        return str(e), C, os, rest, kw\n"
+               "    for i in range(3):\n        print(i, x)\n    return [y for y in a]\n")
+        self.assertEqual(directmode._undefined_names(src), set())
+
+    def test_a_star_import_or_a_syntax_error_gives_no_verdict(self):
+        self.assertEqual(directmode._undefined_names("from m import *\nprint(Z)\n"), set())
+        self.assertEqual(directmode._undefined_names("def f(:\n"), set())
+
+    def test_the_edit_step_asks_again_when_the_change_introduces_an_undefined_name(self):
+        d = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, d, True)
+        (d / "client.py").write_text("def should_retry(attempt):\n    return attempt < 3\n", encoding="utf-8", newline="\n")
+        bad = blocks("    return attempt < 3", "    return attempt < MAX_RETRIES")
+        good = blocks("def should_retry(attempt):", "from settings import MAX_RETRIES\n\n\ndef should_retry(attempt):") + "\n" + blocks("    return attempt < 3", "    return attempt < MAX_RETRIES")
+        script = Script(localize='{"files": ["client.py"], "new_files": []}', edits=[bad, good])
+        result = directmode.run(script, "상수를 쓰게 해줘", d, ["client.py"], "", lambda: ("passed", ""), lambda *a: None)
+        self.assertTrue(result["ok"], result)
+        self.assertIn("from settings import MAX_RETRIES", (d / "client.py").read_text(encoding="utf-8"))
+        self.assertIn("MAX_RETRIES", script.calls[2][1])                   # the retry names the missing name
 
 
 class LenientHeaderTests(unittest.TestCase):

@@ -318,6 +318,35 @@ def _diff_note(before, after, rel):
     return "\n".join(lines)[:1200]
 
 
+def _undefined_names(source):
+    """Names that are read but defined nowhere in the file (no import, def, class, assignment, argument, loop/with/except target) and are
+    not builtins. Coarse on purpose (scopes are ignored), so it only misses mistakes and does not invent them. -> set, or empty on a syntax error."""
+    import ast
+    import builtins
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return set()
+    known, used = set(dir(builtins)) | {"__file__", "__name__", "__doc__"}, set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name):
+            (used if isinstance(node.ctx, ast.Load) else known).add(node.id)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            known.add(node.name)
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            for alias in node.names:
+                if alias.name == "*":
+                    return set()                                # a star import defines names we cannot see
+                known.add((alias.asname or alias.name).split(".")[0])
+        elif isinstance(node, ast.arg):
+            known.add(node.arg)
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            known.add(node.name)
+        elif isinstance(node, (ast.Global, ast.Nonlocal)):
+            known.update(node.names)
+    return used - known
+
+
 def _edit_file(ask, task, worktree, rel, current, emit, retry, ctx="", several=False):
     """`several`: the task touches more than one file. The model then often also writes blocks for the OTHER files in the same answer
     (seen in the held-out measurement); those cannot match this file. They are ignored as long as at least one block did apply here."""
@@ -348,6 +377,10 @@ def _edit_file(ask, task, worktree, rel, current, emit, retry, ctx="", several=F
                 compile(candidate, rel, "exec")
             except SyntaxError as error:                       # catch a broken file now, while the model still has the context
                 return None, "Your change makes the file invalid Python (line %s: %s). Fix it." % (error.lineno, error.msg), ""
+            fresh = sorted(_undefined_names(candidate) - _undefined_names(text))
+            if fresh:                                              # e.g. MAX_RETRIES used after moving it to another file, but never imported
+                return None, "Your change uses %s without defining or importing %s in this file. Add the import (or the definition)." % (
+                    ", ".join(fresh[:4]), "it" if len(fresh) == 1 else "them"), ""
         if candidate == text:
             return None, "Your change left the file unchanged. Make the change the task asks for.", ""
         if len(text) > 200 and len(candidate.strip()) < len(text.strip()) * 0.2:
