@@ -279,6 +279,25 @@ class OneFileAtATimeTests(unittest.TestCase):
         self.assertFalse(self.go(script2)["ok"])                                       # a created file made of edit markers is refused
 
 
+class IndentTests(unittest.TestCase):
+    def test_a_one_line_search_without_its_indentation_keeps_the_extra_lines_indented(self):
+        text = "def f(line):\n    name, age = parse(line)\n    return name\n"
+        new, applied, failed = directmode.apply_blocks(text, [("name, age = parse(line)", "info = parse(line)\nname = info['name']\nage = info['age']")])
+        self.assertEqual(applied, 1)
+        self.assertEqual(new, "def f(line):\n    info = parse(line)\n    name = info['name']\n    age = info['age']\n    return name\n")
+        compile(new, "f.py", "exec")
+
+    def test_an_exact_indented_search_is_left_alone(self):
+        text = "def f():\n    a = 1\n"
+        new, _, _ = directmode.apply_blocks(text, [("    a = 1", "    a = 1\n    b = 2")])
+        self.assertEqual(new, "def f():\n    a = 1\n    b = 2\n")
+
+    def test_a_multi_line_search_is_not_touched(self):
+        text = "if x:\n    a = 1\n    b = 2\n"
+        new, _, _ = directmode.apply_blocks(text, [("a = 1\n    b = 2", "a = 3\n    b = 4")])
+        self.assertEqual(new, "if x:\n    a = 3\n    b = 4\n")
+
+
 class PartialBlocksTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
