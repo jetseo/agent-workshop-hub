@@ -279,6 +279,15 @@ class OneFileAtATimeTests(unittest.TestCase):
         self.assertFalse(self.go(script2)["ok"])                                       # a created file made of edit markers is refused
 
 
+class LenientHeaderTests(unittest.TestCase):
+    def test_a_block_whose_first_marker_lost_its_arrows_still_parses(self):
+        answer = "```\nSEARCH\nreturn 1\n=======\nreturn 2\n>>>>>>> REPLACE\n```"
+        self.assertEqual(directmode.parse_blocks(answer), [("return 1", "return 2")])
+
+    def test_the_word_search_inside_a_line_is_not_a_block(self):
+        self.assertEqual(directmode.parse_blocks("do SEARCH\nx\n=======\ny\n>>>>>>> REPLACE"), [])
+
+
 class IndentTests(unittest.TestCase):
     def test_a_one_line_search_without_its_indentation_keeps_the_extra_lines_indented(self):
         text = "def f(line):\n    name, age = parse(line)\n    return name\n"
