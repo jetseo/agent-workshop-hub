@@ -16,6 +16,8 @@ from .chat_store import DEFAULT_TITLE, CHAT_ID, ChatStore
 from . import arbiter, router
 from . import ctxprobe, folderpick, catalog_check
 from .discovery import Discovery, DiscoveryError
+from . import discoverysrc
+from . import engine as engine_module
 from .codework import CodeRuns, CodeWorkError
 from .projects import ProjectError, ProjectRegistry
 from .engine import Engine, EngineError
@@ -70,6 +72,8 @@ class Context:
                          recorder=lambda model, ok, seconds, kind, tokens: _stats(self).record(model, ok=ok, seconds=seconds, kind=kind, tokens=tokens))                             # coding agent (OpenCode) in throw-away worktrees
 
 
+        self.discovery_fn = discoverysrc.candidates                                 # replaced in tests (no real network)
+        self.discovery_busy = threading.Event()
         self.discovery = Discovery(providers.path.parent / "discovery.json")        # recommendation inbox, off by default (see docs/discovery-helper-plan.md)
         self.catalog_check_fn = catalog_check.check_catalog                          # replaced in tests (no real network)
         self.catalog_busy = threading.Event()                                       # a reachability check (anonymous GETs) is running
@@ -233,7 +237,29 @@ def _discovery_api(ctx, method, rest, body):
     inbox = ctx.discovery
     try:
         if not rest and method == "GET":
-            return inbox.state()
+            return {**inbox.state(), "running": ctx.discovery_busy.is_set()}
+        if rest == ["run"] and method == "POST":
+            if not inbox.state()["enabled"]:
+                raise ApiError(400, "먼저 발견 도우미를 켜세요. 켜기 전에는 인터넷에 아무것도 요청하지 않습니다.")
+            if ctx.discovery_busy.is_set():
+                return {"started": False, "running": True}
+            ctx.discovery_busy.set()
+
+            def search():
+                added, error = 0, ""
+                try:
+                    for card in ctx.discovery_fn(engine_module.detect_hardware()):
+                        try:
+                            added += 1 if inbox.add_card(card) else 0
+                        except DiscoveryError:
+                            continue                                              # a malformed card is dropped, never stored
+                except Exception as problem:                                      # offline, API changed: say so, keep the old cards
+                    error = "찾지 못했습니다: " + str(problem)[:120]
+                finally:
+                    inbox.record_run(added, error)
+                    ctx.discovery_busy.clear()
+            threading.Thread(target=search, name="discovery-run", daemon=True).start()
+            return {"started": True, "running": True}
         if rest == ["enable"] and method == "POST":
             inbox.set_enabled(body.get("enabled") is True)
             return inbox.state()

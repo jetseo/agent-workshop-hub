@@ -100,6 +100,13 @@ class Discovery:
             self._save(data)
             return True
 
+    def record_run(self, added, error=""):
+        """Remember when the last search ran and what it found (shown on the screen)."""
+        with self._lock:
+            data = self._load()
+            data["last_run"] = {"at": self.clock(), "added": int(added), "error": str(error)[:200]}
+            self._save(data)
+
     def dismiss(self, card_id):
         with self._lock:
             data = self._load()
