@@ -1889,6 +1889,74 @@
     termConnect();
   }
 
+  /* ---------- command palette (Ctrl+K): jump to a screen, a chat or a code run, or run a common action ---------- */
+  var paletteEl = null;
+  function paletteMatches(query, items) {
+    var q = query.trim().toLowerCase();
+    if (!q) return items.slice(0, 40);
+    return items.map(function (it) {
+      var hay = (it.label + " " + (it.hint || "")).toLowerCase(), at = hay.indexOf(q);
+      return { it: it, rank: at < 0 ? -1 : (it.label.toLowerCase().indexOf(q) === 0 ? 0 : at === 0 ? 1 : 2) };
+    }).filter(function (x) { return x.rank >= 0; }).sort(function (a, b) { return a.rank - b.rank; }).map(function (x) { return x.it; }).slice(0, 40);
+  }
+  async function paletteItems() {
+    var go = function (view) { return function () { showView(view); }; };
+    var items = [
+      { label: "새 채팅", hint: "chat new", group: "동작", run: newChat },
+      { label: "채팅 화면", hint: "chat", group: "이동", run: go("chat") },
+      { label: "코드 작업 화면", hint: "code 코딩", group: "이동", run: go("code") },
+      { label: "설정", hint: "settings 서비스 모델 연결", group: "이동", run: go("settings") },
+      { label: "작업(대기열)", hint: "tasks queue", group: "이동", run: go("tasks") },
+      { label: "보드", hint: "boards 여러 모델", group: "이동", run: go("boards") },
+      { label: "사용량", hint: "usage 토큰 절약", group: "이동", run: go("usage") },
+      { label: "긴 글 압축", hint: "digest 요약", group: "이동", run: go("digest") },
+      { label: "발견(새 모델·서비스 추천)", hint: "discovery", group: "이동", run: go("discovery") },
+      { label: "테마 전환(밝게/어둡게)", hint: "theme dark light", group: "동작", run: function () { $("theme").click(); } },
+      { label: "사이드바 숨기기/표시", hint: "sidebar Ctrl+B", group: "동작", run: function () { setHidden(!body.classList.contains("side-hidden")); } },
+      { label: "새 코드 작업", hint: "new task", group: "동작", run: function () { showView("code"); codeOpen = ""; renderCode(); setTimeout(function () { var p = $("code-prompt"); p && p.focus(); }, 300); } }
+    ];
+    (state.chats || []).slice(0, 30).forEach(function (c) { items.push({ label: c.title || "새 채팅", hint: "대화", group: "최근 대화", run: function () { showView("chat"); openChat(c.id); } }); });
+    try {
+      var d = await api("GET", "/code");
+      d.runs.slice(0, 20).forEach(function (r) { items.push({ label: runTitle(r), hint: "코드 작업 " + (r.project_name || "") + " " + (CODE_STATUS[r.status] || ""), group: "최근 코드 작업", run: function () { showView("code"); codeOpen = r.id; codeStick = true; renderCode(); } }); });
+    } catch (e) { /* the palette still works without the code runs */ }
+    var order = ["동작", "이동", "최근 대화", "최근 코드 작업"];
+    return items.map(function (it, i) { return { it: it, i: i }; }).sort(function (a, b) { return (order.indexOf(a.it.group) - order.indexOf(b.it.group)) || (a.i - b.i); }).map(function (x) { return x.it; });
+  }
+  async function openPalette() {
+    if (paletteEl) { closePalette(); return; }
+    var items = await paletteItems(), sel = 0, shown = items;
+    var input = h("input", { type: "text", class: "pal-input", placeholder: "이동하거나 실행할 것을 입력하세요 (화면, 대화, 코드 작업, 동작)", "aria-label": "명령 검색", autocomplete: "off", spellcheck: "false" });
+    var list = h("div", { class: "pal-list", role: "listbox" });
+    function draw() {
+      list.textContent = ""; var lastGroup = null;
+      if (!shown.length) list.appendChild(h("p", { class: "sub pal-empty", text: "일치하는 항목이 없습니다." }));
+      shown.forEach(function (it, i) {
+        if (!input.value.trim() && it.group !== lastGroup) { lastGroup = it.group; list.appendChild(h("div", { class: "pal-group", text: it.group })); }
+        list.appendChild(h("button", { type: "button", class: "pal-item" + (i === sel ? " on" : ""), role: "option", "aria-selected": i === sel ? "true" : "false",
+          onclick: function () { choose(it); }, onmousemove: function () { if (sel !== i) { sel = i; draw(); } } },
+          h("span", { text: it.label }), input.value.trim() ? h("span", { class: "sub", text: it.group }) : null));
+      });
+      var on = list.querySelector(".pal-item.on"); if (on && on.scrollIntoView) on.scrollIntoView({ block: "nearest" });
+    }
+    function choose(it) { closePalette(); setTimeout(it.run, 0); }
+    input.addEventListener("input", function () { shown = paletteMatches(input.value, items); sel = 0; draw(); });
+    input.addEventListener("keydown", function (e) {
+      if (e.isComposing || e.keyCode === 229) return;                       // Korean input: Enter that ends a syllable must not pick an item
+      if (e.key === "ArrowDown") { e.preventDefault(); sel = Math.min(shown.length - 1, sel + 1); draw(); }
+      else if (e.key === "ArrowUp") { e.preventDefault(); sel = Math.max(0, sel - 1); draw(); }
+      else if (e.key === "Enter") { e.preventDefault(); if (shown[sel]) choose(shown[sel]); }
+      else if (e.key === "Escape") { e.preventDefault(); closePalette(); }
+    });
+    paletteEl = h("div", { class: "pal-wrap", role: "dialog", "aria-modal": "true", "aria-label": "명령 팔레트", onclick: function (e) { if (e.target === paletteEl) closePalette(); } },
+      h("div", { class: "pal-box" }, input, list));
+    document.body.appendChild(paletteEl); draw(); input.focus();
+  }
+  function closePalette() { if (paletteEl) { paletteEl.remove(); paletteEl = null; } }
+  document.addEventListener("keydown", function (e) {
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "k") { e.preventDefault(); openPalette(); }
+  });
+
   /* ---------- start ---------- */
   (async function init() {
     updateSend();
