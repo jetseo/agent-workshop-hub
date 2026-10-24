@@ -1165,13 +1165,20 @@ class CodeRuns:
                 results.append({"id": run_id, "ok": False, "error": str(error)})
         return results
 
-    def rerun(self, run_id):
-        """Start a NEW run with the same request and settings (the old run and its copy are left as they are)."""
+    def rerun(self, run_id, model=""):
+        """Start a NEW run with the same request and settings (the old run and its copy are left as they are).
+
+        `model` lets the user retry the same request with another model they pick (for example a bigger local one after a failure).
+        It goes through the normal model checks, so a paid or unconnected model is refused exactly as in a fresh run, and `models`
+        (a mixed-model list from the old run) is dropped because the user chose one model on purpose."""
         old = self._read(run_id)
         if self._busy(old):
             raise CodeWorkError("이 작업이 아직 실행 중입니다.")
-        return self.start(old["repo"], old["prompt"], old.get("model") or "auto", old.get("cost_ok") is True, None,
-                          old.get("mode") or "agent", old.get("validate", True), old.get("attempts") or 1, old.get("models"), old.get("limits"))
+        chosen = (model or "").strip()
+        if chosen and (not MODEL_REF.fullmatch(chosen) and chosen != "auto"):
+            raise CodeWorkError("고를 수 없는 모델 이름입니다.")
+        return self.start(old["repo"], old["prompt"], chosen or old.get("model") or "auto", old.get("cost_ok") is True and not chosen, None,
+                          old.get("mode") or "agent", old.get("validate", True), old.get("attempts") or 1, None if chosen else old.get("models"), old.get("limits"))
 
     def _remove_worktree(self, run):
         try:

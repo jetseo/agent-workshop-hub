@@ -1196,6 +1196,31 @@
     return h("div", { class: "cw-tool " + (m[1] === "✗" ? "bad" : m[1] === "…" ? "wait" : "ok") },
       h("span", { class: "cw-ico", text: icons[m[2]] || "🛠" }), h("b", { text: m[2] }), h("span", { class: "cw-target", text: m[3] }), h("span", { class: "cw-mark", text: m[1] }));
   }
+  /* "다른 모델로 다시 시도…": the user picks one of the models the composer already offers; the old run stays. Paid models stay refused by the server. */
+  function otherModelButton(r) {
+    var wrap = h("span", { class: "cw-pop-wrap" });
+    var menu = h("div", { class: "cw-pop", role: "menu", hidden: true });
+    var btn = h("button", { type: "button", class: "btn", text: "다른 모델로 다시 시도…", "aria-haspopup": "true", "aria-expanded": "false",
+      title: "같은 요청을 내가 고른 다른 모델로 새 복사본에서 다시 합니다(이 작업은 그대로 남습니다). 더 큰 모델은 보통 더 정확하지만 더 느립니다." });
+    btn.addEventListener("click", function (e) {
+      e.stopPropagation();
+      var was = menu.hidden; closePops(); if (!was) return;
+      menu.textContent = ""; menu.appendChild(h("div", { class: "mh", text: "이 모델로 새 작업을 시작합니다" }));
+      var options = [].filter.call($("code-model").options, function (o) { return o.value && o.value !== "auto" && o.value !== r.model && !o.disabled && !((r.mode === "direct" || r.mode === "loop") && o.value.indexOf("opencode/") === 0); });
+      if (!options.length) menu.appendChild(h("div", { class: "mh", text: "고를 수 있는 다른 모델이 없습니다. 설정에서 서비스를 연결하거나 내장 엔진을 설치하세요." }));
+      options.forEach(function (o) {
+        menu.appendChild(h("button", { type: "button", role: "menuitem", title: o.dataset.warn || "", text: o.text, onclick: async function () {
+          closePops();
+          try { var n = await api("POST", "/code/runs/" + r.id + "/rerun", { model: o.value }); codeOpen = n.id; codeStick = true; toast(o.value + "(으)로 새 작업을 시작했습니다."); }
+          catch (err) { toast(err.message); }
+          renderCode();
+        } }));
+      });
+      menu.hidden = false; btn.setAttribute("aria-expanded", "true");
+    });
+    wrap.append(btn, menu);
+    return wrap;
+  }
   function codeActions(r) {
     var id = r.id, row = h("div", { class: "cw-actions" });
     function btn(label, name, primary) { row.appendChild(h("button", { type: "button", class: "btn" + (primary ? " primary" : ""), text: label, onclick: function () { codeAction(id, name); } })); }
@@ -1205,6 +1230,7 @@
     if (["review", "nochange", "failed"].indexOf(r.status) >= 0 && !checking) btn(r.checks ? "빌드·테스트 다시" : "빌드·테스트", "check");
     if (r.files && r.files.length && r.status !== "running" && !reviewing) btn(r.review ? "코드 리뷰 다시" : "코드 리뷰", "review");
     if (r.status === "applied") btn("적용 되돌리기", "undo");
+    if (["review", "nochange", "failed", "cancelled"].indexOf(r.status) >= 0 && !checking) row.appendChild(otherModelButton(r));
     if (["review", "nochange", "failed", "cancelled"].indexOf(r.status) >= 0 && !checking) row.appendChild(h("button", { type: "button", class: "btn", text: r.status === "failed" ? "다시 시도(새 작업)" : "다시 실행(새 작업)",
       title: "같은 요청과 설정으로 새 복사본에서 새 작업을 시작합니다(이 작업은 그대로 남습니다)",
       onclick: async function () { try { var n = await api("POST", "/code/runs/" + id + "/rerun", {}); codeOpen = n.id; codeStick = true; toast("새 작업을 시작했습니다."); } catch (e) { toast(e.message); } renderCode(); } }));

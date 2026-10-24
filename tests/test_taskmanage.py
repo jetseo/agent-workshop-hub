@@ -110,6 +110,20 @@ class TaskManagementTests(Base):
         self.wait(new["id"])
         self.assertIn(a, self.ids())
 
+    def test_rerun_with_another_model_uses_the_chosen_model_and_keeps_the_old_run(self):
+        a = self.finished("README에 한 줄 추가해줘")
+        new = self.runs.rerun(a, "loc/tiny-3b")
+        self.assertEqual(new["model"], "loc/tiny-3b")
+        self.wait(new["id"])
+        self.assertEqual(self.runs.get(a)["model"], "loc/qwen2.5-coder:32b")                       # the old run is untouched
+
+    def test_rerun_with_a_bad_unconnected_or_paid_model_is_refused_like_a_fresh_run(self):
+        a = self.finished()
+        for bad in ("../x", "nope/unknown-model", "pay/gpt-x"):
+            with self.assertRaises(CodeWorkError, msg=bad):
+                self.runs.rerun(a, bad)
+        self.assertEqual(len(self.ids()), 1)                                                         # nothing was started
+
 
 if __name__ == "__main__":
     unittest.main()
