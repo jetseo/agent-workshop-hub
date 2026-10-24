@@ -152,6 +152,7 @@ class CodeRuns:
     def __init__(self, providers, *, find_binary=adapters.find_opencode, popen=subprocess.Popen, clock=time.time, max_runtime=MAX_RUNTIME,
                  worktree_base=None, info=None, command_fn=opencode_command, check_timeout=CHECK_TIMEOUT, use_guidance=lambda: True, direct_chat=None, recorder=None):
         self.webcheck_fn = webcheck.run_check                       # replaced in tests
+        self.escalator = None                                        # optional fn(run_id): the automatic retry with a bigger model, set by the app (see modelescalate.py)
         self.recorder = recorder                                     # optional fn(model, ok, seconds, kind, tokens) for routing statistics
         self.providers = providers
         self.command_fn = command_fn
@@ -193,7 +194,7 @@ class CodeRuns:
                 time.sleep(0.05)
         raise CodeWorkError("알 수 없는 작업입니다.")
 
-    MANAGED = ("title", "archived_at", "deleted_at")
+    MANAGED = ("title", "archived_at", "deleted_at", "escalated_from", "escalated_to")
 
     def _save(self, run):
         with self._lock:
@@ -259,7 +260,7 @@ class CodeRuns:
 
     @staticmethod
     def _summary(run):
-        keys = ("id", "repo", "prompt", "model", "status", "started", "finished", "error", "files", "stat", "applied_at", "undone_at", "tier", "repo_was_dirty", "project", "blocked", "approvals", "checks", "review", "guidance", "mode", "attempts", "attempts_log", "models", "project_id", "project_name", "limits", "stats", "webcheck", "title", "archived_at", "deleted_at")
+        keys = ("id", "repo", "prompt", "model", "status", "started", "finished", "error", "files", "stat", "applied_at", "undone_at", "tier", "repo_was_dirty", "project", "blocked", "approvals", "checks", "review", "guidance", "mode", "attempts", "attempts_log", "models", "project_id", "project_name", "limits", "stats", "webcheck", "title", "archived_at", "deleted_at", "escalated_from", "escalated_to")
         return {k: run.get(k) for k in keys}
 
     @staticmethod
@@ -632,6 +633,16 @@ class CodeRuns:
         self._collect(run, keep_status=run["status"] in ("cancelled", "failed"))
         self._save(run)
         self._record_outcome(run)
+        self._maybe_escalate(run)
+
+    def _maybe_escalate(self, run):
+        """After a direct-mode run that failed (the agent could not finish, or its tests still fail), offer it to the automatic retry once.
+        The decision (setting on, model installed, not already a retry) is the escalator's; a retry is never started from a retry."""
+        if self.escalator is None or run.get("mode") not in ("direct", "loop") or run.get("escalated_from") or run.get("status") == "cancelled":
+            return
+        failed = run.get("status") == "failed" or (run.get("checks") or {}).get("verdict") == "failed"
+        if failed:
+            threading.Thread(target=self.escalator, args=(run["id"],), name="escalate-" + run["id"], daemon=True).start()
 
     def _record_outcome(self, run):
         """Feed the router's statistics; never let a recording problem fail the run."""
@@ -1165,7 +1176,7 @@ class CodeRuns:
                 results.append({"id": run_id, "ok": False, "error": str(error)})
         return results
 
-    def rerun(self, run_id, model=""):
+    def rerun(self, run_id, model="", escalated_from=None):
         """Start a NEW run with the same request and settings (the old run and its copy are left as they are).
 
         `model` lets the user retry the same request with another model they pick (for example a bigger local one after a failure).
@@ -1177,8 +1188,16 @@ class CodeRuns:
         chosen = (model or "").strip()
         if chosen and (not MODEL_REF.fullmatch(chosen) and chosen != "auto"):
             raise CodeWorkError("고를 수 없는 모델 이름입니다.")
-        return self.start(old["repo"], old["prompt"], chosen or old.get("model") or "auto", old.get("cost_ok") is True and not chosen, None,
-                          old.get("mode") or "agent", old.get("validate", True), old.get("attempts") or 1, None if chosen else old.get("models"), old.get("limits"))
+        new = self.start(old["repo"], old["prompt"], chosen or old.get("model") or "auto", old.get("cost_ok") is True and not chosen, None,
+                         old.get("mode") or "agent", old.get("validate", True), old.get("attempts") or 1, None if chosen else old.get("models"), old.get("limits"))
+        if escalated_from:                                           # link both runs so the screen can say "retried automatically"
+            with self._lock:
+                for rid, key, value in ((new["id"], "escalated_from", escalated_from), (escalated_from, "escalated_to", new["id"])):
+                    record = self._read(rid)
+                    record[key] = value
+                    self._save(record)
+            new["escalated_from"] = escalated_from
+        return new
 
     def _remove_worktree(self, run):
         try:

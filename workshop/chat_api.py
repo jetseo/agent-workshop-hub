@@ -16,7 +16,7 @@ from .chat_store import DEFAULT_TITLE, CHAT_ID, ChatStore
 from . import arbiter, router
 from . import ctxprobe, folderpick, catalog_check
 from .discovery import Discovery, DiscoveryError
-from . import discoverysrc
+from . import discoverysrc, modelescalate
 from . import engine as engine_module
 from .codework import CodeRuns, CodeWorkError
 from .projects import ProjectError, ProjectRegistry
@@ -54,6 +54,63 @@ class Stream:
 
 
 class Context:
+    def prefer_big(self):
+        """For a new direct-mode run with the model left on "자동": the 9B ref when the user's setting is on and the 9B is installed (the engine is started
+        and the GPU freed first). None means: use the normal automatic choice. Never downloads anything."""
+        if not self.watch.settings().get("code_prefer_big", True):
+            return None
+        try:
+            if not modelescalate.installed(self.engine.status()):
+                return None
+            return modelescalate.BIG_REF if modelescalate.ensure_serving(self.engine, unload=self.unload_fn) else None
+        except Exception:
+            return None
+
+    def escalate_run(self, run_id):
+        """Runs in a background thread after a failed direct-mode run: one automatic retry with the 9B in a NEW copy (the failed run stays).
+        Switched by the setting `code_auto_escalate`; skipped when the run already used the 9B, is itself a retry, or the 9B is not installed."""
+        try:
+            if not self.watch.settings().get("code_auto_escalate", True):
+                return
+            run = self.code._read(run_id)
+            if run.get("model") == modelescalate.BIG_REF or run.get("escalated_from") or run.get("escalated_to"):
+                return
+            if not modelescalate.installed(self.engine.status()):
+                return
+            thread = self.code._threads.get(run_id)
+            if thread is not None:
+                thread.join(60)                                                   # the failed run must be completely finished before another starts
+            if not modelescalate.ensure_serving(self.engine, unload=self.unload_fn):
+                return
+            self.code.rerun(run_id, modelescalate.BIG_REF, escalated_from=run_id)
+        except Exception:
+            pass                                                                   # an automatic extra try must never turn into a new error
+
+    def run_discovery(self):
+        """Start one discovery search in the background; False when one is already running. Used by the button and the weekly timer."""
+        if self.discovery_busy.is_set():
+            return False
+        self.discovery_busy.set()
+        threading.Thread(target=_run_discovery_search, args=(self,), name="discovery-run", daemon=True).start()
+        return True
+
+    def discovery_tick(self, now=None):
+        """Weekly automatic search: only when the user switched the helper on, the setting is on, and the last search is a week old."""
+        if self.watch.settings().get("discovery_weekly", True) and self.discovery.due(now):
+            return self.run_discovery()
+        return False
+
+    def start_background(self, interval=3600):
+        """Called by the server only (never by tests): checks once an hour whether the weekly search is due."""
+        def loop():
+            while not self._stop_background.wait(interval):
+                try:
+                    self.discovery_tick()
+                except Exception:
+                    pass                                                           # a background hiccup must never take the server down
+        self._stop_background = getattr(self, "_stop_background", threading.Event())
+        threading.Thread(target=loop, name="background-ticks", daemon=True).start()
+
     def __init__(self, providers, store=None, chat_fn=chat, stream_fn=chat_stream, list_fn=list_models, ledger=None, env_fn=envcheck.inspect,
                  open_url_fn=webbrowser.open):
         self.providers, self.store = providers, store or ChatStore()
@@ -72,12 +129,15 @@ class Context:
                          recorder=lambda model, ok, seconds, kind, tokens: _stats(self).record(model, ok=ok, seconds=seconds, kind=kind, tokens=tokens))                             # coding agent (OpenCode) in throw-away worktrees
 
 
+        self.unload_fn = modelescalate.unload_ollama                              # replaced in tests
         self.discovery_fn = discoverysrc.discover                                 # replaced in tests (no real network)
         self.discovery_busy = threading.Event()
+        self._stop_background = threading.Event()
         self.discovery = Discovery(providers.path.parent / "discovery.json")        # recommendation inbox, off by default (see docs/discovery-helper-plan.md)
         self.catalog_check_fn = catalog_check.check_catalog                          # replaced in tests (no real network)
         self.catalog_busy = threading.Event()                                       # a reachability check (anonymous GETs) is running
         self.projects = ProjectRegistry(providers.path.parent / "projects.json", check_repo=CodeRuns.check_repo)   # the projects JetAI may work on
+        self.code.escalator = self.escalate_run                                      # one automatic retry with the 9B after a failed direct-mode run
         self.code.projects = self.projects
         self.ctx_limits = ctxprobe.ContextLimits(providers.path.parent / "ctx-limits.json")   # measured input limits of local services
         self.code.ctx_limits = self.ctx_limits
@@ -163,7 +223,10 @@ def _code_api(ctx, method, rest, body):
                     repo = ctx.projects.get(body["project"])["path"]
                 except ProjectError as error:
                     raise ApiError(400, str(error))
-            return code.start(repo, body.get("prompt"), body.get("model") or "auto", body.get("confirm_cost") is True,
+            model = body.get("model") or "auto"
+            if model == "auto" and body.get("mode") in ("direct", "loop"):
+                model = ctx.prefer_big() or "auto"                                  # the measured better model, when installed and allowed by the setting
+            return code.start(repo, body.get("prompt"), model, body.get("confirm_cost") is True,
                               body["guidance"] if isinstance(body.get("guidance"), bool) else None,
                               body["mode"] if body.get("mode") in ("direct", "loop") else "agent", body.get("validate") is not False,
                               body["attempts"] if isinstance(body.get("attempts"), int) else 1,
@@ -232,6 +295,22 @@ def _quota_action(ctx, body):
     return ctx.quota.status(gid)
 
 
+def _run_discovery_search(ctx):
+    inbox = ctx.discovery
+    added, error = 0, ""
+    try:
+        for card in ctx.discovery_fn(engine_module.detect_hardware()):
+            try:
+                added += 1 if inbox.add_card(card) else 0
+            except DiscoveryError:
+                continue                                                          # a malformed card is dropped, never stored
+    except Exception as problem:                                                  # offline, API changed: say so, keep the old cards
+        error = "찾지 못했습니다: " + str(problem)[:120]
+    finally:
+        inbox.record_run(added, error)
+        ctx.discovery_busy.clear()
+
+
 def _discovery_api(ctx, method, rest, body):
     """Inbox of recommended models / services / news. D0 only stores and shows cards: it never fetches or installs anything."""
     inbox = ctx.discovery
@@ -241,25 +320,7 @@ def _discovery_api(ctx, method, rest, body):
         if rest == ["run"] and method == "POST":
             if not inbox.state()["enabled"]:
                 raise ApiError(400, "먼저 발견 도우미를 켜세요. 켜기 전에는 인터넷에 아무것도 요청하지 않습니다.")
-            if ctx.discovery_busy.is_set():
-                return {"started": False, "running": True}
-            ctx.discovery_busy.set()
-
-            def search():
-                added, error = 0, ""
-                try:
-                    for card in ctx.discovery_fn(engine_module.detect_hardware()):
-                        try:
-                            added += 1 if inbox.add_card(card) else 0
-                        except DiscoveryError:
-                            continue                                              # a malformed card is dropped, never stored
-                except Exception as problem:                                      # offline, API changed: say so, keep the old cards
-                    error = "찾지 못했습니다: " + str(problem)[:120]
-                finally:
-                    inbox.record_run(added, error)
-                    ctx.discovery_busy.clear()
-            threading.Thread(target=search, name="discovery-run", daemon=True).start()
-            return {"started": True, "running": True}
+            return {"started": ctx.run_discovery(), "running": True}
         if rest == ["enable"] and method == "POST":
             inbox.set_enabled(body.get("enabled") is True)
             return inbox.state()

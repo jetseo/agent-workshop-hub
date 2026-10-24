@@ -203,5 +203,45 @@ class RunApiTests(unittest.TestCase):
         self.assertEqual(len(calls), 1)
 
 
+class WeeklyTests(unittest.TestCase):
+    """The automatic weekly search: only when the helper is switched on, the setting is on and the last search is a week old."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.ctx = Context(Providers(Path(self.tmp.name) / "providers.json"))
+        self.calls = []
+        self.ctx.discovery_fn = lambda hw: self.calls.append(1) or []
+
+    def wait(self):
+        for _ in range(100):
+            if not self.ctx.discovery_busy.is_set():
+                return
+            time.sleep(0.05)
+        self.fail("the search did not finish")
+
+    def test_nothing_runs_while_the_helper_is_off(self):
+        self.assertFalse(self.ctx.discovery_tick(now=NOW))
+        self.assertEqual(self.calls, [])
+
+    def test_it_runs_when_on_and_due_then_waits_a_week(self):
+        self.ctx.discovery.set_enabled(True)
+        self.assertTrue(self.ctx.discovery_tick(now=NOW))
+        self.wait()
+        self.assertEqual(len(self.calls), 1)
+        last = self.ctx.discovery.state()["last_run"]["at"]
+        self.assertFalse(self.ctx.discovery_tick(now=last + 6 * 86400))            # six days later: not yet
+        self.assertTrue(self.ctx.discovery_tick(now=last + 7 * 86400 + 1))         # a week later: again
+        self.wait()
+        self.assertEqual(len(self.calls), 2)
+
+    def test_the_weekly_setting_can_switch_it_off_without_turning_the_helper_off(self):
+        self.ctx.discovery.set_enabled(True)
+        self.ctx.watch.set_setting("discovery_weekly", False)
+        self.assertFalse(self.ctx.discovery_tick(now=NOW))
+        self.assertEqual(self.calls, [])
+        self.assertTrue(self.ctx.discovery.state()["enabled"])                      # the manual button still works
+
+
 if __name__ == "__main__":
     unittest.main()

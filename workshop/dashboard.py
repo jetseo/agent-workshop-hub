@@ -374,6 +374,7 @@ def main():
     from .providers import Providers
     registry = Providers()
     api_ctx = Context(registry, ChatStore(None), chat_fn=setup_page.chat, list_fn=setup_page.list_models)
+    api_ctx.start_background()                          # hourly check for the weekly discovery search (does nothing unless the user turned the helper on)
     try:
         queue = Queue(args.db)
         api_ctx.remote.queue = queue                  # phone control reads and approves jobs in the same queue
