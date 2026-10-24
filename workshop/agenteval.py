@@ -287,6 +287,172 @@ TASKS += [
          _tests_pass_and_untouched("tests/test_parse.py", TOKEN_TESTS), allowed={"parser.py"}),
 ]
 MULTI_TASK_IDS = ["vague-bug", "three-files", "move-helper", "log-bug"]
+
+# ---- held-out multi-file tasks (2026-10-24): written AFTER the direct-mode fixes, so they were not used to tune anything ----
+INVENTORY_TESTS = (
+    "import unittest\n"
+    "from inventory import Item\n"
+    "from order import total_units\n"
+    "from report import line\n\n\n"
+    "class T(unittest.TestCase):\n"
+    "    def test_the_attribute_is_renamed(self):\n"
+    "        item = Item('pen', 3)\n"
+    "        self.assertEqual(item.quantity, 3)\n"
+    "        self.assertFalse(hasattr(item, 'qty'))\n"
+    "    def test_total(self):\n"
+    "        self.assertEqual(total_units([Item('a', 2), Item('b', 5)]), 7)\n"
+    "    def test_line(self):\n"
+    "        self.assertEqual(line(Item('pen', 3)), 'pen x3')\n")
+
+TAX_TESTS = (
+    "import unittest\n"
+    "from cart import cart_total\n"
+    "from shop import checkout\n"
+    "from tax import with_tax\n\n\n"
+    "class T(unittest.TestCase):\n"
+    "    def test_default_rate(self):\n"
+    "        self.assertEqual(with_tax(100), 110)\n"
+    "        self.assertEqual(cart_total([100, 200]), 330)\n"
+    "        self.assertEqual(checkout([100, 200]), 330)\n"
+    "    def test_custom_rate_goes_all_the_way_down(self):\n"
+    "        self.assertEqual(with_tax(100, 0.2), 120)\n"
+    "        self.assertEqual(cart_total([100, 200], 0.2), 360)\n"
+    "        self.assertEqual(checkout([100, 200], tax_rate=0.5), 450)\n")
+
+SETTINGS_TESTS = (
+    "import re\n"
+    "import unittest\n"
+    "from pathlib import Path\n\n"
+    "import settings\n"
+    "from client import should_retry\n"
+    "from worker import give_up\n\n"
+    "ROOT = Path(__file__).resolve().parent.parent\n\n\n"
+    "class T(unittest.TestCase):\n"
+    "    def test_constant(self):\n"
+    "        self.assertEqual(settings.MAX_RETRIES, 3)\n"
+    "    def test_behaviour(self):\n"
+    "        self.assertTrue(should_retry(2))\n"
+    "        self.assertFalse(should_retry(3))\n"
+    "        self.assertTrue(give_up(3))\n"
+    "        self.assertFalse(give_up(2))\n"
+    "    def test_the_number_is_not_repeated(self):\n"
+    "        for name in ('client.py', 'worker.py'):\n"
+    "            source = (ROOT / name).read_text(encoding='utf-8')\n"
+    "            self.assertIn('settings', source)\n"
+    "            self.assertIsNone(re.search(r'\\b3\\b', source), name)\n")
+
+APP_TESTS = (
+    "import unittest\n"
+    "from app import get_port\n\n\n"
+    "class T(unittest.TestCase):\n"
+    "    def test_plain(self):\n"
+    "        self.assertEqual(get_port('port=80'), 80)\n"
+    "    def test_spaces_around_the_equals_sign(self):\n"
+    "        self.assertEqual(get_port('host = x\\nport = 8080'), 8080)\n"
+    "    def test_spaces_everywhere(self):\n"
+    "        self.assertEqual(get_port(' port= 9 '), 9)\n")
+
+TASKS += [
+    Task("rename-attr", "속성 이름을 세 파일에서 바꾸기", "inventory.py의 Item 속성 qty를 quantity로 바꾸고, 쓰는 곳(order.py, report.py)도 모두 고쳐 주세요. tests/test_inventory.py가 통과해야 하고 테스트 파일은 고치지 마세요.",
+         {"inventory.py": "class Item:\n    def __init__(self, name, qty):\n        self.name = name\n        self.qty = qty\n",
+          "order.py": "def total_units(items):\n    return sum(i.qty for i in items)\n",
+          "report.py": "def line(item):\n    return '%s x%d' % (item.name, item.qty)\n", "tests/test_inventory.py": INVENTORY_TESTS},
+         _tests_pass_and_untouched("tests/test_inventory.py", INVENTORY_TESTS), allowed={"inventory.py", "order.py", "report.py"}),
+    Task("thread-param", "선택 인자를 세 단계로 전달", "세율을 바꿀 수 있게 해 주세요. tax.py의 with_tax, cart.py의 cart_total, shop.py의 checkout이 모두 선택 인자 tax_rate(기본 0.1)를 받아 아래 단계로 넘겨야 합니다. tests/test_tax.py가 통과해야 하고 테스트 파일은 고치지 마세요.",
+         {"tax.py": "def with_tax(amount):\n    return round(amount * 1.1)\n",
+          "cart.py": "from tax import with_tax\n\n\ndef cart_total(prices):\n    return sum(with_tax(p) for p in prices)\n",
+          "shop.py": "from cart import cart_total\n\n\ndef checkout(prices):\n    return cart_total(prices)\n", "tests/test_tax.py": TAX_TESTS},
+         _tests_pass_and_untouched("tests/test_tax.py", TAX_TESTS), allowed={"tax.py", "cart.py", "shop.py"}),
+    Task("extract-constant", "숫자를 설정 파일로 뽑기", "settings.py를 새로 만들어 MAX_RETRIES = 3을 두고, client.py와 worker.py가 숫자 3을 직접 쓰지 말고 그것을 가져다 쓰게 해 주세요. tests/test_retries.py가 통과해야 하고 테스트 파일은 고치지 마세요.",
+         {"client.py": "def should_retry(attempt):\n    return attempt < 3\n", "worker.py": "def give_up(attempt):\n    return attempt >= 3\n", "tests/test_retries.py": SETTINGS_TESTS},
+         _tests_pass_and_untouched("tests/test_retries.py", SETTINGS_TESTS), allowed={"settings.py", "client.py", "worker.py"}),
+    Task("bug-trace", "다른 파일의 원인 찾기", "get_port('port = 8080')가 KeyError를 냅니다. 원인을 찾아 고쳐 주세요. tests/test_app.py가 통과해야 하고 테스트 파일은 고치지 마세요.",
+         {"loader.py": "def load(text):\n    config = {}\n    for line in text.splitlines():\n        if '=' in line:\n            key, value = line.split('=', 1)\n            config[key] = value\n    return config\n",
+          "app.py": "from loader import load\n\n\ndef get_port(text):\n    return int(load(text)['port'])\n", "tests/test_app.py": APP_TESTS},
+         _tests_pass_and_untouched("tests/test_app.py", APP_TESTS), allowed={"loader.py", "app.py"}),
+]
+HELDOUT_TASK_IDS = ["rename-attr", "thread-param", "extract-constant", "bug-trace"]
+
+# ---- held-out set B (2026-10-24): written BEFORE the partial-block change, so it is unseen when that change is measured ----
+USERS_TESTS = (
+    "import unittest\n"
+    "from greet import greeting\n"
+    "from stats import total_age\n"
+    "from users import parse_user\n\n\n"
+    "class T(unittest.TestCase):\n"
+    "    def test_parse_returns_a_dict(self):\n"
+    "        self.assertEqual(parse_user('kim, 30'), {'name': 'kim', 'age': 30})\n"
+    "    def test_callers_still_work(self):\n"
+    "        self.assertEqual(greeting('kim, 30'), 'kim (30)')\n"
+    "        self.assertEqual(total_age(['a,1', 'b,2']), 3)\n")
+
+RENAME_FUNC_TESTS = (
+    "import unittest\n"
+    "import lib\n"
+    "from a import run_a\n"
+    "from b import run_b\n\n\n"
+    "class T(unittest.TestCase):\n"
+    "    def test_renamed(self):\n"
+    "        self.assertTrue(hasattr(lib, 'compute_total'))\n"
+    "        self.assertFalse(hasattr(lib, 'calc_total'))\n"
+    "    def test_callers(self):\n"
+    "        self.assertEqual(run_a(), 6)\n"
+    "        self.assertEqual(run_b(), 9)\n")
+
+USER_TESTS = (
+    "import unittest\n"
+    "from models import User\n"
+    "from services import create\n\n\n"
+    "class T(unittest.TestCase):\n"
+    "    def test_user(self):\n"
+    "        self.assertEqual(User('a', 'b').name, 'a b')\n"
+    "    def test_create(self):\n"
+    "        self.assertEqual(create('a', 'b').name, 'a b')\n")
+
+STACK_TESTS = (
+    "import unittest\n"
+    "from stack import Stack\n"
+    "from utils import top_or_none\n\n\n"
+    "class T(unittest.TestCase):\n"
+    "    def test_peek_does_not_remove(self):\n"
+    "        s = Stack()\n"
+    "        s.push(1)\n"
+    "        s.push(2)\n"
+    "        self.assertEqual(s.peek(), 2)\n"
+    "        self.assertEqual(s.pop(), 2)\n"
+    "    def test_peek_on_empty_raises(self):\n"
+    "        with self.assertRaises(IndexError):\n"
+    "            Stack().peek()\n"
+    "    def test_top_or_none(self):\n"
+    "        s = Stack()\n"
+    "        self.assertIsNone(top_or_none(s))\n"
+    "        s.push('x')\n"
+    "        self.assertEqual(top_or_none(s), 'x')\n"
+    "        self.assertEqual(top_or_none(s), 'x')\n")
+
+TASKS += [
+    Task("dict-return", "반환 형식을 바꾸고 호출부 고치기", "users.py의 parse_user가 (이름, 나이) 튜플 대신 {'name': ..., 'age': ...} 딕셔너리를 돌려주게 바꾸고, 쓰는 곳(greet.py, stats.py)도 맞게 고쳐 주세요. tests/test_users.py가 통과해야 하고 테스트 파일은 고치지 마세요.",
+         {"users.py": "def parse_user(line):\n    name, age = line.split(',')\n    return name.strip(), int(age)\n",
+          "greet.py": "from users import parse_user\n\n\ndef greeting(line):\n    name, age = parse_user(line)\n    return '%s (%d)' % (name, age)\n",
+          "stats.py": "from users import parse_user\n\n\ndef total_age(lines):\n    return sum(parse_user(l)[1] for l in lines)\n", "tests/test_users.py": USERS_TESTS},
+         _tests_pass_and_untouched("tests/test_users.py", USERS_TESTS), allowed={"users.py", "greet.py", "stats.py"}),
+    Task("rename-func", "함수 이름을 모든 호출부에서 바꾸기", "lib.py의 함수 calc_total을 compute_total로 이름을 바꾸고 a.py, b.py의 호출도 고쳐 주세요(옛 이름은 남기지 마세요). tests/test_names.py가 통과해야 하고 테스트 파일은 고치지 마세요.",
+         {"lib.py": "def calc_total(prices):\n    return sum(prices)\n", "a.py": "from lib import calc_total\n\n\ndef run_a():\n    return calc_total([1, 2, 3])\n",
+          "b.py": "import lib\n\n\ndef run_b():\n    return lib.calc_total([4, 5])\n", "tests/test_names.py": RENAME_FUNC_TESTS},
+         _tests_pass_and_untouched("tests/test_names.py", RENAME_FUNC_TESTS), allowed={"lib.py", "a.py", "b.py"}),
+    Task("fix-import", "순환 import 풀기", "models.py와 services.py가 서로를 import해서 ImportError가 납니다. 순환 import를 없애 tests/test_user.py가 통과하게 고쳐 주세요. 테스트 파일은 고치지 마세요.",
+         {"models.py": "from services import make_name\n\n\nclass User:\n    def __init__(self, first, last):\n        self.name = make_name(first, last)\n",
+          "services.py": "from models import User\n\n\ndef make_name(first, last):\n    return first + ' ' + last\n\n\ndef create(first, last):\n    return User(first, last)\n",
+          "tests/test_user.py": USER_TESTS},
+         _tests_pass_and_untouched("tests/test_user.py", USER_TESTS), allowed={"models.py", "services.py", "naming.py"}),
+    Task("add-peek", "메서드를 추가하고 다른 파일에서 쓰기", "stack.py의 Stack에 peek() 메서드(맨 위 값을 꺼내지 않고 돌려줌, 비어 있으면 IndexError)를 추가하고, utils.py의 top_or_none이 그것을 써서 비어 있으면 None을 돌려주게 구현해 주세요. tests/test_stack.py가 통과해야 하고 테스트 파일은 고치지 마세요.",
+         {"stack.py": "class Stack:\n    def __init__(self):\n        self.items = []\n\n    def push(self, x):\n        self.items.append(x)\n\n    def pop(self):\n        return self.items.pop()\n",
+          "utils.py": "from stack import Stack\n\n\ndef top_or_none(stack):\n    raise NotImplementedError\n", "tests/test_stack.py": STACK_TESTS},
+         _tests_pass_and_untouched("tests/test_stack.py", STACK_TESTS), allowed={"stack.py", "utils.py"}),
+]
+HELDOUT_B_IDS = ["dict-return", "rename-func", "fix-import", "add-peek"]
+TASK_IDS = [t.id for t in TASKS]
+TASK_IDS = [t.id for t in TASKS]
 TASK_IDS = [t.id for t in TASKS]
 
 

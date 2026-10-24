@@ -262,7 +262,7 @@ def run(chat, task, worktree, files, summary, test_fn, emit, *, cancelled=lambda
         for rel in existing:
             if stopped():
                 return result
-            ok = _edit_file(ask, task, worktree, rel, original[rel], emit, retry=True, ctx=ctx + _earlier(done_notes))
+            ok = _edit_file(ask, task, worktree, rel, original[rel], emit, retry=True, ctx=ctx + _earlier(done_notes), several=len(existing) + len(new) > 1)
             if not ok:
                 result["error"] = "%s 에 수정안을 적용하지 못했습니다." % rel
                 return result
@@ -305,10 +305,13 @@ def _diff_note(before, after, rel):
     return "\n".join(lines)[:1200]
 
 
-def _edit_file(ask, task, worktree, rel, current, emit, retry, ctx=""):
+def _edit_file(ask, task, worktree, rel, current, emit, retry, ctx="", several=False):
+    """`several`: the task touches more than one file. The model then often also writes blocks for the OTHER files in the same answer
+    (seen in the held-out measurement); those cannot match this file. They are ignored as long as at least one block did apply here."""
     text, bom, crlf = current
     path = safe_path(worktree, rel)
-    prompt = "Task:\n%s\n\nFile: %s\n```\n%s\n```%s" % (task, rel, text, ctx)
+    only = "\n\n(This step edits ONLY %s. The other files of the task are edited in their own steps: write no blocks for them.)" % rel if several else ""
+    prompt = "Task:\n%s\n\nFile: %s\n```\n%s\n```%s%s" % (task, rel, text, only, ctx)
 
     def attempt(extra=""):
         """-> (new_text or None, problem, note). new_text is set only for a usable change."""
@@ -316,9 +319,9 @@ def _edit_file(ask, task, worktree, rel, current, emit, retry, ctx=""):
         blocks = parse_blocks(answer)
         if blocks:
             candidate, applied, failed = apply_blocks(text, blocks)
-            if failed or not applied:
+            if not applied or (failed and not several):
                 return None, "These SEARCH blocks did not match exactly once, copy the lines exactly: " + " | ".join(f.replace("\n", "\\n") for f in failed), ""
-            note = "%d개 블록" % applied
+            note = "%d개 블록" % applied + (" (다른 파일용으로 보이는 %d개는 무시)" % len(failed) if failed else "")
         else:
             whole = FENCE.search(answer or "")          # the model rewrote the whole file instead: accept it for a small file, the diff shows the result
             if not whole or not whole.group(1).strip() or len(whole.group(1)) > MAX_FILE_CHARS:
