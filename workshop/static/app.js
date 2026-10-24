@@ -1927,6 +1927,7 @@
     function choose(it) { closePalette(); setTimeout(it.run, 0); }
     input.addEventListener("input", function () { shown = paletteMatches(input.value, items); sel = 0; draw(); });
     input.addEventListener("keydown", function (e) {
+      if (e.isComposing || e.keyCode === 229) return;                       // Korean input: Enter that ends a syllable must not pick an item
       if (e.key === "ArrowDown") { e.preventDefault(); sel = Math.min(shown.length - 1, sel + 1); draw(); }
       else if (e.key === "ArrowUp") { e.preventDefault(); sel = Math.max(0, sel - 1); draw(); }
       else if (e.key === "Enter") { e.preventDefault(); if (shown[sel]) choose(shown[sel]); }
