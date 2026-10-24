@@ -357,3 +357,7 @@ body[data-view="code"] .topbar .help{display:none}
 
 .cw-sys{top:calc(100% + 6px);bottom:auto;left:auto;right:0;min-width:300px;padding:10px}
 .cw-sys-row{display:flex;justify-content:space-between;gap:12px;padding:3px 4px;font-size:13px}.cw-sys-row b{font-weight:600;text-align:right}.cw-sys-row b.bad{color:#e0a100}
+
+/* ---- discovery inbox ---- */
+.nav-dot{margin-left:auto;min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:var(--accent);color:var(--accent-fg);font-size:11px;line-height:18px;text-align:center}
+.disc-card{margin:10px 0}.disc-facts{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0}

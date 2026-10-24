@@ -3,7 +3,7 @@
   var body = document.body, CSRF = body.dataset.csrf, TERM = body.dataset.terminal;
   var state = { providers: [], catalog: [], onboarded: false, chats: [], chat: null, model: "",
                 view: "chat", streaming: null, wiz: null, fallback: store("fallback") !== "0" };
-  var VIEWS = ["chat", "settings", "tasks", "boards", "usage", "digest", "code", "terminal"];
+  var VIEWS = ["chat", "settings", "tasks", "boards", "usage", "digest", "code", "discovery", "terminal"];
   var SUGGESTIONS = ["이 프로젝트의 빠른 시작 가이드를 5줄로 요약해줘",
                      "파이썬으로 CSV 파일을 읽어서 열별 합계를 구하는 코드를 작성해줘",
                      "다음 문장을 자연스러운 영어로 번역해줘: 오늘 회의는 3시에 시작합니다.",
@@ -379,6 +379,36 @@
   }
 
   /* ---------- views ---------- */
+  /* ---------- discovery inbox (D0: shows cards, never fetches or installs) ---------- */
+  var KIND_NAMES = { model: "모델", service: "서비스", news: "소식" }, FIT_NAMES = { gpu: "이 PC GPU에서 실행 가능", partial: "일부만 GPU(느릴 수 있음)", cpu: "CPU로만 실행(느림)", no: "이 PC에서는 어려움" };
+  async function renderDiscovery() {
+    var root = $("disc-root"); if (!root) return;
+    var d; try { d = await api("GET", "/discovery"); } catch (e) { root.textContent = e.message; return; }
+    root.textContent = "";
+    var sw = h("input", { type: "checkbox", id: "disc-enabled", checked: d.enabled, onchange: async function (e) { try { d = await api("POST", "/discovery/enable", { enabled: e.target.checked }); } catch (err) { toast(err.message); } renderDiscovery(); } });
+    root.appendChild(h("h2", { text: "발견" }));
+    root.appendChild(h("p", { class: "sub", text: "새로 나온 모델·서비스·소식을 찾아 **추천만** 합니다. 설치·등록·결제는 항상 사용자가 확인한 뒤에만 이뤄집니다. 기본은 꺼져 있습니다." }));
+    root.appendChild(h("label", { class: "check" }, sw, h("span", { text: " 발견 도우미 켜기" })));
+    root.appendChild(h("button", { type: "button", class: "btn", id: "disc-run", text: "지금 찾아보기", disabled: true, title: "다음 단계(D1)에서 모델 후보 찾기부터 추가됩니다." }));
+    root.appendChild(h("p", { class: "sub", text: "아직 찾아보는 기능은 연결되지 않았습니다(계획: docs/discovery-helper-plan.md, D1부터). 지금은 추천 카드를 저장·표시하는 틀만 있습니다." }));
+    if (!d.cards.length) { root.appendChild(h("p", { class: "sub", id: "disc-empty", text: "아직 추천이 없습니다." })); }
+    d.cards.forEach(function (c) {
+      var facts = Object.keys(c.facts || {}).map(function (k) { return h("span", { class: "tag", text: k + ": " + c.facts[k] }); });
+      root.appendChild(h("div", { class: "cw-card disc-card" },
+        h("p", {}, h("span", { class: "tag", text: KIND_NAMES[c.kind] || c.kind }), " ", h("b", { text: c.title }), c.status === "new" ? h("span", { class: "tag", text: " 새" }) : ""),
+        c.summary ? h("p", { class: "sub", text: (c.ai_summary ? "AI 요약(틀릴 수 있음): " : "") + c.summary }) : "",
+        h("div", { class: "disc-facts" }, facts),
+        c.fit ? h("p", { class: "sub", text: FIT_NAMES[c.fit] || "" }) : "",
+        h("p", { class: "sub", text: c.measured ? "JetAI가 측정한 결과가 있습니다." : "성능은 측정되지 않았습니다." }),
+        h("div", { class: "cw-actions" },
+          h("a", { class: "btn", href: c.source_url, target: "_blank", rel: "noopener noreferrer", text: "출처 보기" }),
+          h("button", { type: "button", class: "btn", text: "무시", onclick: async function () { try { await api("POST", "/discovery/dismiss", { id: c.id }); } catch (err) { toast(err.message); } renderDiscovery(); } }))));
+    });
+    if (d.unread) { try { await api("POST", "/discovery/read", {}); } catch (e) { /* the dot may stay until next time */ } }
+    discoveryDot(0);
+  }
+  function discoveryDot(count) { var dot = $("disc-dot"); if (dot) { dot.hidden = !count; dot.textContent = count ? String(count) : ""; } }
+  async function pollDiscovery() { try { var d = await api("GET", "/discovery"); discoveryDot(d.unread); } catch (e) { /* the dot is a hint only */ } }
   function showView(name) {
     state.view = name;
     VIEWS.forEach(function (v) {
@@ -394,6 +424,7 @@
     if (name === "digest") digestInit();
     document.body.dataset.view = name;
     if (name === "code") renderCode();
+    if (name === "discovery") renderDiscovery();
     if (name === "settings") renderSettings();
     if (window.innerWidth <= 760) setSide(false);
   }
@@ -1838,6 +1869,7 @@
     updateSend();
     try { await loadState(); await loadChats(); loadUsage(); } catch (e) { toast("상태를 불러오지 못했습니다: " + e.message); }
     renderWelcome(); showView("chat");
+    pollDiscovery(); setInterval(pollDiscovery, 300000);                  // the unread dot on the 발견 menu
     if (!state.onboarded) openWizard();
     $("input").focus();
   })();

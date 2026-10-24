@@ -15,6 +15,7 @@ from .chat import chat, chat_stream, list_models
 from .chat_store import DEFAULT_TITLE, CHAT_ID, ChatStore
 from . import arbiter, router
 from . import ctxprobe, folderpick, catalog_check
+from .discovery import Discovery, DiscoveryError
 from .codework import CodeRuns, CodeWorkError
 from .projects import ProjectError, ProjectRegistry
 from .engine import Engine, EngineError
@@ -69,6 +70,7 @@ class Context:
                          recorder=lambda model, ok, seconds, kind, tokens: _stats(self).record(model, ok=ok, seconds=seconds, kind=kind, tokens=tokens))                             # coding agent (OpenCode) in throw-away worktrees
 
 
+        self.discovery = Discovery(providers.path.parent / "discovery.json")        # recommendation inbox, off by default (see docs/discovery-helper-plan.md)
         self.catalog_check_fn = catalog_check.check_catalog                          # replaced in tests (no real network)
         self.catalog_busy = threading.Event()                                       # a reachability check (anonymous GETs) is running
         self.projects = ProjectRegistry(providers.path.parent / "projects.json", check_repo=CodeRuns.check_repo)   # the projects JetAI may work on
@@ -224,6 +226,26 @@ def _quota_action(ctx, body):
     except ValueError as error:
         raise ApiError(400, str(error))
     return ctx.quota.status(gid)
+
+
+def _discovery_api(ctx, method, rest, body):
+    """Inbox of recommended models / services / news. D0 only stores and shows cards: it never fetches or installs anything."""
+    inbox = ctx.discovery
+    try:
+        if not rest and method == "GET":
+            return inbox.state()
+        if rest == ["enable"] and method == "POST":
+            inbox.set_enabled(body.get("enabled") is True)
+            return inbox.state()
+        if rest == ["dismiss"] and method == "POST":
+            inbox.dismiss(str(body.get("id") or ""))
+            return inbox.state()
+        if rest == ["read"] and method == "POST":
+            inbox.mark_read()
+            return inbox.state()
+    except DiscoveryError as error:
+        raise ApiError(400, str(error))
+    raise LookupError("Unknown discovery route")
 
 
 def _projects_api(ctx, method, rest, body):
@@ -612,6 +634,8 @@ def dispatch(ctx, method, path, body):
             return Json(200, _remote_api(ctx, method, parts[1:], body))
         if parts and parts[0] == "engine":
             return Json(200, _engine_api(ctx, method, parts[1:], body))
+        if parts and parts[0] == "discovery":
+            return Json(200, _discovery_api(ctx, method, parts[1:], body))
         if parts == ["catalog", "check"] and method == "POST":
             if ctx.catalog_busy.is_set():
                 return Json(200, {"started": False, "running": True})
