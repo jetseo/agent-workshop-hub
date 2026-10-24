@@ -328,6 +328,12 @@ def _engine_api(ctx, method, rest, body):
         if method != "POST" or len(rest) != 1:
             raise LookupError("Unknown engine route")
         action = rest[0]
+        if action == "register":                      # a discovery card's model, made installable through the normal size confirmation
+            repo, file = str(body.get("repo") or ""), str(body.get("file") or "")
+            if not any(c.get("id") == "hf:" + repo and (c.get("facts") or {}).get("파일") == file for c in ctx.discovery.state()["cards"]):
+                raise ApiError(400, "발견 카드에 있는 모델만 추가할 수 있습니다.")
+            model_id = engine.register_external(repo, file)
+            return {"model": model_id, **engine.plan(model_id)}
         if action == "plan":
             return engine.plan(str(body.get("model", "")))
         if action == "install":
