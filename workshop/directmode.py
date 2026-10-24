@@ -24,7 +24,7 @@ WRITE_TOKENS = 6000
 MAX_BLOCKS = 8
 MAX_FILE_CHARS = 40_000
 MAX_NEW_FILE_CHARS = 60_000
-BLOCK = re.compile(r"<{5,9} SEARCH\r?\n(.*?)\r?\n={5,9}\r?\n(.*?)\r?\n?>{5,9} REPLACE", re.S)
+BLOCK = re.compile(r"^(?:<{5,9} )?SEARCH\r?\n(.*?)\r?\n={5,9}\r?\n(.*?)\r?\n?>{5,9} REPLACE", re.S | re.M)
 FENCE = re.compile(r"```[a-zA-Z0-9_+-]*\r?\n(.*?)```", re.S)
 
 LOCALIZE = ("You are a careful software engineer. Given a task and a list of repository files, decide which EXISTING files must be "
@@ -38,7 +38,8 @@ EDIT = ("You edit one file. Reply ONLY with SEARCH/REPLACE blocks, in this exact
         "existing style. Do not change anything the task does not ask for. If your new code uses a name that is defined in another "
         "file, add the import. When you move or rename code, copy its body exactly (every character, punctuation included). No explanations.")
 CREATE = ("You create one new file. Reply ONLY with the complete file content inside a single fenced code block. No explanations. "
-          "If the task moves or copies code into this file, copy it exactly from the reference files (every character, punctuation included).")
+          "If the task moves or copies code into this file, copy it exactly from the reference files (every character, punctuation included). "
+          "Write ONLY what the task says belongs in this new file: never copy other code from the reference files into it.")
 MARKER_LINE = re.compile(r"^\s*(?:<{5,9}\s*SEARCH|={5,9}\s*$|>{5,9}\s*REPLACE|SEARCH\s*$|FILE:)", re.M)       # edit-block syntax is never file content
 
 
