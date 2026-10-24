@@ -193,7 +193,7 @@ def _code_api(ctx, method, rest, body):
                 code.purge(run_id, body.get("confirm") is True)
                 return {"ok": True, "counts": code.counts()}
             elif action == "rerun":
-                return code.rerun(run_id)
+                return code.rerun(run_id, str(body.get("model") or ""))
 
             elif action == "webcheck":
                 code.webcheck(run_id, str(body.get("url") or ""))
