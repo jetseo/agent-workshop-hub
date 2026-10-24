@@ -100,6 +100,14 @@ class Discovery:
             self._save(data)
             return True
 
+    def due(self, now=None, days=7):
+        """True when the user switched the helper on and the last search is older than `days` (or there was none). The weekly run uses this."""
+        state = self.state()
+        if not state["enabled"]:
+            return False
+        last = (state.get("last_run") or {}).get("at") or 0
+        return (self.clock() if now is None else now) - last >= days * 86400
+
     def record_run(self, added, error=""):
         """Remember when the last search ran and what it found (shown on the screen)."""
         with self._lock:

@@ -389,6 +389,10 @@
     root.appendChild(h("h2", { text: "발견" }));
     root.appendChild(h("p", { class: "sub", text: "새로 나온 모델·서비스·소식을 찾아 **추천만** 합니다. 설치·등록·결제는 항상 사용자가 확인한 뒤에만 이뤄집니다. 기본은 꺼져 있습니다." }));
     root.appendChild(h("label", { class: "check" }, sw, h("span", { text: " 발견 도우미 켜기" })));
+    root.appendChild(h("label", { class: "check", title: "도우미가 켜져 있을 때만, 마지막 확인이 일주일 지났으면 자동으로 한 번 읽어 카드를 추가합니다. 설치·다운로드는 하지 않습니다." },
+      h("input", { type: "checkbox", id: "disc-weekly", checked: !(state.settings && state.settings.discovery_weekly === false),
+        onchange: async function (e) { try { state.settings = (await api("POST", "/settings", { discovery_weekly: e.target.checked })).settings; } catch (err) { toast(err.message); } } }),
+      h("span", { text: " 일주일에 한 번 자동으로 찾기" })));
     root.appendChild(h("button", { type: "button", class: "btn", id: "disc-run", text: d.running ? "찾는 중…" : "지금 찾아보기", disabled: !d.enabled || d.running,
       title: d.enabled ? "Hugging Face의 최근 GGUF 모델 후보와 GitHub의 OpenCode·Ollama 새 릴리스를 읽기만 합니다(익명 요청, 설치·다운로드 없음)." : "먼저 위에서 발견 도우미를 켜세요.",
       onclick: async function () {
@@ -753,7 +757,13 @@
       h("span", { text: "📁" }), h("span", { class: "lbl", id: "code-project-label", text: "프로젝트 선택" }), h("span", { text: "▾" }));
     var projMenu = h("div", { class: "cw-pop", id: "code-projmenu", role: "menu", hidden: true });
     projChip.addEventListener("click", function (e) { e.stopPropagation(); openProjectMenu(projMenu, projChip); });
-    var advMenu = h("div", { class: "cw-pop", id: "code-adv", hidden: true }, h("div", { class: "mh", text: "고급 옵션" }), attempts, mix, validate, guide, ctxBtn);
+    function settingBox(key, text, tip, fallback) {
+      return h("label", { class: "check cw-guide", title: tip }, h("input", { type: "checkbox", id: "set-" + key, checked: !(state.settings && state.settings[key] === false) && (fallback || (state.settings && state.settings[key] === true)),
+        onchange: async function (e) { try { state.settings = (await api("POST", "/settings", (function (o) { o[key] = e.target.checked; return o; })({}))).settings; } catch (err) { toast(err.message); } } }), h("span", { text: " " + text }));
+    }
+    var bigPref = settingBox("code_prefer_big", "설치돼 있으면 새 직접 모드 작업에 9B 사용", "내장 엔진에 Qwen3.5 9B가 설치돼 있으면 모델을 '자동'으로 둔 직접 모드 작업을 9B로 시작합니다(엔진을 켜고 GPU를 비웁니다). 7B보다 정확하지만 6~8배 느립니다.", true);
+    var autoEsc = settingBox("code_auto_escalate", "7B가 실패하면 9B로 자동 재시도(한 번)", "직접 모드 작업이 실패하면 새 복사본에서 9B로 한 번만 자동으로 다시 합니다. 원래 작업은 그대로 남습니다.", true);
+    var advMenu = h("div", { class: "cw-pop", id: "code-adv", hidden: true }, h("div", { class: "mh", text: "고급 옵션" }), attempts, mix, validate, guide, bigPref, autoEsc, ctxBtn);
     var advBtn = h("button", { type: "button", class: "chip-btn", id: "code-adv-btn", "aria-haspopup": "true", "aria-expanded": "false", title: "시도 횟수·테스트 확인·작업 지침 같은 고급 옵션", text: "⚙ 옵션" });
     advBtn.addEventListener("click", function (e) { e.stopPropagation(); togglePop(advMenu, advBtn); });
     if (!window.__cwPopClose) { window.__cwPopClose = true; document.addEventListener("click", function (e) { if (!e.target.closest || !e.target.closest(".cw-pop")) closePops(); }); document.addEventListener("keydown", function (e) { if (e.key === "Escape") closePops(); }); }
@@ -1148,6 +1158,7 @@
     codeBusy = true; $("code-start").disabled = true;
     try {
       store("code-repo", $("code-repo").value.trim()); store("code-project", $("code-project").value);
+      if ($("code-model").value === "auto" && ($("code-mode").value === "direct" || $("code-mode").value === "loop") && state.settings && state.settings.code_prefer_big !== false) toast("9B가 설치돼 있으면 엔진을 켜느라 시작이 조금 늦을 수 있습니다.");
       var r = await api("POST", "/code/start", { project: $("code-project").value || undefined, repo: $("code-repo").value.trim(), prompt: text, model: $("code-model").value, confirm_cost: $("code-cost").checked, guidance: $("code-guidance").checked, mode: $("code-mode").value, validate: $("code-validate").checked, attempts: $("code-mode").value !== "agent" && $("code-validate").checked ? parseInt($("code-attempts").value, 10) : 1,
         models: $("code-mode").value !== "agent" && $("code-mix").checked && !$("code-mix-row").hidden ? ["auto"] : null });
       codeOpen = r.id; codeStick = true; input.value = ""; toast("작업을 시작했습니다.");
@@ -1254,6 +1265,8 @@
     if (ck) rows.push(["빌드·테스트", ck]);
     var card = h("div", { class: "cw-sum" });
     rows.forEach(function (row) { card.appendChild(h("div", { class: "cw-sum-i" }, h("span", { class: "sub", text: row[0] }), h("b", { text: row[1] }))); });
+    if (r.escalated_from) card.appendChild(h("div", { class: "cw-sum-i" }, h("span", { class: "sub", text: "자동 재시도" }), h("b", { text: "이전 작업이 실패해 9B로 자동 시작됨" })));
+    if (r.escalated_to) card.appendChild(h("div", { class: "cw-sum-i" }, h("span", { class: "sub", text: "자동 재시도" }), h("b", { text: "실패해서 9B로 새 작업이 자동 시작됨(작업 목록에서 찾아보세요)" })));
     if (s.cut_calls) card.appendChild(h("div", { class: "cw-sum-i warn" }, h("span", { class: "sub", text: "입력 잘림" }), h("b", { text: s.cut_calls + "회 (모델이 일부를 못 봤을 수 있음)" })));
     return card;
   }
