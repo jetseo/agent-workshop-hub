@@ -74,6 +74,8 @@ CANDIDATES = [
     {"id": "glm-4.7-flash", "label": "GLM-4.7-Flash", "repo": "unsloth/GLM-4.7-Flash-GGUF", "file": "GLM-4.7-Flash-Q4_K_M.gguf", "license": "MIT",
      "params_b": 31.2, "moe": True, "vision": False, "weights_gib": 17.1, "kv_bytes_per_token": None, "tools": None, "reasoning": None},
 ]
+EXT_REPO = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,60}/[A-Za-z0-9][A-Za-z0-9._-]{0,100}$")
+EXT_FILE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+-]{0,120}Q4_K_M\.gguf$")        # one Q4_K_M file: never a split or a free-form name
 OVERHEAD_GIB = 0.6        # runtime buffers (rough); the estimate is a planning aid, not a promise
 SAFETY = 1.08
 
@@ -319,6 +321,39 @@ class Engine:
         except (OSError, ValueError):
             return {"binary": None, "models": {}, "active": None}
 
+    def _model(self, model_id):
+        """A built-in model, or one registered from a discovery card (`register_external`, kept in the state file)."""
+        return BY_ID.get(model_id) or (self._state().get("extra") or {}).get(model_id)
+
+    def register_external(self, repo, file):
+        """Make a Hugging Face GGUF installable through the SAME confirmation flow as the built-in models (exact size and hash are read
+        from huggingface.co at plan time, nothing is downloaded here). The caller must have checked that the repo came from a discovery card."""
+        if not isinstance(repo, str) or not EXT_REPO.fullmatch(repo) or not isinstance(file, str) or not EXT_FILE.fullmatch(file):
+            raise EngineError("받을 수 없는 모델 이름입니다.")
+        try:
+            info = _get_json(HF_API % repo, self.opener)
+        except (urllib.error.URLError, OSError, ValueError) as error:
+            raise EngineError("모델 정보를 가져오지 못했습니다: " + str(getattr(error, "reason", error))[:150]) from None
+        if info.get("gated") or info.get("private"):
+            raise EngineError("이 모델은 로그인·동의가 필요해 자동으로 받을 수 없습니다.")
+        sibling = next((s for s in info.get("siblings", []) if s.get("rfilename") == file), None)
+        lfs = (sibling or {}).get("lfs") or {}
+        size = int((sibling or {}).get("size") or lfs.get("size") or 0)
+        if not sibling or not lfs.get("sha256") or size <= 0:
+            raise EngineError("모델 파일의 크기·해시를 확인하지 못해 받지 않습니다.")
+        name = repo.split("/", 1)[1]
+        model_id = "ext-" + re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:40]
+        license_tag = next((t[8:] for t in info.get("tags", []) if isinstance(t, str) and t.startswith("license:")), "확인 필요")
+        weights = round(size / 2**30, 2)
+        entry = {"id": model_id, "label": name.replace("-GGUF", "") + " (발견·측정 전)", "repo": repo, "file": file, "alias": model_id,
+                 "tags": ["발견", "측정 전"], "vram_gb": max(2, int(weights + 1.5)), "license": license_tag, "weights_gib": weights,
+                 "kv_bytes_per_token": None, "external": True}
+        with self._lock:
+            state = self._state()
+            state.setdefault("extra", {})[model_id] = entry
+            self._save(state)
+        return model_id
+
     def _save(self, state):
         self.home.mkdir(parents=True, exist_ok=True)
         tmp = self.state_path.with_suffix(".tmp")
@@ -328,7 +363,7 @@ class Engine:
     def status(self):
         state, hardware = self._state(), self.hardware_fn()
         models = []
-        for m in MODELS:
+        for m in list(MODELS) + list((state.get("extra") or {}).values()):
             kind, note = fit(m, hardware)
             installed = state["models"].get(m["id"])
             ctx_fit = fit_with_context(m, hardware)
@@ -344,7 +379,7 @@ class Engine:
     # -- plan (nothing is downloaded) ---------------------------------------------------------------------------
     def plan(self, model_id):
         """What installing `model_id` would download, with exact sizes, so the user can confirm."""
-        model = BY_ID.get(model_id)
+        model = self._model(model_id)
         if model is None:
             raise EngineError("알 수 없는 모델입니다.")
         hardware = self.hardware_fn()
@@ -480,7 +515,7 @@ class Engine:
             if not entry or not binary or not Path(binary["exe"]).exists() or not (self.home / "models" / entry["file"]).exists():
                 raise EngineError("먼저 설치해 주세요.")
             self.stop()
-            model = BY_ID[model_id]
+            model = self._model(model_id)
             self._port = free_port()
             argv = self.argv_fn(binary["exe"], self.home / "models" / entry["file"], self._port, model["alias"], self.hardware_fn())
             log = open(self.home / "llama-server.log", "ab")
