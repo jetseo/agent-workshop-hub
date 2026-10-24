@@ -389,8 +389,18 @@
     root.appendChild(h("h2", { text: "발견" }));
     root.appendChild(h("p", { class: "sub", text: "새로 나온 모델·서비스·소식을 찾아 **추천만** 합니다. 설치·등록·결제는 항상 사용자가 확인한 뒤에만 이뤄집니다. 기본은 꺼져 있습니다." }));
     root.appendChild(h("label", { class: "check" }, sw, h("span", { text: " 발견 도우미 켜기" })));
-    root.appendChild(h("button", { type: "button", class: "btn", id: "disc-run", text: "지금 찾아보기", disabled: true, title: "다음 단계(D1)에서 모델 후보 찾기부터 추가됩니다." }));
-    root.appendChild(h("p", { class: "sub", text: "아직 찾아보는 기능은 연결되지 않았습니다(계획: docs/discovery-helper-plan.md, D1부터). 지금은 추천 카드를 저장·표시하는 틀만 있습니다." }));
+    root.appendChild(h("button", { type: "button", class: "btn", id: "disc-run", text: d.running ? "찾는 중…" : "지금 찾아보기", disabled: !d.enabled || d.running,
+      title: d.enabled ? "Hugging Face에서 최근 갱신된 GGUF 모델 후보를 읽기만 합니다(익명 요청, 설치·다운로드 없음)." : "먼저 위에서 발견 도우미를 켜세요.",
+      onclick: async function () {
+        var b = this; b.disabled = true; b.textContent = "찾는 중…";
+        try {
+          await api("POST", "/discovery/run", {});
+          for (var i = 0; i < 40; i++) { await new Promise(function (r) { setTimeout(r, 2000); }); var s = await api("GET", "/discovery"); if (!s.running) break; }
+        } catch (e) { toast(e.message); }
+        renderDiscovery();
+      } }));
+    var lr = d.last_run;
+    root.appendChild(h("p", { class: "sub", id: "disc-last", text: lr ? "마지막 확인 " + new Date(lr.at * 1000).toLocaleString("ko-KR", { month: "numeric", day: "numeric", hour: "numeric", minute: "2-digit" }) + (lr.error ? " — " + lr.error : " — 새 카드 " + lr.added + "개") : "아직 찾아본 적이 없습니다. 카드의 모델은 이 PC에서 돌아갈지를 메모리 추정으로만 표시하며 성능은 측정되지 않았습니다." }));
     if (!d.cards.length) { root.appendChild(h("p", { class: "sub", id: "disc-empty", text: "아직 추천이 없습니다." })); }
     d.cards.forEach(function (c) {
       var facts = Object.keys(c.facts || {}).map(function (k) { return h("span", { class: "tag", text: k + ": " + c.facts[k] }); });
