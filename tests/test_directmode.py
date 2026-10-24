@@ -279,6 +279,37 @@ class OneFileAtATimeTests(unittest.TestCase):
         self.assertFalse(self.go(script2)["ok"])                                       # a created file made of edit markers is refused
 
 
+class PartialBlocksTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.dir = Path(self.tmp.name)
+        (self.dir / "calc.py").write_text(BUG, encoding="utf-8", newline="\n")
+        (self.dir / "other.py").write_text("X = 1\n", encoding="utf-8", newline="\n")
+
+    def go(self, script, files):
+        return directmode.run(script, "고쳐줘", self.dir, files, "", lambda: ("passed", ""), lambda *a: None)
+
+    def test_blocks_meant_for_another_file_are_ignored_when_the_task_touches_several_files(self):
+        mixed = blocks("    return a - b", "    return a + b") + "\n" + blocks("Y = 2", "Y = 3")           # the second block belongs to some other file
+        script = Script(localize='{"files": ["calc.py", "other.py"], "new_files": []}', edits=[mixed, blocks("X = 1", "X = 2")])
+        result = self.go(script, ["calc.py", "other.py"])
+        self.assertTrue(result["ok"], result)
+        self.assertIn("return a + b", (self.dir / "calc.py").read_text(encoding="utf-8"))
+        self.assertIn("only calc.py".upper()[:0] + "ONLY calc.py", script.calls[1][1])                        # the step says which file it edits
+
+    def test_a_single_file_task_stays_strict_when_a_block_does_not_match(self):
+        mixed = blocks("    return a - b", "    return a + b") + "\n" + blocks("Y = 2", "Y = 3")
+        script = Script(localize='{"files": ["calc.py"], "new_files": []}', edits=[mixed, mixed])
+        result = self.go(script, ["calc.py"])
+        self.assertFalse(result["ok"])                                                                       # nothing is guessed
+        self.assertEqual((self.dir / "calc.py").read_text(encoding="utf-8"), BUG)
+
+    def test_no_matching_block_at_all_still_fails_in_a_multi_file_task(self):
+        script = Script(localize='{"files": ["calc.py", "other.py"], "new_files": []}', edits=[blocks("Y = 2", "Y = 3"), blocks("Y = 2", "Y = 3")])
+        self.assertFalse(self.go(script, ["calc.py", "other.py"])["ok"])
+
+
 class ContextHygieneTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
