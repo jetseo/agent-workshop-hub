@@ -412,6 +412,21 @@
         h("p", { class: "sub", text: c.measured ? "JetAI가 측정한 결과가 있습니다." : "성능은 측정되지 않았습니다." }),
         h("div", { class: "cw-actions" },
           h("a", { class: "btn", href: c.source_url, target: "_blank", rel: "noopener noreferrer", text: "출처 보기" }),
+          c.kind === "model" && c.facts && c.facts["파일"] ? h("button", { type: "button", class: "btn primary", text: "추가(크기 확인)", title: "정확한 크기를 보여 드리고 확인하신 뒤에만 받습니다.",
+            onclick: async function () {
+              var b = this; b.disabled = true;
+              try {
+                var plan = await api("POST", "/engine/register", { repo: c.id.slice(3), file: c.facts["파일"] });
+                var gib = function (n) { return (n / 1073741824).toFixed(2) + " GiB"; };
+                var lines = plan.items.map(function (it) { return "· " + it.name + " — " + it.bytes.toLocaleString() + "바이트 (" + gib(it.bytes) + ") · " + it.source; });
+                var ok = window.confirm("이 모델을 내려받을까요?\n\n" + c.title + " · 라이선스 " + plan.license + "\n" + lines.join("\n") + "\n\n합계 " + plan.total_bytes.toLocaleString() + "바이트 (" + gib(plan.total_bytes) + ")"
+                  + (plan.enough_disk ? "" : "\n\n⚠ 디스크 여유 공간이 부족합니다.") + "\n\n내려받은 뒤에도 자동으로 실행하지 않습니다. 이 모델은 JetAI가 측정하기 전이라 성능을 알 수 없습니다.");
+                if (!ok) { b.disabled = false; return; }
+                await api("POST", "/engine/install", { model: plan.model, confirm_bytes: plan.total_bytes });
+                toast("받기를 시작했습니다. 진행은 설정의 내장 엔진에서 보입니다.");
+              } catch (e) { toast(e.message); }
+              b.disabled = false;
+            } }) : null,
           h("button", { type: "button", class: "btn", text: "무시", onclick: async function () { try { await api("POST", "/discovery/dismiss", { id: c.id }); } catch (err) { toast(err.message); } renderDiscovery(); } }))));
     });
     if (d.unread) { try { await api("POST", "/discovery/read", {}); } catch (e) { /* the dot may stay until next time */ } }
